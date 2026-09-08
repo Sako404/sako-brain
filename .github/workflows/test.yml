@@ -96,14 +96,14 @@ jobs:
 
       - name: Acceptance — installed artefact, no PYTHONPATH, outside the checkout
         run: |
-          mkdir -p /tmp/run/home /tmp/run/elsewhere
+          mkdir -p /tmp/run/fakehome /tmp/run/elsewhere
           cd /tmp/run/elsewhere
           run() {
             env -u PYTHONPATH \
-                HOME=/tmp/run/home \
-                XDG_CONFIG_HOME=/tmp/run/home/.config \
-                XDG_STATE_HOME=/tmp/run/home/.local/state \
-                XDG_DATA_HOME=/tmp/run/home/.local/share \
+                HOME=/tmp/run/fakehome \
+                XDG_CONFIG_HOME=/tmp/run/fakehome/.config \
+                XDG_STATE_HOME=/tmp/run/fakehome/.local/state \
+                XDG_DATA_HOME=/tmp/run/fakehome/.local/share \
                 "$@"
           }
           run /tmp/venv/bin/python - <<'PY'
