@@ -8,9 +8,8 @@ Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Status: pre-release.** This is the current public source for the forthcoming
-0.1.0. Pre-1.0 means the command line and configuration format may still
-change; your notes will not — they are text.
+**Current release: 0.1.0.** Pre-1.0 means the command line and configuration
+format may still change; your notes will not — they are text.
 
 ## Why it exists
 
@@ -71,20 +70,27 @@ feature; without it, that feature says so and everything else works.
 
 ## Install
 
-Sako Brain is **not on PyPI**, and there is no published release yet. Build it
-from source:
+Sako Brain is **not on PyPI**. Install the wheel from the
+[latest release](https://github.com/Sako404/sako-brain/releases/latest):
+
+```sh
+pipx install ./sako_brain-0.1.0-py3-none-any.whl
+```
+
+Each release lists the SHA-256 of its artefacts, so you can check what you
+downloaded:
+
+```sh
+sha256sum ./sako_brain-0.1.0-py3-none-any.whl
+```
+
+Or build from source:
 
 ```sh
 git clone https://github.com/Sako404/sako-brain.git
 cd sako-brain
 python -m build
 pipx install ./dist/sako_brain-0.1.0-py3-none-any.whl
-```
-
-Once a release exists, its wheel can be installed directly:
-
-```sh
-pipx install ./sako_brain-0.1.0-py3-none-any.whl
 ```
 
 `pipx` puts `brain` on your PATH and keeps it isolated. A plain virtualenv
