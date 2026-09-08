@@ -1,0 +1,155 @@
+# Public CI for Sako Brain.
+#
+# Everything here runs from a plain checkout of this repository. There are no
+# secrets, no private files and no maintainer-specific configuration: a fork
+# gets an identical, green run. That is deliberate — a gate a contributor
+# cannot reproduce is not a gate.
+#
+# The privacy scan that runs here is the GENERIC one. The project also has a
+# deployment-specific marker list, which is supplied by an uncommitted file and
+# is never handed to public CI: publishing an inventory of private identifiers
+# in order to check for them would defeat the purpose.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The declared floor must always be represented, alongside a current
+        # stable release. Both are pinned to minor versions so a new Python
+        # cannot silently change what "tested" means.
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show interpreter
+        run: python -VV
+
+      - name: Install runtime dependency
+        run: python -m pip install --quiet PyYAML
+
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -t . --verbose 2>&1 | tail -40
+
+      - name: Report skipped tests
+        # Skips are expected — optional external tools are absent on a runner —
+        # but an UNEXPLAINED skip is a defect, so they are always printed.
+        if: always()
+        run: |
+          python -m unittest discover -s tests -t . --verbose 2>&1 \
+            | grep -io "skipped '.*'" | sort | uniq -c || true
+
+  package:
+    name: package (build, install, first run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --quiet build
+          python -m build
+
+      - name: Inspect the wheel
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+          whl = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(whl).namelist()
+          print(f"{whl}: {len(names)} entries")
+          assert "brain/templates/AGENTS.md.template" in names, \
+              "the AGENTS template did not ship in the wheel"
+          assert any(n.endswith("entry_points.txt") for n in names), "no console script"
+          assert any("licenses/LICENSE" in n for n in names), "no licence"
+          assert not any("/tests/" in n for n in names), "tests leaked into the wheel"
+          print("wheel contents OK")
+          PY
+
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install --quiet dist/*.whl
+
+      - name: Acceptance — installed artefact, no PYTHONPATH, outside the checkout
+        run: |
+          mkdir -p /tmp/run/home /tmp/run/elsewhere
+          cd /tmp/run/elsewhere
+          run() {
+            env -u PYTHONPATH \
+                HOME=/tmp/run/home \
+                XDG_CONFIG_HOME=/tmp/run/home/.config \
+                XDG_STATE_HOME=/tmp/run/home/.local/state \
+                XDG_DATA_HOME=/tmp/run/home/.local/share \
+                "$@"
+          }
+          run /tmp/venv/bin/python - <<'PY'
+          import os, sys, brain
+          assert "PYTHONPATH" not in os.environ, "PYTHONPATH must not be set"
+          assert "/tmp/venv/" in brain.__file__, f"imported from {brain.__file__}"
+          print("brain imported from", brain.__file__)
+          PY
+          run /tmp/venv/bin/brain --version
+          run /tmp/venv/bin/brain --help > /dev/null
+
+          echo "--- minimal first run ---"
+          run /tmp/venv/bin/brain init /tmp/run/mine
+          run /tmp/venv/bin/brain --vault /tmp/run/mine doctor
+          run /tmp/venv/bin/brain --vault /tmp/run/mine integrity | grep "Doctor problems: 0"
+          run /tmp/venv/bin/brain --vault /tmp/run/mine index
+
+          echo "--- demo first run ---"
+          run /tmp/venv/bin/brain init --demo /tmp/run/demo
+          run /tmp/venv/bin/brain --vault /tmp/run/demo doctor
+          run /tmp/venv/bin/brain --vault /tmp/run/demo integrity | grep "Doctor problems: 0"
+          run /tmp/venv/bin/brain --vault /tmp/run/demo index
+
+          echo "--- packaged AGENTS template renders from the installed package ---"
+          run /tmp/venv/bin/brain --vault /tmp/run/demo agents-doc | head -1
+
+      - name: Install and check the sdist
+        run: |
+          python -m venv /tmp/venv-sdist
+          /tmp/venv-sdist/bin/pip install --quiet dist/*.tar.gz
+          env -u PYTHONPATH /tmp/venv-sdist/bin/brain --version
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # gitleaks scans history, not just the tree
+
+      # The official image rather than the marketplace action: no licence key,
+      # no third-party action to trust, and the same binary a contributor can
+      # run locally with one docker command.
+      - name: gitleaks (working tree and full history)
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks:latest detect \
+              --source=/repo --config=/repo/.gitleaks.toml \
+              --redact --verbose --exit-code 1

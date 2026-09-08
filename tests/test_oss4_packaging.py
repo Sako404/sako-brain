@@ -18,6 +18,9 @@ from brain import paths as paths_mod
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
 
+# The one real repository. Every shipped URL must point at it.
+CANONICAL_REPO = "https://github.com/Sako404/sako-brain"
+
 
 def _pyproject() -> dict:
     return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
@@ -83,10 +86,24 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertIn("GNU AFFERO GENERAL PUBLIC LICENSE",
                       (PROJECT_ROOT / "LICENSE").read_text(encoding="utf-8"))
 
-    def test_no_fabricated_public_urls(self):
-        """No repository, homepage or issue tracker exists yet. Shipping a
-        made-up URL in distribution metadata is not acceptable."""
-        self.assertNotIn("urls", self.project)
+    def test_project_urls_are_real_and_canonical(self):
+        """These were absent until the repository existed.
+
+        The invariant was never "no URLs" — it was "no INVENTED URLs". Now the
+        repository is real, so the invariant is that every URL points at it.
+        """
+        urls = self.project["urls"]
+        self.assertEqual(urls["Homepage"], CANONICAL_REPO)
+        self.assertEqual(urls["Repository"], CANONICAL_REPO)
+        self.assertTrue(urls["Issues"].startswith(CANONICAL_REPO + "/issues"))
+        for name, url in urls.items():
+            self.assertTrue(url.startswith(CANONICAL_REPO),
+                            f"{name} does not point at the canonical repository: {url}")
+
+    def test_still_no_pypi_url(self):
+        """The package is not published; claiming a PyPI page would be a lie."""
+        for url in self.project["urls"].values():
+            self.assertNotIn("pypi.org", url.lower())
 
     def test_readme_exists_and_is_referenced(self):
         self.assertEqual(self.project["readme"], "README.md")
@@ -317,15 +334,24 @@ class TestPublicDocumentation(unittest.TestCase):
                      if not m.endswith(".invalid")]
             self.assertEqual(found, [], f"{name} exposes an address: {found}")
 
-    def test_no_invented_project_urls(self):
-        """No repository, homepage or issue tracker exists yet."""
+    def test_every_github_url_points_at_the_canonical_repository(self):
+        """A URL in a shipped document must be one a reader can actually open."""
+        pattern = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+")
         for name in self.FILES:
             path = PROJECT_ROOT / name
             if not path.is_file():
                 continue
-            text = path.read_text()
-            for invented in ("github.com/", "pypi.org/project/sako"):
-                self.assertNotIn(invented, text, f"{name} contains an invented URL")
+            for url in pattern.findall(path.read_text()):
+                self.assertTrue(url.startswith(CANONICAL_REPO),
+                                f"{name} links a non-canonical repository: {url}")
+
+    def test_no_document_claims_a_pypi_page(self):
+        for name in self.FILES:
+            path = PROJECT_ROOT / name
+            if not path.is_file():
+                continue
+            self.assertNotIn("pypi.org/project/sako", path.read_text(),
+                             f"{name} claims a PyPI page that does not exist")
 
     # --- the other public documents ---------------------------------------
 

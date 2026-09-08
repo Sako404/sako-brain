@@ -14,13 +14,16 @@ Sako Brain is pre-1.0. Only the latest release receives fixes.
 **Please do not open a public issue, discussion or pull request for a security
 problem.** That includes anything that would expose the reporter's own data.
 
-Use **GitHub's private vulnerability reporting** on this repository: open the
-repository's *Security* tab and choose *Report a vulnerability*. The report is
-visible only to the maintainer until a fix is published.
+Use **GitHub's private vulnerability reporting**:
 
-This channel is enabled on the canonical GitHub repository at public launch. If
-you are reading this from a mirror or a fork, report to the upstream project
-rather than here.
+> <https://github.com/Sako404/sako-brain/security/advisories/new>
+
+or open the repository's *Security* tab and choose *Report a vulnerability*.
+The report is visible only to the maintainer until a fix is published.
+
+This channel is enabled on the canonical repository,
+<https://github.com/Sako404/sako-brain>. If you are reading this from a mirror
+or a fork, report upstream rather than here.
 
 ## What to report
 

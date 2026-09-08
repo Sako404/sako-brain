@@ -1,0 +1,14 @@
+# Only GitHub Actions.
+#
+# The project has one runtime dependency, declared as a floor with no upper
+# bound, so a pip ecosystem entry would produce no useful pull requests —
+# Dependabot alerts already cover the security case. Action versions are the
+# thing that actually goes stale here.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"

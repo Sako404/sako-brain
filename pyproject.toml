@@ -52,8 +52,13 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
-# No [project.urls]: no public repository, homepage or issue tracker exists
-# yet, and inventing one would be a lie in shipped metadata. Added when real.
+# Real URLs only. These were deliberately absent until the repository actually
+# existed; nothing here is aspirational.
+[project.urls]
+Homepage = "https://github.com/Sako404/sako-brain"
+Repository = "https://github.com/Sako404/sako-brain"
+Issues = "https://github.com/Sako404/sako-brain/issues"
+Changelog = "https://github.com/Sako404/sako-brain/blob/main/CHANGELOG.md"
 
 [project.scripts]
 brain = "brain.cli:main"

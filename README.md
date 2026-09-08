@@ -8,8 +8,9 @@ Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Status: 0.1.0, the first public release.** Pre-1.0: the command line and
-configuration format may still change. Your notes will not — they are text.
+**Status: pre-release.** This is the current public source for the forthcoming
+0.1.0. Pre-1.0 means the command line and configuration format may still
+change; your notes will not — they are text.
 
 ## Why it exists
 
@@ -70,19 +71,20 @@ feature; without it, that feature says so and everything else works.
 
 ## Install
 
-Sako Brain is **not on PyPI**. Install from a release artefact or from source.
+Sako Brain is **not on PyPI**, and there is no published release yet. Build it
+from source:
 
-From a release wheel:
+```sh
+git clone https://github.com/Sako404/sako-brain.git
+cd sako-brain
+python -m build
+pipx install ./dist/sako_brain-0.1.0-py3-none-any.whl
+```
+
+Once a release exists, its wheel can be installed directly:
 
 ```sh
 pipx install ./sako_brain-0.1.0-py3-none-any.whl
-```
-
-From a source checkout:
-
-```sh
-python -m build
-pipx install ./dist/sako_brain-0.1.0-py3-none-any.whl
 ```
 
 `pipx` puts `brain` on your PATH and keeps it isolated. A plain virtualenv
@@ -195,11 +197,14 @@ PyPI distribution. Everything described above this section exists today.
 Contributions are welcome, though this is a small project and review may be
 slow. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests and expectations.
 
+Source: <https://github.com/Sako404/sako-brain>
+
 ## Support
 
 Best-effort. This is a personal project shared publicly: there is no service
 level, no guaranteed response time and no commercial support. Bug reports and
-questions are read.
+questions go to [Issues](https://github.com/Sako404/sako-brain/issues) and are
+read.
 
 For **security issues**, do not open a public report — see
 [SECURITY.md](SECURITY.md).

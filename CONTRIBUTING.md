@@ -44,6 +44,24 @@ have indexed zero notes" explains what the test is defending against far better
 than the assertion alone. You do not need to know the history to work on the
 code — read them as "an earlier change", and the docstring will tell you which.
 
+## Continuous integration
+
+Every push and pull request runs three jobs, all from a plain checkout with no
+secrets, so a fork gets an identical run:
+
+- **tests** — the suite on Python 3.11 (the declared floor) and a current
+  stable release, with skipped tests printed so an unexplained skip is visible.
+- **package** — builds the wheel and sdist, checks the wheel actually contains
+  the `AGENTS.md` template and the licence and no tests, installs it into a
+  clean virtualenv, and runs both first-run modes from outside the checkout
+  with `PYTHONPATH` unset.
+- **secret scan** — gitleaks over the working tree and the full history.
+
+The privacy scan in CI is the **generic** one. The project also has a
+deployment-specific marker list, supplied by an uncommitted file; it is
+deliberately never given to public CI, because publishing an inventory of
+private identifiers in order to check for them would defeat the purpose.
+
 ## Privacy expectations
 
 This project came out of a private knowledge vault, and keeping the two apart
