@@ -1,0 +1,71 @@
+# Packaging for Sako Brain Core — the portable core of Sako Brain.
+#
+# The project root is this directory, not the vault above it. `90_SYSTEM/`
+# already holds the package (`brain/`), its tests and its launchers, while the
+# directory above is a personal knowledge vault: a LICENSE and a pyproject
+# alongside `10_PEOPLE/` would be miscategorising private notes as software.
+# This is also the shape a public repository will have.
+#
+# Build:   python -m build              (from this directory)
+# Install: pip install dist/sako_brain-<version>-py3-none-any.whl
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sako-brain"
+description = "Local-first, Markdown-native personal knowledge system with a CLI and provider-neutral agent rules."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "Marcin Sakowski" }]
+keywords = ["knowledge-management", "notes", "markdown", "cli", "local-first", "pkm"]
+
+# Declared floor is 3.11: the code itself needs nothing newer than 3.8 syntax,
+# so this is an ecosystem choice, not a technical one — 3.10 reaches end of
+# life as this is released, and a new public package should not open on an
+# unsupported interpreter.
+requires-python = ">=3.11"
+
+# One runtime dependency, deliberately. Everything else the core uses is
+# standard library. SQLite must be built with FTS5 (`brain doctor` checks it);
+# that is a property of the interpreter, not something pip can install.
+dependencies = ["PyYAML>=6.0"]
+
+# Single source of truth: brain/__init__.py::__version__.
+dynamic = ["version"]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    # No License classifier: PEP 639 supersedes it wherever `license` is an
+    # SPDX expression, and setuptools rejects having both. The licence is
+    # declared once, above, as `license = "AGPL-3.0-or-later"`.
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+]
+
+# No [project.urls]: no public repository, homepage or issue tracker exists
+# yet, and inventing one would be a lie in shipped metadata. Added when real.
+
+[project.scripts]
+brain = "brain.cli:main"
+
+[tool.setuptools]
+packages = ["brain"]
+
+[tool.setuptools.dynamic]
+version = { attr = "brain.__version__" }
+
+# The AGENTS.md template is read at runtime by `brain agents-doc`, so it must
+# travel inside the wheel. Loaded via importlib.resources, never by a path
+# relative to the source tree.
+[tool.setuptools.package-data]
+brain = ["templates/*.template"]

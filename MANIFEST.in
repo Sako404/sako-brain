@@ -1,0 +1,20 @@
+# The sdist is a build artefact, not a repository mirror.
+#
+# `tests/` is pruned for a specific reason, not for size: the leak gate in
+# `test_oss2_neutralisation.py` must spell out the private identifiers it
+# forbids everywhere else — that is its whole job — and a *distribution*
+# artefact is the last place those strings belong. The tests live in the
+# repository, which is where they are meant to be run from.
+prune tests
+exclude MANIFEST.in
+
+# Deployment-private, never distributed: the leak gate's marker list for THIS
+# machine. setuptools would not include it anyway, since only declared files
+# ship — this is the belt to that braces, because the cost of being wrong is
+# publishing the very strings the gate exists to hide.
+exclude private-markers.txt
+exclude .gitleaks.toml
+
+include LICENSE
+include README.md
+recursive-include brain/templates *.template

@@ -1,0 +1,35 @@
+# gitleaks configuration for Sako Brain.
+#
+# The project detects secret-shaped strings in a vault (`brain doctor`,
+# `brain git snapshot`, and the MCP write tools all refuse them). Proving that
+# works requires test fixtures that LOOK like credentials — so a secret scanner
+# finds them, correctly, and they are not secrets.
+#
+# The allowlist below is deliberately narrow: it names the exact literal
+# fixture values, not the files and not the rules. A real credential in the
+# same file would still be reported.
+
+[extend]
+useDefault = true
+
+[[rules]]
+  id = "sako-brain-placeholder-guard"
+  description = "Never allow a plausible-looking credential outside the known fixtures"
+  regex = '''(?i)(aws_secret_access_key|private_key|password)\s*=\s*["'][^"']{12,}["']'''
+
+[allowlist]
+  description = """
+  Synthetic credentials used to test this project's own secret detection.
+  Each is an obvious alphabet sequence, not a real key:
+    AKIAABCDEFGHIJKLMNOP           AKIA + A..P, in test_validate.py and
+                                   test_mcp_server.py — asserts doctor detects
+                                   an AWS-shaped key and that the MCP write
+                                   tools refuse one.
+    sk-abcdefghijklmnop1234567890  alphabet + digits, in test_gitops.py —
+                                   asserts a snapshot refuses to commit a vault
+                                   containing an api_key pattern.
+  """
+  regexes = [
+    '''AKIAABCDEFGHIJKLMNOP''',
+    '''sk-abcdefghijklmnop1234567890''',
+  ]

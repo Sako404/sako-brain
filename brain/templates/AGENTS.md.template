@@ -1,0 +1,156 @@
+# AGENTS.md — {{VAULT_NAME}} (provider-neutral)
+
+This file governs any AI agent (Claude, ChatGPT, Gemini, local models, scripts)
+that reads or writes this Brain. It is intentionally provider-neutral: nothing
+here depends on a specific AI vendor.
+
+## What this is
+
+A local-first, Markdown-based personal knowledge system. AI is a **client** of
+the Brain, not the Brain itself. The system must stay usable from a plain text
+editor even with no AI available.
+
+- Canonical source of truth: `{{VAULT_PATH}}/` (this directory).
+{{BACKUP_LINE}}- Working code projects live under {{PROJECTS_ROOTS}}. This Brain stores
+  **knowledge about** those projects (summaries, decisions, links), never the
+  project source code itself. Never copy a project into the Brain.
+
+## Directory map
+
+{{DIRECTORY_MAP}}
+
+## Data model
+
+Every note is Markdown with YAML frontmatter. Supported fields (not all
+required on every note):
+
+```yaml
+id: <type>-<slug>          # stable, unique, never reused
+type: {{NOTE_TYPES_PIPE}}
+status: <see allowed values below>
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+people: [<person-id>, ...]
+projects: [<project-id>, ...]
+tags: [...]
+sensitivity: normal|private|restricted
+source: <where this came from, e.g. "chatgpt", "claude-local-inspection", a project path, "user">
+source_date: YYYY-MM-DD  # when the source evidence itself is dated (distinct from `created`, which is when this Brain note was written)
+confidence: fact|assumption|opinion
+valid_from: YYYY-MM-DD
+valid_to: YYYY-MM-DD
+supersedes: <note-id>     # or a list of ids — this note replaces an older one; the older note should be marked status: superseded, not deleted
+aliases: [...]
+```
+
+`supersedes` and `valid_to` are how the Brain represents a fact changing
+over time without destroying history: write a *new* note with `supersedes:
+<old-id>` and set the old note's `status: superseded` (and/or `valid_to`)
+rather than editing the old note's content in place. `brain doctor` checks
+that every `supersedes` target actually resolves to a real note id, the
+same way it checks `[[wikilinks]]`.
+
+{{STATUS_BY_TYPE}}
+
+IDs are permanent. If an entity is renamed, keep the `id`, update `aliases`.
+
+## Memory rules (must follow)
+
+1. Search before creating. Use `brain search <query>` first.
+2. Avoid duplicate facts — prefer updating an existing note over creating a new one.
+3. Distinguish facts from assumptions/opinions via `confidence`.
+4. Record `source` where practical.
+5. Preserve historical information — do not delete superseded content, mark it
+   `status: superseded` / set `valid_to` and add a new entry instead.
+6. Never silently rewrite history when facts change; append/supersede.
+7. Update `updated` whenever a note's content changes.
+8. Create a `{{TIMELINE_DIR}}/` entry for meaningful events.
+9. Create a `{{DECISIONS_DIR}}/` entry for significant decisions.
+10. Move completed projects to `{{ARCHIVED_PROJECTS_DIR}}/` rather than deleting.
+11. **Never** store passwords, API keys, auth tokens, recovery codes, private
+    keys, or crypto seed phrases in this Brain, in any note, in any field.
+12. Respect `sensitivity`: `normal`, `private`, `restricted`.
+13. Only surface `restricted` information when directly relevant to the task.
+14. When uncertain whether two entities are the same, ask the user or flag the
+    ambiguity — never silently merge.
+
+## Proactive usage (Phase 5A)
+
+The Brain is long-term external memory. Any AI agent working with the
+user should **search it automatically** before answering a request that
+could materially depend on prior personal, project, decision, preference,
+or historical context (e.g. "where did we finish X", "what did we decide
+about Y", "continue Z", "what was wrong with W") — the user should not
+have to ask explicitly. Do **not** search for generic
+programming/general-knowledge questions with no personal angle; that's
+just noise.
+
+Writing back follows three levels, least to most caution:
+
+1. **Safe automatic write** — the agent's own project-work updates,
+   objective milestones, decisions made explicitly in-session, or
+   stale-data corrections backed by clear primary-source evidence. Write
+   directly, then report what changed.
+2. **User-derived durable information** stated in passing (a new job, a
+   purchase, a move) but not explicitly "remember this" — goes into a
+   **pending-memory queue** (`{{PENDING_QUEUE}}`, a single
+   growing list, not one file per candidate) for review rather than
+   straight into an authoritative record. An explicit "remember/save/note
+   this permanently" from the user authorizes a direct write instead.
+3. **Restricted/sensitive** (medical, disability, detailed child support,
+   financial balances, identity) — never auto-written, not even to the
+   pending queue, without direct relevance and explicit, strong user
+   intent. Always `sensitivity: restricted`, kept in a separate note from
+   ordinary profile content.
+
+Whenever an agent modifies the Brain during ordinary work, it must report
+a compact summary (e.g. `Brain updated: - project-x: current state
+updated`) — the user should never have to wonder whether memory changed
+silently.
+
+## Project records vs. project code
+
+A project record in `{{PROJECTS_DIR}}/` may contain: purpose, current state,
+architecture summary, important locations, current tasks, decisions,
+milestones, problems, next actions, links to people, links to documents, and
+the working directory path (a reference, not a copy). See `_registry.yaml` for
+the canonical id → filesystem path mapping.
+
+`brain project discover` may **propose** candidate projects found under
+{{PROJECTS_ROOTS}} for review. It must never register or import a project
+automatically.
+
+## Search index and runtime state
+
+The SQLite + FTS5 index is a **cache**, fully rebuildable via `brain index`.
+Markdown is always authoritative. If the index and the Markdown ever disagree,
+Markdown wins — reindex.
+
+**It lives outside the vault** (OSS-1), together with logs and integrity
+manifests, under `$XDG_STATE_HOME/{{APP_DIRNAME}}/vaults/<vault-name>-<hash>/`.
+Two reasons, both independent:
+
+- The index contains full note bodies. Keeping it out of the vault means the
+  vault is Markdown and configuration only — by construction, not because a
+  `.gitignore` line happens to be right.
+- A SQLite file rewritten on every `brain index`, inside a Nextcloud-synced
+  folder, is the same hazard as a live `.git/` — which is why git history
+  already lives outside the vault too.
+
+Override with `BRAIN_STATE_DIR`, or `state_dir:` in the vault's `config.yaml`.
+
+## Which vault?
+
+The `brain` package never decides this from its own location on disk. In order:
+`--vault PATH` → `BRAIN_ROOT` → a `90_SYSTEM/config.yaml` marker found by
+walking up from the current directory → `vault_path:` in
+`$XDG_CONFIG_HOME/{{APP_DIRNAME}}/config.yaml` → an error. It refuses rather than
+guesses, because guessing is how a tool ends up writing to the wrong vault.
+
+## Validation
+
+Run `brain doctor` before relying on the Brain after bulk edits. It checks for
+duplicate IDs, broken internal links, missing project directories, invalid
+YAML/status values, duplicate registry entries, the backup dir being treated
+as canonical, and accidental secret-like patterns. It reports problems; it
+never deletes or auto-fixes content.
