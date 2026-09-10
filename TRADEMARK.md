@@ -6,13 +6,13 @@ take any of it back.
 
 The **name** is a separate matter, and a small one:
 
-- **Sako Brain** and **Sako Brain Core** identify this project, as maintained
+- **SAKO Brain** and **SAKO Brain Core** identify this project, as maintained
   in its canonical upstream repository.
 - If you distribute a modified version, please give it a different name. Users
   should be able to tell your build from this one, particularly when reporting
   a bug.
 - Saying that your project is *derived from*, *based on*, *compatible with* or
-  *a fork of* Sako Brain is fine and accurate, and needs no permission.
+  *a fork of* SAKO Brain is fine and accurate, and needs no permission.
 - Please do not present a fork as the official project, or use the name in a
   way that suggests endorsement.
 

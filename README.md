@@ -1,9 +1,9 @@
 # SAKO Brain
 
-**Structured Augmented Knowledge Orchestrator** — 
-*Structured* knowledge, projects, decisions, timeline and context; 
-*Augmented* by AI, tooling, indexing and automation; 
-*Knowledge* and context at the core; an 
+**Structured Augmented Knowledge Orchestrator** —<br>
+*Structured* knowledge, projects, decisions, timeline and context;<br>
+*Augmented* by AI, tooling, indexing and automation;<br>
+*Knowledge* and context at the core; an<br>
 *Orchestrator* that coordinates knowledge, rules, context and the tools and agents that use them.
 
 An open-source knowledge system for organizing projects, decisions, context and
