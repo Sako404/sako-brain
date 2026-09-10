@@ -201,7 +201,7 @@ class TestInstalledPackageIsTheOneBeingUsed(InstalledTestCase):
             env=self.world.env(), cwd=str(self.world.cwd),
             capture_output=True, text=True, timeout=120,
         )
-        self.assertEqual(self.assertOk(result).strip(), "0.1.0")
+        self.assertEqual(self.assertOk(result).strip(), "0.2.0")
 
 
 class TestInstalledCliRunsOutsideTheRepository(InstalledTestCase):
@@ -211,7 +211,7 @@ class TestInstalledCliRunsOutsideTheRepository(InstalledTestCase):
         self.assertIn("init", out)
 
     def test_version(self):
-        self.assertEqual(self.assertOk(self.world.run("--version")).strip(), "brain 0.1.0")
+        self.assertEqual(self.assertOk(self.world.run("--version")).strip(), "brain 0.2.0")
 
     def test_with_no_vault_it_refuses_cleanly_rather_than_failing_to_import(self):
         """An expected vault-discovery failure is a pass; an import or resource
@@ -296,7 +296,8 @@ class TestInstalledMinimalFirstRun(InstalledTestCase):
         self.assertIn("Initialised vault", out)
         self.assertIn("no problems found", out)
         self.assertTrue((vault / "90_SYSTEM" / "config.yaml").is_file())
-        self.assertTrue((vault / "AGENTS.md").is_file())
+        # 0.2.0: agent rules are opt-in, so a healthy vault has no AGENTS.md.
+        self.assertFalse((vault / "AGENTS.md").exists())
 
     def test_the_initialised_vault_indexes_and_validates(self):
         vault = self.world.base / "init-usable"
@@ -315,11 +316,21 @@ class TestInstalledMinimalFirstRun(InstalledTestCase):
         self.assertNotIn("Traceback", result.stderr)
 
     def test_no_agents_flag_through_the_installed_cli(self):
+        """Legacy no-op: a 0.1.0 script keeps working against the installed 0.2.0."""
         vault = self.world.base / "init-no-agents"
         self.assertOk(self.world.run("init", "--no-agents", str(vault)))
         self.assertFalse((vault / "AGENTS.md").exists())
         self.assertIn("no problems found",
                       self.assertOk(self.world.run("--vault", str(vault), "doctor")))
+
+    def test_agents_doc_write_opts_in_through_the_installed_cli(self):
+        vault = self.world.base / "init-agents-optin"
+        self.assertOk(self.world.run("init", str(vault)))
+        self.assertFalse((vault / "AGENTS.md").exists())
+        self.assertOk(self.world.run("--vault", str(vault), "agents-doc", "--write"))
+        agents = vault / "AGENTS.md"
+        self.assertTrue(agents.is_file())
+        self.assertNotIn("{{", agents.read_text())
 
     def test_state_lands_under_the_throwaway_home(self):
         vault = self.world.base / "init-state"

@@ -14,4 +14,4 @@ the SQLite FTS5 index can always be thrown away and regenerated with
 # first-run are the beginning of the externally consumable lifecycle, and
 # pre-1.0 states honestly that the CLI and configuration contract are not yet
 # frozen. The internal 1.0.0 was real and is not being written out of history.
-__version__ = "0.1.0"
+__version__ = "0.2.0"

@@ -72,7 +72,7 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertEqual(attr, "brain.__version__")
 
     def test_public_version_baseline(self):
-        self.assertEqual(__version__, "0.1.0")
+        self.assertEqual(__version__, "0.2.0")
 
     def test_template_is_declared_as_package_data(self):
         """Without this the wheel ships a package whose agents-doc is broken."""
@@ -373,6 +373,7 @@ class TestPublicDocumentation(unittest.TestCase):
     def test_changelog_has_one_honest_entry(self):
         text = (PROJECT_ROOT / "CHANGELOG.md").read_text()
         self.assertIn("0.1.0", text)
+        self.assertIn("0.2.0", text)
         self.assertIn("First public release", text)
         for fake in ("## 0.0.", "## [0.0."):
             self.assertNotIn(fake, text, "changelog invents earlier public versions")
