@@ -176,7 +176,7 @@ def _validate(vault: Path, force: bool) -> bool:
     return False
 
 
-def initialise(vault: Path, *, with_agents: bool = True, with_git: bool = False,
+def initialise(vault: Path, *, with_agents: bool = False, with_git: bool = False,
                force: bool = False) -> InitResult:
     """Create (or complete) a vault at `vault`. Never overwrites."""
     vault = Path(vault).expanduser()
@@ -212,6 +212,9 @@ def initialise(vault: Path, *, with_agents: bool = True, with_git: bool = False,
     for role in CONTENT_ROLES:
         result.note(f"{config.taxonomy.directory(role)}/", _mkdir(config.dir_for(role)))
 
+    # Off by default: an agent rules file is a client concern, and the vault is
+    # complete and doctor-clean without one. `brain agents-doc --write` renders
+    # it on demand, for whoever actually wants it.
     if with_agents:
         agents_path = resolved / AGENTS_FILENAME
         if agents_path.exists():
@@ -232,13 +235,13 @@ def initialise(vault: Path, *, with_agents: bool = True, with_git: bool = False,
     return result
 
 
-def initialise_demo(vault: Path, *, with_agents: bool = True) -> InitResult:
+def initialise_demo(vault: Path, *, with_agents: bool = False) -> InitResult:
     """Create the synthetic Example Brain.
 
     A thin wrapper over `demo.build()` — the OSS-3 generator is the single
     implementation and is not duplicated here. This adds only what a user-facing
-    command owes: reporting what was created, and AGENTS.md, which the demo
-    generator has no business deciding about.
+    command owes: reporting what was created, and optionally AGENTS.md, which
+    the demo generator has no business deciding about.
 
     Deliberately separate from `initialise()`: a real user's first vault must
     never be seeded with fictional content, so the two contracts do not mix.

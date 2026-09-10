@@ -5,7 +5,34 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
-## 0.1.0 — unreleased
+## 0.2.0 — unreleased
+
+### Changed
+
+- **`brain init` no longer creates `AGENTS.md`.** An agent rules file is a
+  client concern, and the project stays neutral toward any particular agent,
+  model or tooling. A vault without one is complete and passes `brain doctor`.
+  **This is a deliberate breaking change to a default**, made while the project
+  is pre-1.0.
+- Whoever wants the file runs the command that already existed:
+  `brain agents-doc --write`. It is unchanged, and it renders from the vault's
+  own configuration exactly as before.
+- `initialise()` and `initialise_demo()` now default `with_agents=False`. The
+  parameter itself is unchanged, so a programmatic caller can still opt in.
+
+### Deprecated
+
+- `brain init --no-agents` is accepted and ignored. It has nothing left to
+  switch off, and is kept deliberately so scripts written against 0.1.0 keep
+  working unchanged. There is no plan to remove it.
+
+### Documentation
+
+- The project is introduced as **SAKO Brain — Structured Augmented Knowledge
+  Orchestrator**, giving the name a standalone technical meaning alongside its
+  origin.
+
+## 0.1.0 — 2026-09-08
 
 First public release. The project was developed privately before this point;
 that history is not part of the public repository, so this changelog starts

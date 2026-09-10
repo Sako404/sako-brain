@@ -1,14 +1,20 @@
-# Sako Brain
+# SAKO Brain
 
-A local-first personal knowledge and project-management CLI. Your notes are
-plain Markdown files with YAML frontmatter, in directories you can read, edit
-and back up with anything. The search index, integrity manifests and logs are a
-rebuildable cache that lives **outside** your notes — so the vault stays
-Markdown and configuration, and nothing else.
+**Structured Augmented Knowledge Orchestrator** — *Structured* knowledge,
+projects, decisions, timeline and context; *Augmented* by AI, tooling, indexing
+and automation; *Knowledge* and context at the core; an *Orchestrator* that
+coordinates knowledge, rules, context and the tools and agents that use them.
+
+An open-source knowledge system for organizing projects, decisions, context and
+AI-assisted workflows — a local-first personal knowledge and project-management
+CLI. Your notes are plain Markdown files with YAML frontmatter, in directories
+you can read, edit and back up with anything. The search index, integrity
+manifests and logs are a rebuildable cache that lives **outside** your notes —
+so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.1.0.** Pre-1.0 means the command line and configuration
+**Current release: 0.2.0.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -25,9 +31,10 @@ and can be thrown away and rebuilt with one command. If the program disappears
 tomorrow, you still have a directory of Markdown.
 
 It also assumes AI agents will read and write your notes, and treats that as a
-*client* concern rather than a feature: `brain init` generates an `AGENTS.md`
-describing the vault's data model and rules in a provider-neutral way, which
-any agent — or person — can read.
+*client* concern rather than a feature. `brain agents-doc --write` generates an
+`AGENTS.md` describing the vault's data model and rules in a provider-neutral
+way, which any agent — or person — can read. It is **opt-in**: nothing about
+the vault assumes an agent is involved, and `brain init` does not create one.
 
 ## What it does not do
 
@@ -119,15 +126,28 @@ or its backups.
 brain init ~/brain
 ```
 
-Creates the vault, its directories, a commented configuration file and
-`AGENTS.md`, then runs `brain doctor` and prints the result.
+Creates the vault, its directories and a commented configuration file, then
+runs `brain doctor` and prints the result. It does **not** create an
+`AGENTS.md` — see below.
 
 It never overwrites anything. Run it again on an existing vault and it refuses;
 with `--force` it fills in only what is missing and still leaves your
-configuration, `AGENTS.md` and notes untouched.
+configuration and notes untouched.
 
-Useful flags: `--no-agents` skips `AGENTS.md`; `--git` also initialises version
-history.
+Useful flags: `--git` also initialises version history. `--no-agents` is
+accepted but does nothing — it is kept only so scripts written against 0.1.0
+keep working.
+
+### Agent rules are opt-in
+
+```sh
+brain agents-doc --write
+```
+
+Writes `AGENTS.md` at the vault root, rendered from that vault's own
+configuration, describing the data model and rules in a provider-neutral way.
+Run it whenever you want one; nothing else needs it, and a vault without one is
+complete and passes `brain doctor`.
 
 ### Look around first
 

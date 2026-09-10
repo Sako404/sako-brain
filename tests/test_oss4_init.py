@@ -55,9 +55,16 @@ class TestMinimalInit(InitTestCase):
         init_mod.initialise(target)
         self.assertEqual(validate.run_all(default_config(target)), [])
 
-    def test_generates_agents_md_by_default(self):
+    def test_does_not_generate_agents_md_by_default(self):
+        """0.2.0: agent rules are opt-in. A plain init writes no AGENTS.md."""
         target = self.vault()
         init_mod.initialise(target)
+        self.assertFalse((target / "AGENTS.md").exists())
+
+    def test_opting_in_still_renders_a_complete_agents_md(self):
+        """The capability is unchanged — only the default moved."""
+        target = self.vault()
+        init_mod.initialise(target, with_agents=True)
         agents = target / "AGENTS.md"
         self.assertTrue(agents.is_file())
         text = agents.read_text()
@@ -179,10 +186,10 @@ class TestSafety(InitTestCase):
 
     def test_force_never_overwrites_an_existing_agents_file(self):
         target = self.vault()
-        init_mod.initialise(target)
+        init_mod.initialise(target, with_agents=True)
         agents = target / "AGENTS.md"
         agents.write_text("hand-written\n")
-        init_mod.initialise(target, force=True)
+        init_mod.initialise(target, with_agents=True, force=True)
         self.assertEqual(agents.read_text(), "hand-written\n")
 
     def test_force_fills_in_only_what_is_missing(self):
@@ -327,7 +334,7 @@ class TestDemoInit(InitTestCase):
 
     def test_generates_agents_reflecting_the_synthetic_taxonomy(self):
         target = self.vault("example")
-        init_mod.initialise_demo(target)
+        init_mod.initialise_demo(target, with_agents=True)
         text = (target / "AGENTS.md").read_text()
         self.assertIn("Example Brain", text)
         self.assertIn("`work/`", text)
@@ -336,6 +343,12 @@ class TestDemoInit(InitTestCase):
     def test_no_agents_is_honoured_for_the_demo_too(self):
         target = self.vault("example")
         init_mod.initialise_demo(target, with_agents=False)
+        self.assertFalse((target / "AGENTS.md").exists())
+        self.assertEqual(validate.run_all(default_config(target)), [])
+
+    def test_the_demo_writes_no_agents_md_by_default_either(self):
+        target = self.vault("example")
+        init_mod.initialise_demo(target)
         self.assertFalse((target / "AGENTS.md").exists())
         self.assertEqual(validate.run_all(default_config(target)), [])
 
@@ -459,11 +472,33 @@ class TestInitCli(InitTestCase):
         self.assertIn("already a vault", out)
         self.assertNotIn("Traceback", out)
 
-    def test_no_agents_flag(self):
+    def test_the_cli_writes_no_agents_md_by_default(self):
         target = self.vault()
-        code, _ = self._run("init", "--no-agents", str(target))
+        code, _ = self._run("init", str(target))
         self.assertEqual(code, 0)
         self.assertFalse((target / "AGENTS.md").exists())
+
+    def test_no_agents_flag_is_still_accepted_as_a_legacy_no_op(self):
+        """Kept for 0.1.0 scripts: accepted, ignored, and never an error."""
+        target = self.vault()
+        code, out = self._run("init", "--no-agents", str(target))
+        self.assertEqual(code, 0)
+        self.assertFalse((target / "AGENTS.md").exists())
+        self.assertNotIn("unrecognized arguments", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_agents_doc_write_is_the_opt_in_path(self):
+        """The documented way to get AGENTS.md after a default init."""
+        target = self.vault()
+        self._run("init", str(target))
+        self.assertFalse((target / "AGENTS.md").exists())
+        code, _ = self._run("--vault", str(target), "agents-doc", "--write")
+        self.assertEqual(code, 0)
+        agents = target / "AGENTS.md"
+        self.assertTrue(agents.is_file())
+        text = agents.read_text()
+        self.assertIn("# AGENTS.md — vault", text)
+        self.assertNotIn("{{", text)
 
     def test_demo_flag_through_the_cli(self):
         target = self.vault("example")
