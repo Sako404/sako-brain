@@ -73,6 +73,23 @@ class TestOperationalStateProjects(unittest.TestCase):
         ids = sorted(e.id for e in result.projects.entries)
         self.assertEqual(ids, ["project-alpha", "project-beta"])
 
+    def test_json_serializable_with_unquoted_yaml_dates_in_registry(self):
+        # Regression: a real registry with unquoted created:/updated: dates
+        # (YAML auto-types these as datetime.date) used to crash
+        # dataclasses.asdict()-based JSON serialization here — found by
+        # running brain state against a real vault for the first time.
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-alpha\n"
+            "    name: Alpha\n"
+            "    path: /tmp/does-not-need-to-exist\n"
+            "    status: active\n"
+            "    created: 2026-01-15\n"
+            "    updated: 2026-02-01\n"
+        )
+        result = state.get_operational_state(self.config)
+        json.dumps(dataclasses.asdict(result))  # must not raise
+
 
 class TestOperationalStateDecisions(unittest.TestCase):
     def setUp(self):

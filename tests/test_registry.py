@@ -1,3 +1,5 @@
+import dataclasses
+import json
 import unittest
 
 from brain.registry import ProjectEntry, find_duplicates, load_registry
@@ -27,6 +29,27 @@ class TestRegistry(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0].id, "project-foo")
         self.assertEqual(entries[0].status, "active")
+
+    def test_unquoted_yaml_dates_are_coerced_to_str(self):
+        # YAML auto-types an unquoted date-like scalar as datetime.date, not
+        # str, even though ProjectEntry.created/updated are documented str |
+        # None — this broke JSON serialization (e.g. brain state) the first
+        # time anything actually serialized a real registry to JSON.
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-foo\n"
+            "    name: Foo\n"
+            "    path: /tmp/foo\n"
+            "    status: active\n"
+            "    created: 2026-01-15\n"
+            "    updated: 2026-02-01\n"
+        )
+        entry = load_registry(self.config)[0]
+        self.assertIsInstance(entry.created, str)
+        self.assertIsInstance(entry.updated, str)
+        self.assertEqual(entry.created, "2026-01-15")
+        self.assertEqual(entry.updated, "2026-02-01")
+        json.dumps(dataclasses.asdict(entry))  # must not raise
 
     def test_find_duplicates_detects_duplicate_id(self):
         entries = [

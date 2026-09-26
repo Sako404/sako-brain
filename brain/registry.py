@@ -20,6 +20,15 @@ class ProjectEntry:
     aliases: list | None = None
 
 
+def _str_or_none(value) -> str | None:
+    """YAML auto-types an unquoted date-like scalar (`created: 2026-01-15`)
+    as a real `datetime.date`, not a string — common in registries written
+    by hand. `ProjectEntry.created`/`updated` are documented as `str | None`;
+    coerce here so every caller (including JSON serialization, e.g.
+    `brain state`) gets what the type actually promises."""
+    return None if value is None else str(value)
+
+
 def load_registry(config: Config) -> list[ProjectEntry]:
     if not config.registry_path.exists():
         return []
@@ -33,8 +42,8 @@ def load_registry(config: Config) -> list[ProjectEntry]:
             path=p.get("path"),
             status=p.get("status"),
             category=p.get("category"),
-            created=p.get("created"),
-            updated=p.get("updated"),
+            created=_str_or_none(p.get("created")),
+            updated=_str_or_none(p.get("updated")),
             aliases=p.get("aliases") or [],
         ))
     return entries
