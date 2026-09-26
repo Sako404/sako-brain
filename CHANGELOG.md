@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## Unreleased
+
+### Added
+
+- **`brain state` / `brain state --json`** — a deterministic, read-only
+  operational-state snapshot: projects, open decisions, the pending-memory
+  queue, projects with a handoff, `brain doctor` problems, recent timeline
+  entries (sensitivity-filtered), systemd timer status, and a reference to
+  the last saved `brain integrity` manifest. Exposed identically through a
+  new `get_operational_state` MCP tool — CLI and MCP call the same function.
+  No AI, no network calls, no new "stale"/"blocked" semantics: every section
+  composes an existing function's own data. `schema_version: 1`.
+- `indexer.count_by_type()` and `indexer.count_inbox_pending()`, extracted
+  from `brain status`'s own inline logic so `brain state` (and any future
+  caller) can reuse it instead of duplicating it. `brain status`'s output is
+  unchanged.
+
 ## 0.2.0 — 2026-09-10
 
 ### Changed
