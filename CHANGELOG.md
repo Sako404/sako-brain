@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.7.0 — 2026-09-26
+
+### Added
+
+- **`brain project section-update <id> --section <name> --mode replace|append --content "..." [--if-match <sha256>]`**
+  — closes the last direct-write gap: `/project-sync`'s named-body-section
+  edit. Restricted to four allowlisted project-template sections
+  (`Current state`, `Milestones`, `Problems / limitations`, `Next
+  actions`) — `Decisions` is deliberately excluded (use `brain decision
+  create` instead). The section's position is found by parsing the note's
+  own `## ` headers server-side; the caller never supplies a path or line
+  range. `--if-match` is an optional optimistic-concurrency guard: pass
+  the sha256 of the section's content as last read, and the write is
+  refused if it changed since — omit it for the normal single-agent case.
+- New MCP tool `update_project_section`, same secret-scan policy as the
+  rest.
+- Migrated `/project-sync` onto it — every skill that writes now goes
+  through a `brain` CLI primitive, no remaining direct-write exceptions.
+
 ## 0.6.1 — 2026-09-26
 
 ### Fixed

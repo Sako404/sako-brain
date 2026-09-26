@@ -272,6 +272,19 @@ def cmd_project_close(config: Config, args) -> int:
     return 0
 
 
+def cmd_project_section_update(config: Config, args) -> int:
+    try:
+        path = projectops.update_section(
+            config, args.id, args.section, args.mode, args.content, if_match=args.if_match,
+        )
+    except projectops.SectionEditError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Updated section '{args.section}' in {path.relative_to(config.brain_root)}")
+    print("Run 'brain index' to make it searchable.")
+    return 0
+
+
 def cmd_decision_create(config: Config, args) -> int:
     try:
         dest = decision_mod.create_decision(
@@ -1044,6 +1057,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_close.add_argument("--summary", default=None,
                                  help="Closing summary appended to the record (not invented — pass your own text)")
 
+    p_project_section = project_sub.add_parser(
+        "section-update",
+        help="Replace or append one allowlisted body section (extracted from /project-sync's own edit)")
+    p_project_section.add_argument("id")
+    p_project_section.add_argument("--section", required=True,
+                                   help=f"one of: {', '.join(projectops.PROJECT_SECTION_ALLOWLIST)}")
+    p_project_section.add_argument("--mode", required=True, choices=["replace", "append"])
+    p_project_section.add_argument("--content", required=True)
+    p_project_section.add_argument("--if-match", default=None, dest="if_match",
+                                   help="sha256 of the section's content as last read — optimistic-concurrency "
+                                        "guard, refuses the write if the section changed since. Optional.")
+
     p_decision = sub.add_parser("decision", help="Create a decision record — create / (supersede via --supersedes)")
     decision_sub = p_decision.add_subparsers(dest="decision_command", required=True)
     p_decision_create = decision_sub.add_parser(
@@ -1234,6 +1259,7 @@ USER_FACING_ERRORS = (
     handoff.HandoffError,
     decision_mod.DecisionError,
     projectops.ProjectWriteError,
+    projectops.SectionEditError,
     memoryops.MemoryWriteError,
     timeline.TimelineWriteError,
 )
@@ -1293,6 +1319,8 @@ def _dispatch(config: Config, args, parser) -> int:
             return cmd_project_update(config, args)
         if args.project_command == "close":
             return cmd_project_close(config, args)
+        if args.project_command == "section-update":
+            return cmd_project_section_update(config, args)
     if args.command == "decision":
         if args.decision_command == "create":
             return cmd_decision_create(config, args)

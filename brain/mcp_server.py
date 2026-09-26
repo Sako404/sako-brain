@@ -11,8 +11,9 @@ Never expose this over a network socket — stdio only, local use only.
 
 Write-policy note: every write tool here (`remember`, `update_memory`,
 `write_handoff`, `create_decision`, `create_project`, `update_project_status`,
-`close_project`, `create_memory_note`, `create_timeline_event`) is a thin
-wrapper over the same business-logic function the CLI calls — no tool
+`close_project`, `update_project_section`, `create_memory_note`,
+`create_timeline_event`) is a thin wrapper over the same business-logic
+function the CLI calls — no tool
 duplicates logic the CLI doesn't also have. None bypasses
 what a human typing the equivalent `brain` command would be subject to, and
 each free-text-carrying tool runs the same secret-pattern scan `brain doctor`
@@ -298,6 +299,17 @@ def tool_close_project(config: Config, id: str, summary: str = "") -> dict:
     }
 
 
+def tool_update_project_section(config: Config, id: str, section: str, mode: str, content: str,
+                                 if_match: str | None = None) -> dict:
+    """Thin wrapper over projectops.update_section() — the exact function
+    `brain project section-update` already calls. No new logic. `section`
+    is validated against a fixed allowlist server-side; never an arbitrary
+    path or line range."""
+    _scan_for_secrets(content)
+    path = projectops.update_section(config, id, section, mode, content, if_match=if_match)
+    return {"updated_path": str(path.relative_to(config.brain_root))}
+
+
 def tool_create_memory_note(config: Config, type: str, title: str, text: str = "",
                              tags: list | None = None, people: list | None = None,
                              projects: list | None = None, sensitivity: str = "normal",
@@ -462,6 +474,19 @@ TOOLS = {
         "type": "object",
         "properties": {"id": {"type": "string"}, "summary": {"type": "string"}},
         "required": ["id"],
+    }),
+    "update_project_section": (tool_update_project_section, {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "section": {"type": "string",
+                        "description": f"one of: {', '.join(projectops.PROJECT_SECTION_ALLOWLIST)}"},
+            "mode": {"type": "string", "description": "replace | append"},
+            "content": {"type": "string"},
+            "if_match": {"type": "string",
+                         "description": "sha256 of the section's content as last read — optional optimistic-concurrency guard"},
+        },
+        "required": ["id", "section", "mode", "content"],
     }),
     "create_memory_note": (tool_create_memory_note, {
         "type": "object",

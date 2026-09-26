@@ -152,5 +152,50 @@ class TestCliDecisionCreate(unittest.TestCase):
         self.assertEqual(rc, 1)
 
 
+class TestCliProjectSectionUpdate(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        run_cli(["project", "create", "--id", "project-widget", "--name", "Widget", "--path", "/a"], self.vault)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_replace(self):
+        rc, out = run_cli(
+            ["project", "section-update", "project-widget", "--section", "Current state",
+             "--mode", "replace", "--content", "All good."],
+            self.vault,
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("Updated section", out)
+
+    def test_append(self):
+        rc, out = run_cli(
+            ["project", "section-update", "project-widget", "--section", "Milestones",
+             "--mode", "append", "--content", "v1 shipped."],
+            self.vault,
+        )
+        self.assertEqual(rc, 0)
+
+    def test_unknown_section_fails_cleanly(self):
+        rc, out = run_cli(
+            ["project", "section-update", "project-widget", "--section", "Purpose",
+             "--mode", "replace", "--content", "x"],
+            self.vault,
+        )
+        self.assertEqual(rc, 1)
+
+    def test_bad_mode_rejected_by_argparse(self):
+        # --mode has a fixed `choices=`, so argparse itself refuses an
+        # invalid value via SystemExit(2), before any business logic runs.
+        with self.assertRaises(SystemExit) as ctx:
+            run_cli(
+                ["project", "section-update", "project-widget", "--section", "Current state",
+                 "--mode", "delete", "--content", "x"],
+                self.vault,
+            )
+        self.assertEqual(ctx.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

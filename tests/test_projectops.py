@@ -149,5 +149,102 @@ class TestCloseProject(unittest.TestCase):
         self.assertEqual(result.new_status, "archived")
 
 
+class TestUpdateSection(unittest.TestCase):
+    """Extracted from what /project-sync does today via a direct Edit on a
+    named body section. The core invariant: only the targeted section's
+    content changes — the header itself, and every other section, stay
+    byte-identical."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.path = projectops.create_project(
+            self.config, id="project-widget", name="Widget", path="/a", status="active",
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_replace_current_state(self):
+        path = projectops.update_section(
+            self.config, "project-widget", "Current state", "replace", "Now feature-complete.",
+        )
+        note = frontmatter.parse_file(path)
+        self.assertIn("Now feature-complete.", note.body)
+
+    def test_replace_never_touches_other_sections(self):
+        before = frontmatter.parse_file(self.path)
+        projectops.update_section(self.config, "project-widget", "Current state", "replace", "New state.")
+        after = frontmatter.parse_file(self.path)
+        for other_section in ("## Purpose", "## Location", "## Architecture / technologies",
+                               "## Important locations", "## Milestones", "## Decisions",
+                               "## Problems / limitations", "## Next actions",
+                               "## Relationships", "## Sources"):
+            self.assertIn(other_section, after.body)
+        # And the pre-existing placeholder text under Milestones (untouched section) survives.
+        self.assertIn("Links to `40_DECISIONS/`", after.body)
+        self.assertEqual(before.body.count("## "), after.body.count("## "))
+
+    def test_append_preserves_prior_content(self):
+        projectops.update_section(self.config, "project-widget", "Milestones", "append", "v1 shipped.")
+        note = frontmatter.parse_file(self.path)
+        self.assertIn("Links to `40_DECISIONS/`", note.body)  # original placeholder still there
+        self.assertIn("v1 shipped.", note.body)
+
+    def test_append_twice_keeps_both_entries(self):
+        projectops.update_section(self.config, "project-widget", "Milestones", "append", "First.")
+        projectops.update_section(self.config, "project-widget", "Milestones", "append", "Second.")
+        note = frontmatter.parse_file(self.path)
+        self.assertIn("First.", note.body)
+        self.assertIn("Second.", note.body)
+
+    def test_unknown_section_rejected(self):
+        with self.assertRaises(projectops.SectionEditError):
+            projectops.update_section(self.config, "project-widget", "Purpose", "replace", "x")
+
+    def test_decisions_section_rejected(self):
+        # Explicitly excluded — /project-sync's own rule: use /decision instead.
+        with self.assertRaises(projectops.SectionEditError):
+            projectops.update_section(self.config, "project-widget", "Decisions", "replace", "x")
+
+    def test_invalid_mode_rejected(self):
+        with self.assertRaises(projectops.SectionEditError):
+            projectops.update_section(self.config, "project-widget", "Current state", "delete", "x")
+
+    def test_unknown_project_id_fails_cleanly(self):
+        with self.assertRaises(projectops.SectionEditError):
+            projectops.update_section(self.config, "project-does-not-exist", "Current state", "replace", "x")
+
+    def test_non_project_note_rejected(self):
+        self.vault.write_note("60_KNOWLEDGE", "k.md", id="knowledge-k", type="knowledge",
+                               body="# K\n\n## Current state\n\nsomething\n")
+        with self.assertRaises(projectops.SectionEditError):
+            projectops.update_section(self.config, "knowledge-k", "Current state", "replace", "x")
+
+    def test_if_match_succeeds_when_hash_matches(self):
+        import hashlib
+        note = frontmatter.parse_file(self.path)
+        lines = note.body.splitlines(keepends=True)
+        start, end = projectops._section_span(lines, "Current state")
+        current_hash = hashlib.sha256("".join(lines[start:end]).encode("utf-8")).hexdigest()
+        # Should not raise.
+        projectops.update_section(
+            self.config, "project-widget", "Current state", "replace", "New.", if_match=current_hash,
+        )
+
+    def test_if_match_refused_on_stale_hash(self):
+        with self.assertRaises(projectops.SectionEditError):
+            projectops.update_section(
+                self.config, "project-widget", "Current state", "replace", "New.",
+                if_match="0" * 64,
+            )
+
+    def test_bumps_updated_timestamp(self):
+        import datetime as dt
+        projectops.update_section(self.config, "project-widget", "Current state", "replace", "x")
+        note = frontmatter.parse_file(self.path)
+        self.assertEqual(note.meta["updated"], dt.date.today().isoformat())
+
+
 if __name__ == "__main__":
     unittest.main()

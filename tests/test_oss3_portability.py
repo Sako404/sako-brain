@@ -646,8 +646,9 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
 
         Grew by one in OSS-4 when `brain init` gained InitError. Grew by two
         for the V2 write primitives (`brain decision create`, `brain project
-        create/update/close`), and by two more for `brain note create` /
-        `brain timeline add`.
+        create/update/close`), by two more for `brain note create` /
+        `brain timeline add`, and by one more for `brain project
+        section-update` (the /project-sync named-section primitive).
         """
         from brain import backup, cli, decision, gitops, handoff, memoryops, projectops, timeline
         from brain import init as init_mod
@@ -659,6 +660,7 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
              paths_mod.VocabularyError, backup.BackupError, gitops.GitError,
              handoff.HandoffError, init_mod.InitError,
              decision.DecisionError, projectops.ProjectWriteError,
+             projectops.SectionEditError,
              memoryops.MemoryWriteError, timeline.TimelineWriteError},
         )
 
