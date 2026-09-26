@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.6.1 — 2026-09-26
+
+### Fixed
+
+- **Security**: the SQLite FTS5 index (`brain.db`) was created with the
+  process's default umask — commonly world-readable — the same class of
+  bug `ensure_private_file()` already exists to fix for the MCP log files,
+  just never applied to the index itself. The index holds full note
+  bodies, restricted ones included, so this is a real information
+  exposure on any multi-user or multi-tenant host. `indexer.connect()`
+  (the one choke point every caller already goes through) now chmods the
+  file to owner-only right after opening it. Found during a server
+  hardening review — a deployed instance's real `brain.db` was confirmed
+  world-readable before this fix, not just theorized.
+
 ## 0.6.0 — 2026-09-26
 
 ### Added
