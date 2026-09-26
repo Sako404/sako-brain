@@ -17,6 +17,7 @@ leaves the rest of the file byte-identical.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -228,3 +229,86 @@ def close_project(config: Config, project_id: str, summary: str = "") -> StatusC
         from . import update as update_mod
         update_mod.update_memory(config, project_id, append_text=summary)
     return result
+
+
+# Extracted from what /project-sync already does today via a direct Edit on
+# specific named body sections — never the whole body, never an arbitrary
+# one. Restricted to the sections that skill actually touches; "Decisions"
+# is deliberately excluded (the skill's own rule: leave it alone, use
+# /decision instead), and every other project-template section (Purpose,
+# Location, Architecture, Important locations, Relationships, Sources) has
+# no sync-driven write need today, so is left out rather than allowlisted
+# "just in case".
+PROJECT_SECTION_ALLOWLIST = ("Current state", "Milestones", "Problems / limitations", "Next actions")
+
+
+class SectionEditError(ValueError):
+    """A named-section edit that cannot be applied safely."""
+
+
+def _section_span(lines: list[str], section: str) -> tuple[int, int]:
+    """Line range [start, end) of one '## <section>' block's CONTENT,
+    excluding the header line itself, up to the next '## ' header or EOF."""
+    header = f"## {section}"
+    start = None
+    for i, line in enumerate(lines):
+        if line.rstrip("\n") == header:
+            start = i + 1
+            break
+    if start is None:
+        raise SectionEditError(f"section '{section}' not found in this note's body")
+    end = len(lines)
+    for j in range(start, len(lines)):
+        if lines[j].startswith("## "):
+            end = j
+            break
+    return start, end
+
+
+def update_section(config: Config, project_id: str, section: str, mode: str, content: str,
+                    if_match: str | None = None) -> Path:
+    """Replace or append the content of one allowlisted section in a
+    project record. Never touches any other section, never accepts an
+    arbitrary path or line range — `section` must be on
+    `PROJECT_SECTION_ALLOWLIST`, and the section's real position is found
+    by parsing the note's own headers, not supplied by the caller.
+
+    `if_match`, if given, is the sha256 of the section's content as the
+    caller last read it — an optimistic-concurrency guard against two
+    callers syncing the same project at once; omit it for the normal
+    single-agent case."""
+    if section not in PROJECT_SECTION_ALLOWLIST:
+        raise SectionEditError(f"section must be one of {PROJECT_SECTION_ALLOWLIST}")
+    if mode not in ("replace", "append"):
+        raise SectionEditError("mode must be 'replace' or 'append'")
+
+    path = find_note_path(config, project_id)
+    if path is None:
+        raise SectionEditError(f"no project record with id '{project_id}'")
+    note = frontmatter.parse_file(path)
+    if note.type != "project":
+        raise SectionEditError(f"'{project_id}' is not a project record (type={note.type!r})")
+
+    lines = note.body.splitlines(keepends=True)
+    start, end = _section_span(lines, section)
+    current_block = "".join(lines[start:end])
+
+    if if_match is not None:
+        actual_hash = hashlib.sha256(current_block.encode("utf-8")).hexdigest()
+        if actual_hash != if_match:
+            raise SectionEditError(
+                f"section content changed since it was last read (expected hash {if_match}, "
+                f"got {actual_hash}) — re-read the section and retry"
+            )
+
+    content = content.rstrip("\n")
+    if mode == "replace":
+        new_block = f"{content}\n\n" if content else "\n"
+    else:
+        existing = current_block.rstrip("\n")
+        new_block = f"{existing}\n\n{content}\n\n" if existing else f"{content}\n\n"
+
+    note.body = "".join(lines[:start]) + new_block + "".join(lines[end:])
+    note.meta["updated"] = dt.date.today().isoformat()
+    path.write_text(frontmatter.render(note), encoding="utf-8")
+    return path

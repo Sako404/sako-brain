@@ -400,6 +400,49 @@ class TestMcpProjectWriteTools(unittest.TestCase):
         self.assertIn("error", resp)
 
 
+class TestMcpUpdateProjectSection(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        _call(self.config, "create_project", {"id": "project-widget", "name": "Widget", "path": "/a"})
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_is_listed_in_tools(self):
+        resp = mcp_server.handle_request(self.config, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {t["name"] for t in resp["result"]["tools"]}
+        self.assertIn("update_project_section", names)
+
+    def test_replace_section(self):
+        resp = _call(self.config, "update_project_section", {
+            "id": "project-widget", "section": "Current state", "mode": "replace", "content": "Good.",
+        })
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertIn("updated_path", payload)
+
+    def test_unknown_section_refused(self):
+        resp = _call(self.config, "update_project_section", {
+            "id": "project-widget", "section": "Purpose", "mode": "replace", "content": "x",
+        })
+        self.assertIn("error", resp)
+
+    def test_secret_in_content_refused(self):
+        resp = _call(self.config, "update_project_section", {
+            "id": "project-widget", "section": "Current state", "mode": "replace",
+            "content": "api_key: sk-abcdefghijklmnopqrstuvwx",
+        })
+        self.assertIn("error", resp)
+
+    def test_stale_if_match_refused(self):
+        resp = _call(self.config, "update_project_section", {
+            "id": "project-widget", "section": "Current state", "mode": "replace",
+            "content": "x", "if_match": "0" * 64,
+        })
+        self.assertIn("error", resp)
+
+
 class TestMcpCreateMemoryNote(unittest.TestCase):
     def setUp(self):
         self.vault = TempVault()
