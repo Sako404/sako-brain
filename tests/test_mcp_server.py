@@ -400,5 +400,71 @@ class TestMcpProjectWriteTools(unittest.TestCase):
         self.assertIn("error", resp)
 
 
+class TestMcpCreateMemoryNote(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_is_listed_in_tools(self):
+        resp = mcp_server.handle_request(self.config, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {t["name"] for t in resp["result"]["tools"]}
+        self.assertIn("create_memory_note", names)
+
+    def test_creates_person_note(self):
+        resp = _call(self.config, "create_memory_note", {"type": "person", "title": "Jane Doe"})
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertIn("created_path", payload)
+
+    def test_fact_without_area_refused(self):
+        resp = _call(self.config, "create_memory_note", {"type": "fact", "title": "X"})
+        self.assertIn("error", resp)
+
+    def test_secret_in_text_refused(self):
+        resp = _call(self.config, "create_memory_note", {
+            "type": "knowledge", "title": "X", "text": "api_key: sk-abcdefghijklmnopqrstuvwx",
+        })
+        self.assertIn("error", resp)
+
+    def test_restricted_without_confirmation_refused(self):
+        resp = _call(self.config, "create_memory_note", {
+            "type": "person", "title": "X", "sensitivity": "restricted",
+        })
+        self.assertIn("error", resp)
+        self.assertIn("confirm_restricted", resp["error"]["message"])
+
+
+class TestMcpCreateTimelineEvent(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_is_listed_in_tools(self):
+        resp = mcp_server.handle_request(self.config, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {t["name"] for t in resp["result"]["tools"]}
+        self.assertIn("create_timeline_event", names)
+
+    def test_creates_event(self):
+        resp = _call(self.config, "create_timeline_event", {
+            "title": "Something happened", "valid_from": "2026-09-26",
+        })
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertIn("created_path", payload)
+
+    def test_secret_in_what_happened_refused(self):
+        resp = _call(self.config, "create_timeline_event", {
+            "title": "X", "valid_from": "2026-09-26",
+            "what_happened": "api_key: sk-abcdefghijklmnopqrstuvwx",
+        })
+        self.assertIn("error", resp)
+
+
 if __name__ == "__main__":
     unittest.main()

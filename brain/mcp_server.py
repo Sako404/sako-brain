@@ -11,8 +11,9 @@ Never expose this over a network socket — stdio only, local use only.
 
 Write-policy note: every write tool here (`remember`, `update_memory`,
 `write_handoff`, `create_decision`, `create_project`, `update_project_status`,
-`close_project`) is a thin wrapper over the same business-logic function the
-CLI calls — no tool duplicates logic the CLI doesn't also have. None bypasses
+`close_project`, `create_memory_note`, `create_timeline_event`) is a thin
+wrapper over the same business-logic function the CLI calls — no tool
+duplicates logic the CLI doesn't also have. None bypasses
 what a human typing the equivalent `brain` command would be subject to, and
 each free-text-carrying tool runs the same secret-pattern scan `brain doctor`
 uses (refusing outright on a match, the same as `brain git snapshot`/`brain
@@ -31,7 +32,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import capture, context as context_mod, discover as discover_mod, memoryqueue, projectops, projectsync
+from . import capture, context as context_mod, discover as discover_mod, memoryops, memoryqueue, projectops, projectsync
 from . import decision as decision_mod
 from . import handoff as handoff_mod
 from . import search as search_mod
@@ -297,6 +298,43 @@ def tool_close_project(config: Config, id: str, summary: str = "") -> dict:
     }
 
 
+def tool_create_memory_note(config: Config, type: str, title: str, text: str = "",
+                             tags: list | None = None, people: list | None = None,
+                             projects: list | None = None, sensitivity: str = "normal",
+                             confidence: str = "fact", source: str = "", source_date: str = "",
+                             area: str | None = None, doc_path: str = "",
+                             confirm_restricted: bool = False) -> dict:
+    """Thin wrapper over memoryops.create_memory() — the exact function
+    `brain note create` already calls. No new logic. Never accepts a
+    client-supplied path: the destination is derived from `type` (plus a
+    validated `area` for facts), never taken as-is."""
+    _require_restricted_confirmation(sensitivity, confirm_restricted)
+    _scan_for_secrets(title, text)
+    path = memoryops.create_memory(
+        config, type_=type, title=title, text=text, tags=tags, people=people,
+        projects=projects, sensitivity=sensitivity, confidence=confidence,
+        source=source, source_date=source_date, area=area, doc_path=doc_path,
+    )
+    return {"created_path": str(path.relative_to(config.brain_root))}
+
+
+def tool_create_timeline_event(config: Config, title: str, valid_from: str,
+                                what_happened: str = "", why_it_matters: str = "",
+                                people: list | None = None, projects: list | None = None,
+                                tags: list | None = None, sensitivity: str = "normal",
+                                confidence: str = "fact", source: str = "", source_date: str = "",
+                                confirm_restricted: bool = False) -> dict:
+    """Thin wrapper over timeline.create_event(). No new logic."""
+    _require_restricted_confirmation(sensitivity, confirm_restricted)
+    _scan_for_secrets(title, what_happened, why_it_matters)
+    path = timeline_mod.create_event(
+        config, title=title, valid_from=valid_from, what_happened=what_happened,
+        why_it_matters=why_it_matters, people=people, projects=projects, tags=tags,
+        sensitivity=sensitivity, confidence=confidence, source=source, source_date=source_date,
+    )
+    return {"created_path": str(path.relative_to(config.brain_root))}
+
+
 def tool_get_operational_state(config: Config, include_restricted: bool = False,
                                 timeline_window_days: int = 14) -> dict:
     """Deterministic, read-only operational-state snapshot: projects,
@@ -424,6 +462,37 @@ TOOLS = {
         "type": "object",
         "properties": {"id": {"type": "string"}, "summary": {"type": "string"}},
         "required": ["id"],
+    }),
+    "create_memory_note": (tool_create_memory_note, {
+        "type": "object",
+        "properties": {
+            "type": {"type": "string", "description": "person | knowledge | document | fact"},
+            "title": {"type": "string"}, "text": {"type": "string"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "people": {"type": "array", "items": {"type": "string"}},
+            "projects": {"type": "array", "items": {"type": "string"}},
+            "sensitivity": {"type": "string"}, "confidence": {"type": "string"},
+            "source": {"type": "string"}, "source_date": {"type": "string"},
+            "area": {"type": "string", "description": "Required for type='fact': an existing 20_AREAS/ subdirectory name"},
+            "doc_path": {"type": "string", "description": "type='document' only: filesystem location of the actual document"},
+            "confirm_restricted": {"type": "boolean", "description": "Required (true) when sensitivity='restricted'"},
+        },
+        "required": ["type", "title"],
+    }),
+    "create_timeline_event": (tool_create_timeline_event, {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "valid_from": {"type": "string", "description": "The event's own date (YYYY-MM-DD) — sorts the timeline"},
+            "what_happened": {"type": "string"}, "why_it_matters": {"type": "string"},
+            "people": {"type": "array", "items": {"type": "string"}},
+            "projects": {"type": "array", "items": {"type": "string"}},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "sensitivity": {"type": "string"}, "confidence": {"type": "string"},
+            "source": {"type": "string"}, "source_date": {"type": "string"},
+            "confirm_restricted": {"type": "boolean", "description": "Required (true) when sensitivity='restricted'"},
+        },
+        "required": ["title", "valid_from"],
     }),
     "get_operational_state": (tool_get_operational_state, {
         "type": "object",

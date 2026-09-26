@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.6.0 — 2026-09-26
+
+### Added
+
+Capability-specific create primitives for the three remaining skills that
+had none (`/remember`'s "obvious final home" path, `/import`, `/timeline`)
+— extending, not replacing, the V2 write primitives from 0.5.0. Both new
+primitives take semantic intent (type, title, content, metadata); neither
+accepts a client-supplied filesystem path — the destination is always
+derived from fixed, validated rules, never arbitrary input.
+
+- **`brain note create --type <person|knowledge|document|fact> --title
+  "..." [--text "..."] [--area <name>] [--doc-path <path>]`** — creates a
+  note at its canonical destination from the matching `80_TEMPLATES/`
+  file. `person`/`knowledge`/`document` each have exactly one fixed bucket
+  (`10_PEOPLE/`, `60_KNOWLEDGE/`, `70_DOCUMENTS/`); `fact` has none — real
+  facts live under whichever `20_AREAS/<area>/` they belong to — so it
+  requires `--area`, validated against the vault's actual existing area
+  subdirectories (never lets a caller invent a new one). Any other type,
+  or a `fact` with no matching area, is refused with a pointer to `brain
+  remember` (unchanged inbox capture) instead of guessing.
+- **`brain timeline add --title "..." --date <YYYY-MM-DD> [--what-happened
+  "..."] [--why-it-matters "..."] ...`** — creates
+  `50_TIMELINE/event-<date>-<slug>.md` from the event template. `--date`
+  sets `valid_from` (what sorts the timeline) and is the event's own date,
+  not necessarily today.
+- New MCP tools `create_memory_note`, `create_timeline_event` — same
+  secret-scan/`confirm_restricted` policy as the rest.
+- Migrated `/remember`, `/import`, `/timeline` onto these (plus the
+  existing `brain update` for edits) — all skills that write now go
+  through a `brain` CLI primitive rather than a direct file edit, except
+  `/project-sync`'s one still-unaddressed case (a mid-body named-section
+  edit, called out in that skill's own text).
+
 ## 0.5.0 — 2026-09-26
 
 ### Added

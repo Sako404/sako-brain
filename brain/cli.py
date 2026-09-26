@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, indexer, integrity, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate
+from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, indexer, integrity, memoryops, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -299,6 +299,39 @@ def cmd_timeline(config: Config, args) -> int:
         return 0
     for entry in entries[: args.limit]:
         print(f"{entry.date}  {entry.id}  {entry.title}")
+    return 0
+
+
+def cmd_timeline_add(config: Config, args) -> int:
+    try:
+        path = timeline.create_event(
+            config, title=args.title, valid_from=args.date,
+            what_happened=args.what_happened or "", why_it_matters=args.why_it_matters or "",
+            people=args.people, projects=args.projects, tags=args.tags,
+            sensitivity=args.sensitivity, source=args.source or "",
+        )
+    except timeline.TimelineWriteError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Created {path.relative_to(config.brain_root)}")
+    print("Run 'brain index' to make it searchable.")
+    return 0
+
+
+def cmd_note_create(config: Config, args) -> int:
+    try:
+        path = memoryops.create_memory(
+            config, type_=args.type, title=args.title, text=args.text or "",
+            tags=args.tags, people=args.people, projects=args.projects,
+            sensitivity=args.sensitivity, confidence=args.confidence,
+            source=args.source or "", source_date=args.source_date or "",
+            area=args.area, doc_path=args.doc_path or "",
+        )
+    except memoryops.MemoryWriteError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Created {path.relative_to(config.brain_root)}")
+    print("Run 'brain index' to make it searchable.")
     return 0
 
 
@@ -1033,8 +1066,42 @@ def build_parser() -> argparse.ArgumentParser:
                                    help="id of an older decision this replaces — marks it "
                                         "'superseded' and links forward, never edits its content")
 
-    p_timeline = sub.add_parser("timeline", help="List timeline entries, newest first")
+    p_timeline = sub.add_parser("timeline", help="List timeline entries, newest first (or 'add' one)")
     p_timeline.add_argument("--limit", type=int, default=50)
+    timeline_sub = p_timeline.add_subparsers(dest="timeline_command", required=False)
+    p_timeline_add = timeline_sub.add_parser(
+        "add", help="Create 50_TIMELINE/event-<date>-<slug>.md from the event template")
+    p_timeline_add.add_argument("--title", required=True)
+    p_timeline_add.add_argument("--date", required=True, metavar="YYYY-MM-DD",
+                                help="The event's own date — sets 'valid_from', which sorts the timeline")
+    p_timeline_add.add_argument("--what-happened", default="", dest="what_happened")
+    p_timeline_add.add_argument("--why-it-matters", default="", dest="why_it_matters")
+    p_timeline_add.add_argument("--people", nargs="*", default=[])
+    p_timeline_add.add_argument("--projects", nargs="*", default=[])
+    p_timeline_add.add_argument("--tags", nargs="*", default=[])
+    p_timeline_add.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
+    p_timeline_add.add_argument("--source", default="")
+
+    p_note = sub.add_parser(
+        "note", help="Create a memory note at its canonical destination (person/knowledge/document/fact)")
+    note_sub = p_note.add_subparsers(dest="note_command", required=True)
+    p_note_create = note_sub.add_parser(
+        "create", help="person/knowledge/document go to their fixed bucket; fact needs --area")
+    p_note_create.add_argument("--type", required=True, dest="type",
+                               help="person | knowledge | document | fact")
+    p_note_create.add_argument("--title", required=True)
+    p_note_create.add_argument("--text", default="")
+    p_note_create.add_argument("--area", default=None,
+                               help="Required for --type fact: an existing 20_AREAS/ subdirectory name")
+    p_note_create.add_argument("--doc-path", default=None, dest="doc_path",
+                               help="--type document only: filesystem location of the actual document")
+    p_note_create.add_argument("--tags", nargs="*", default=[])
+    p_note_create.add_argument("--people", nargs="*", default=[])
+    p_note_create.add_argument("--projects", nargs="*", default=[])
+    p_note_create.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
+    p_note_create.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
+    p_note_create.add_argument("--source", default="")
+    p_note_create.add_argument("--source-date", default="", dest="source_date")
 
     sub.add_parser("status", help="Vault overview: counts, inbox, projects")
     sub.add_parser("doctor", help="Run health checks")
@@ -1167,6 +1234,8 @@ USER_FACING_ERRORS = (
     handoff.HandoffError,
     decision_mod.DecisionError,
     projectops.ProjectWriteError,
+    memoryops.MemoryWriteError,
+    timeline.TimelineWriteError,
 )
 
 
@@ -1228,7 +1297,12 @@ def _dispatch(config: Config, args, parser) -> int:
         if args.decision_command == "create":
             return cmd_decision_create(config, args)
     if args.command == "timeline":
+        if getattr(args, "timeline_command", None) == "add":
+            return cmd_timeline_add(config, args)
         return cmd_timeline(config, args)
+    if args.command == "note":
+        if args.note_command == "create":
+            return cmd_note_create(config, args)
     if args.command == "status":
         return cmd_status(config, args)
     if args.command == "state":
