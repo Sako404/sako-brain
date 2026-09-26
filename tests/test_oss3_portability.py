@@ -644,9 +644,11 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
         """Pins the set deliberately: adding a domain error is a decision, and
         forgetting to route one is how tracebacks came back last time.
 
-        Grew by one in OSS-4 when `brain init` gained InitError.
+        Grew by one in OSS-4 when `brain init` gained InitError. Grew by two
+        for the V2 write primitives (`brain decision create`, `brain project
+        create/update/close`).
         """
-        from brain import backup, cli, gitops, handoff
+        from brain import backup, cli, decision, gitops, handoff, projectops
         from brain import init as init_mod
         from brain import paths as paths_mod
 
@@ -654,7 +656,8 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
             set(cli.USER_FACING_ERRORS),
             {paths_mod.VaultNotFoundError, paths_mod.TaxonomyError,
              paths_mod.VocabularyError, backup.BackupError, gitops.GitError,
-             handoff.HandoffError, init_mod.InitError},
+             handoff.HandoffError, init_mod.InitError,
+             decision.DecisionError, projectops.ProjectWriteError},
         )
 
 

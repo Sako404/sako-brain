@@ -183,7 +183,12 @@ decisions, memory queue, handoffs, doctor, recent timeline, systemd timers) —
 built for a script or a scheduled summary to consume, not for asking a
 question. `brain update <id> --set key=value --append-text "..."` sets
 frontmatter fields and/or appends a dated note to an existing note by id,
-without touching anything else in it.
+without touching anything else in it. `brain decision create --title ...`
+creates a decision record from the decision template (and, with
+`--supersedes`, links an older one forward without editing its content);
+`brain project create/update/close` register a project, move its record
+between status folders, and keep the registry entry in sync — all without
+touching anything else in the vault.
 
 ## Where things live
 

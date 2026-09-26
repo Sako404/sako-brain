@@ -5,6 +5,44 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.5.0 — 2026-09-26
+
+### Added
+
+V2 write primitives — the structured-content counterparts to `brain update`
+(0.4.0's plain field-set/append), extracted from what the `/decision` and
+`/project-new`/`/project-update`/`/project-close` skills already do today via
+direct `Write`/`Edit`. None builds a generic arbitrary-filesystem-write API:
+each is a fixed, validated operation over a known template and directory.
+
+- **`brain decision create --title ... [--context ...] [--decision ...] ...`**
+  — creates `40_DECISIONS/decision-<date>-<slug>.md` from the decision
+  template. `--supersedes <old-id>` marks the old decision `superseded` and
+  links forward, without ever touching its Context/Reasoning — history stays
+  intact.
+- **`brain project create --id ... --name ... --path ...`** — adds a
+  registry entry and creates the project record in the status folder
+  matching its status. Never copies project source files — `path` is a
+  reference only.
+- **`brain project update <id> --status <new-status>`** — the one thing
+  plain `brain update` cannot do: moves the record between
+  `30_PROJECTS/<STATUS>/` folders and updates the registry entry's status in
+  the same call, so the record's frontmatter, its physical folder, and the
+  registry can never drift apart. `--set`/`--append-text` on the same
+  command still go through the existing `update_memory()` for everything
+  else; `--set status=...` is refused with a pointer to `--status`.
+- **`brain project close <id> [--summary ...]`** — archives a project
+  (`set-status` to `archived`) and, if given, appends a closing summary via
+  the existing append-text primitive. Never invents the summary text.
+- New MCP tools `create_decision`, `create_project`, `update_project_status`,
+  `close_project` — thin wrappers over the same functions the CLI commands
+  above call, with the same secret-scan/`confirm_restricted` policy as
+  `remember`/`update_memory`/`write_handoff`.
+- `_registry.yaml` writes (`brain project create`/`update`/`close`) never
+  re-serialize the whole file — every entry other than the one being
+  changed, and every comment, is left byte-identical. Verified against a
+  copy of a real 26-entry registry, not just a test fixture.
+
 ## 0.4.0 — 2026-09-26
 
 ### Added
