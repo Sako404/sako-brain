@@ -1,4 +1,5 @@
 import shutil
+import stat
 import unittest
 
 from brain import indexer
@@ -140,6 +141,18 @@ class TestIndexer(unittest.TestCase):
         (inbox / "b.md").write_text("draft b\n")
         (inbox / "notes.txt").write_text("not markdown\n")
         self.assertEqual(indexer.count_inbox_pending(self.config), 2)
+
+    def test_db_file_not_world_or_group_readable(self):
+        # The index holds full note bodies, restricted ones included —
+        # same privacy reasoning as the MCP log files (see paths.py's
+        # ensure_private_file docstring). sqlite3.connect() creates the
+        # file under the process umask like any other open(), which is
+        # commonly 022 (world-readable) regardless of directory permissions.
+        self.vault.write_note("60_KNOWLEDGE", "k.md", id="knowledge-k", type="knowledge")
+        indexer.rebuild(self.config)
+        mode = self.config.db_path.stat().st_mode
+        self.assertEqual(mode & stat.S_IRWXG, 0, "db file should not be group-accessible")
+        self.assertEqual(mode & stat.S_IRWXO, 0, "db file should not be other-accessible")
 
 
 if __name__ == "__main__":

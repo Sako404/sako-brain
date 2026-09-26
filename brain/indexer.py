@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from . import frontmatter
-from .paths import Config
+from .paths import Config, ensure_private_file
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS notes (
@@ -57,6 +57,13 @@ def connect(config: Config) -> sqlite3.Connection:
     config.db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(config.db_path)
     conn.row_factory = sqlite3.Row
+    # sqlite3.connect() creates the file (if missing) under the process
+    # umask like any other `open()` — commonly 022, i.e. world-readable —
+    # exactly the log-file bug `ensure_private_file` already exists to fix
+    # (see paths.py), just never applied here. This index holds full note
+    # bodies, restricted ones included, so it deserves the same treatment,
+    # applied at the one choke point every caller already goes through.
+    ensure_private_file(config.db_path)
     return conn
 
 
