@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.4.0 — 2026-09-26
+
+### Added
+
+- **`brain update <id> [--set key=value ...] [--append-text "..."]`** — a
+  CLI surface over the existing `update_mod.update_memory()`, the same
+  function the MCP `update_memory` tool already calls. Sets frontmatter
+  fields and/or appends a dated `## Update` section to the body; `id` and
+  `created` are never mutated. No new logic — same trust model as
+  `brain remember` (a human typing the command is the confirmation).
+- **New MCP tool `write_handoff`** — a thin wrapper over the existing
+  `handoff.write()`, the same function `brain handoff write` already calls,
+  including its existing refusal on an all-blank payload. First step of a
+  broader "skills move off direct `Write`/`Edit`, onto CLI/MCP" migration —
+  see the project's private decision log for the full audit and the
+  remaining (larger, not-yet-built) primitives.
+
 ## 0.3.1 — 2026-09-26
 
 ### Fixed

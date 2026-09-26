@@ -279,5 +279,49 @@ class TestMcpGetOperationalState(unittest.TestCase):
         self.assertEqual(cli_payload, mcp_payload)
 
 
+class TestMcpWriteHandoff(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-alpha\n"
+            "    name: Alpha\n"
+            "    path: /tmp/does-not-need-to-exist\n"
+            "    status: active\n"
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_is_listed_in_tools(self):
+        resp = mcp_server.handle_request(self.config, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {t["name"] for t in resp["result"]["tools"]}
+        self.assertIn("write_handoff", names)
+
+    def test_writes_a_handoff_matching_cli_shape(self):
+        resp = _call(self.config, "write_handoff", {
+            "project_id": "project-alpha", "attempted": "did a thing",
+            "changed": "changed a thing", "files_changed": ["a.py"],
+        })
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertIn("updated_path", payload)
+        from brain import handoff as handoff_mod
+        self.assertTrue(handoff_mod.has_handoff(self.config, "project-alpha"))
+
+    def test_empty_payload_refused(self):
+        resp = _call(self.config, "write_handoff", {"project_id": "project-alpha"})
+        self.assertIn("error", resp)
+
+    def test_secret_bearing_text_refused(self):
+        resp = _call(self.config, "write_handoff", {
+            "project_id": "project-alpha", "attempted": "api_key: sk-abcdefghijklmnopqrstuvwx",
+        })
+        self.assertIn("error", resp)
+        from brain import handoff as handoff_mod
+        self.assertFalse(handoff_mod.has_handoff(self.config, "project-alpha"))
+
+
 if __name__ == "__main__":
     unittest.main()
