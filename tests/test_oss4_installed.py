@@ -201,7 +201,7 @@ class TestInstalledPackageIsTheOneBeingUsed(InstalledTestCase):
             env=self.world.env(), cwd=str(self.world.cwd),
             capture_output=True, text=True, timeout=120,
         )
-        self.assertEqual(self.assertOk(result).strip(), "0.2.0")
+        self.assertEqual(self.assertOk(result).strip(), "0.3.0")
 
 
 class TestInstalledCliRunsOutsideTheRepository(InstalledTestCase):
@@ -211,7 +211,7 @@ class TestInstalledCliRunsOutsideTheRepository(InstalledTestCase):
         self.assertIn("init", out)
 
     def test_version(self):
-        self.assertEqual(self.assertOk(self.world.run("--version")).strip(), "brain 0.2.0")
+        self.assertEqual(self.assertOk(self.world.run("--version")).strip(), "brain 0.3.0")
 
     def test_with_no_vault_it_refuses_cleanly_rather_than_failing_to_import(self):
         """An expected vault-discovery failure is a pass; an import or resource

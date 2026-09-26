@@ -176,7 +176,12 @@ brain integrity             # point-in-time report with a file manifest
 
 Also: `brain projects` / `brain project` for project records, `brain timeline`
 for dated events, `brain handoff` for session notes, `brain agents-doc` to
-regenerate `AGENTS.md`, and `brain context --json` for feeding an agent.
+regenerate `AGENTS.md`, `brain context --json` for feeding an agent one
+question's worth of context, and `brain state --json` for a deterministic,
+read-only snapshot of the whole vault's operational state (projects,
+decisions, memory queue, handoffs, doctor, recent timeline, systemd timers) —
+built for a script or a scheduled summary to consume, not for asking a
+question.
 
 ## Where things live
 
