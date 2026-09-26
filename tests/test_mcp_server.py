@@ -323,5 +323,82 @@ class TestMcpWriteHandoff(unittest.TestCase):
         self.assertFalse(handoff_mod.has_handoff(self.config, "project-alpha"))
 
 
+class TestMcpCreateDecision(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_is_listed_in_tools(self):
+        resp = mcp_server.handle_request(self.config, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {t["name"] for t in resp["result"]["tools"]}
+        self.assertIn("create_decision", names)
+
+    def test_creates_decision(self):
+        resp = _call(self.config, "create_decision", {"title": "Use SQLite", "decision": "Use SQLite FTS5."})
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertIn("created_path", payload)
+
+    def test_secret_in_context_refused(self):
+        resp = _call(self.config, "create_decision", {
+            "title": "X", "context": "api_key: sk-abcdefghijklmnopqrstuvwx",
+        })
+        self.assertIn("error", resp)
+
+    def test_restricted_without_confirmation_refused(self):
+        resp = _call(self.config, "create_decision", {"title": "X", "sensitivity": "restricted"})
+        self.assertIn("error", resp)
+        self.assertIn("confirm_restricted", resp["error"]["message"])
+
+
+class TestMcpProjectWriteTools(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_all_listed_in_tools(self):
+        resp = mcp_server.handle_request(self.config, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {t["name"] for t in resp["result"]["tools"]}
+        for expected in ("create_project", "update_project_status", "close_project"):
+            self.assertIn(expected, names)
+
+    def test_create_project(self):
+        resp = _call(self.config, "create_project", {
+            "id": "project-widget", "name": "Widget", "path": "/tmp/example-widget",
+        })
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertIn("created_path", payload)
+
+    def test_update_project_status_moves_and_syncs(self):
+        _call(self.config, "create_project", {"id": "project-widget", "name": "Widget", "path": "/a"})
+        resp = _call(self.config, "update_project_status", {"id": "project-widget", "status": "on-hold"})
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertEqual(payload["new_status"], "on-hold")
+        self.assertTrue(payload["moved"])
+        self.assertTrue(payload["registry_updated"])
+
+    def test_close_project(self):
+        _call(self.config, "create_project", {"id": "project-widget", "name": "Widget", "path": "/a"})
+        resp = _call(self.config, "close_project", {"id": "project-widget", "summary": "Shipped."})
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertEqual(payload["new_status"], "archived")
+
+    def test_close_project_secret_in_summary_refused(self):
+        _call(self.config, "create_project", {"id": "project-widget", "name": "Widget", "path": "/a"})
+        resp = _call(self.config, "close_project", {
+            "id": "project-widget", "summary": "api_key: sk-abcdefghijklmnopqrstuvwx",
+        })
+        self.assertIn("error", resp)
+
+
 if __name__ == "__main__":
     unittest.main()

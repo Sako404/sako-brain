@@ -9,17 +9,19 @@ for `mcp.server.fastmcp.FastMCP` with the same tool functions — see README.
 Run with:  python3 -m brain.mcp_server
 Never expose this over a network socket — stdio only, local use only.
 
-Phase 5A write-policy note: `remember` and `update_memory` are the only
-tools that write. Neither bypasses what a human typing `brain remember` /
-editing a file by hand would be subject to — both run the same
-secret-pattern scan `brain doctor` uses (refusing outright on a match, the
-same as `brain git snapshot`/`brain backup run` do), and writing
-`sensitivity: restricted` content requires an explicit `confirm_restricted:
-true` argument, so a restricted write can never happen as an unnoticed
-side effect of a tool call. `queue_memory` exposes the Level 2
-pending-memory queue (see `memoryqueue.py`) for MCP-only clients — the
-"durable-seeming but not explicitly confirmed" case — as a non-authoritative
-staging step rather than an immediate write.
+Write-policy note: every write tool here (`remember`, `update_memory`,
+`write_handoff`, `create_decision`, `create_project`, `update_project_status`,
+`close_project`) is a thin wrapper over the same business-logic function the
+CLI calls — no tool duplicates logic the CLI doesn't also have. None bypasses
+what a human typing the equivalent `brain` command would be subject to, and
+each free-text-carrying tool runs the same secret-pattern scan `brain doctor`
+uses (refusing outright on a match, the same as `brain git snapshot`/`brain
+backup run` do); writing `sensitivity: restricted` content requires an
+explicit `confirm_restricted: true` argument, so a restricted write can never
+happen as an unnoticed side effect of a tool call. `queue_memory` exposes the
+Level 2 pending-memory queue (see `memoryqueue.py`) for MCP-only clients —
+the "durable-seeming but not explicitly confirmed" case — as a
+non-authoritative staging step rather than an immediate write.
 """
 from __future__ import annotations
 
@@ -29,7 +31,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import capture, context as context_mod, discover as discover_mod, memoryqueue, projectsync
+from . import capture, context as context_mod, discover as discover_mod, memoryqueue, projectops, projectsync
+from . import decision as decision_mod
 from . import handoff as handoff_mod
 from . import search as search_mod
 from . import state as state_mod
@@ -241,6 +244,59 @@ def tool_write_handoff(config: Config, project_id: str, attempted: str = "", cha
     return {"updated_path": str(path.relative_to(config.brain_root))}
 
 
+def tool_create_decision(config: Config, title: str, context: str = "", options: str = "",
+                          decision: str = "", reasoning: str = "", consequences: str = "",
+                          status: str = "proposed", people: list | None = None,
+                          projects: list | None = None, tags: list | None = None,
+                          sensitivity: str = "normal", source: str = "", source_date: str = "",
+                          supersedes: str | None = None, confirm_restricted: bool = False) -> dict:
+    """Thin wrapper over decision.create_decision() — the exact function
+    `brain decision create` already calls. No new logic."""
+    _require_restricted_confirmation(sensitivity, confirm_restricted)
+    _scan_for_secrets(title, context, options, decision, reasoning, consequences)
+    path = decision_mod.create_decision(
+        config, title=title, context=context, options=options, decision=decision,
+        reasoning=reasoning, consequences=consequences, status=status, people=people,
+        projects=projects, tags=tags, sensitivity=sensitivity, source=source,
+        source_date=source_date, supersedes=supersedes,
+    )
+    return {"created_path": str(path.relative_to(config.brain_root))}
+
+
+def tool_create_project(config: Config, id: str, name: str, path: str, status: str = "active",
+                         category: str | None = None, aliases: list | None = None) -> dict:
+    """Thin wrapper over projectops.create_project(). No new logic. Never
+    copies project source files — `path` is a reference only."""
+    _scan_for_secrets(name, category or "")
+    dest = projectops.create_project(
+        config, id=id, name=name, path=path, status=status, category=category, aliases=aliases,
+    )
+    return {"created_path": str(dest.relative_to(config.brain_root))}
+
+
+def tool_update_project_status(config: Config, id: str, status: str) -> dict:
+    """Thin wrapper over projectops.set_project_status() — the one thing
+    plain update_memory cannot do: moves the record between status folders
+    and syncs the registry entry, in the same call."""
+    result = projectops.set_project_status(config, id, status)
+    return {
+        "id": result.id, "old_status": result.old_status, "new_status": result.new_status,
+        "moved": result.moved, "registry_updated": result.registry_updated,
+        "updated_path": str(result.new_path.relative_to(config.brain_root)),
+    }
+
+
+def tool_close_project(config: Config, id: str, summary: str = "") -> dict:
+    """Thin wrapper over projectops.close_project(). No new logic."""
+    _scan_for_secrets(summary)
+    result = projectops.close_project(config, id, summary=summary)
+    return {
+        "id": result.id, "old_status": result.old_status, "new_status": result.new_status,
+        "moved": result.moved, "registry_updated": result.registry_updated,
+        "updated_path": str(result.new_path.relative_to(config.brain_root)),
+    }
+
+
 def tool_get_operational_state(config: Config, include_restricted: bool = False,
                                 timeline_window_days: int = 14) -> dict:
     """Deterministic, read-only operational-state snapshot: projects,
@@ -333,6 +389,41 @@ TOOLS = {
             "decisions": {"type": "array", "items": {"type": "string"}},
         },
         "required": ["project_id"],
+    }),
+    "create_decision": (tool_create_decision, {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"}, "context": {"type": "string"}, "options": {"type": "string"},
+            "decision": {"type": "string"}, "reasoning": {"type": "string"}, "consequences": {"type": "string"},
+            "status": {"type": "string", "description": "proposed | decided | superseded"},
+            "people": {"type": "array", "items": {"type": "string"}},
+            "projects": {"type": "array", "items": {"type": "string"}},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "sensitivity": {"type": "string"}, "source": {"type": "string"}, "source_date": {"type": "string"},
+            "supersedes": {"type": "string", "description": "id of an older decision this replaces"},
+            "confirm_restricted": {"type": "boolean", "description": "Required (true) when sensitivity='restricted'"},
+        },
+        "required": ["title"],
+    }),
+    "create_project": (tool_create_project, {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"}, "name": {"type": "string"},
+            "path": {"type": "string", "description": "The project's real working directory — reference only, never copied"},
+            "status": {"type": "string"}, "category": {"type": "string"},
+            "aliases": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["id", "name", "path"],
+    }),
+    "update_project_status": (tool_update_project_status, {
+        "type": "object",
+        "properties": {"id": {"type": "string"}, "status": {"type": "string"}},
+        "required": ["id", "status"],
+    }),
+    "close_project": (tool_close_project, {
+        "type": "object",
+        "properties": {"id": {"type": "string"}, "summary": {"type": "string"}},
+        "required": ["id"],
     }),
     "get_operational_state": (tool_get_operational_state, {
         "type": "object",

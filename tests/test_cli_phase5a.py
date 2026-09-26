@@ -139,12 +139,12 @@ class TestProjectResolution(unittest.TestCase):
         self.vault.cleanup()
 
     def test_brain_project_show_resolves_registered_project(self):
-        rc, out = run_cli(["project", "project-example"], self.vault)
+        rc, out = run_cli(["project", "show", "project-example"], self.vault)
         self.assertEqual(rc, 0)
         self.assertIn("Example Project", out)
 
     def test_brain_project_show_unknown_id_fails_clearly(self):
-        rc, out = run_cli(["project", "project-nonexistent"], self.vault)
+        rc, out = run_cli(["project", "show", "project-nonexistent"], self.vault)
         self.assertNotEqual(rc, 0)
 
 

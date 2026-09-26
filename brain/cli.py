@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, discover, gitops, handoff, indexer, integrity, memoryqueue, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate
+from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, indexer, integrity, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -194,6 +194,101 @@ def cmd_project_sync(config: Config, project_id: str) -> int:
         return 1
     facts = projectsync.gather(e.path)
     print(json.dumps(facts.__dict__, indent=2))
+    return 0
+
+
+def cmd_project_create(config: Config, args) -> int:
+    try:
+        dest = projectops.create_project(
+            config, id=args.id, name=args.name, path=args.path, status=args.status,
+            category=args.category, aliases=args.aliases,
+        )
+    except projectops.ProjectWriteError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Registry entry added: {args.id}")
+    print(f"Created {dest.relative_to(config.brain_root)}")
+    print("Run 'brain index' to make it searchable.")
+    return 0
+
+
+def cmd_project_update(config: Config, args) -> int:
+    """Composes the new status-transition primitive (folder move + registry
+    sync) with the existing update_mod.update_memory() for everything else —
+    the same field/body edit `brain update` already does for any note."""
+    try:
+        set_fields = _parse_set_fields(args.set or [])
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    if "status" in set_fields:
+        print("Error: use --status to change status (keeps the record, the "
+              "status folder, and the registry entry in sync — --set status="
+              "... would only touch frontmatter).", file=sys.stderr)
+        return 2
+
+    lines = []
+    if args.status:
+        try:
+            r = projectops.set_project_status(config, args.id, args.status)
+        except projectops.ProjectWriteError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        lines.append(f"Status: {r.old_status} -> {r.new_status}")
+        if r.moved:
+            lines.append(f"Moved: {r.old_path.relative_to(config.brain_root)} "
+                          f"-> {r.new_path.relative_to(config.brain_root)}")
+        lines.append(f"Registry updated: {r.registry_updated}")
+
+    if set_fields or args.append_text:
+        try:
+            path = update_mod.update_memory(
+                config, args.id, set_fields=set_fields or None, append_text=args.append_text,
+            )
+        except FileNotFoundError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        lines.append(f"Updated: {path.relative_to(config.brain_root)}")
+
+    if not lines:
+        print("Nothing to do — pass --status, --set, and/or --append-text.", file=sys.stderr)
+        return 2
+    print("\n".join(lines))
+    print("Run 'brain index' to refresh the search index.")
+    return 0
+
+
+def cmd_project_close(config: Config, args) -> int:
+    try:
+        r = projectops.close_project(config, args.id, summary=args.summary or "")
+    except projectops.ProjectWriteError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Closed {args.id}: {r.old_status} -> {r.new_status}")
+    if r.moved:
+        print(f"Moved to {r.new_path.relative_to(config.brain_root)}")
+    print(f"Registry updated: {r.registry_updated}")
+    print("Run 'brain index' to make it searchable.")
+    return 0
+
+
+def cmd_decision_create(config: Config, args) -> int:
+    try:
+        dest = decision_mod.create_decision(
+            config, title=args.title, context=args.context or "", options=args.options or "",
+            decision=args.decision or "", reasoning=args.reasoning or "",
+            consequences=args.consequences or "", status=args.status,
+            people=args.people, projects=args.projects, tags=args.tags,
+            sensitivity=args.sensitivity, source=args.source or "",
+            supersedes=args.supersedes or None,
+        )
+    except decision_mod.DecisionError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Created {dest.relative_to(config.brain_root)}")
+    if args.supersedes:
+        print(f"Marked {args.supersedes} as superseded, linked forward.")
+    print("Run 'brain index' to make it searchable.")
     return 0
 
 
@@ -877,9 +972,66 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("projects", help="List registered projects")
 
-    p_project = sub.add_parser("project", help="Show / discover / sync projects")
-    p_project.add_argument("target", help="A project id, or 'discover', or 'sync <id>'")
-    p_project.add_argument("sync_id", nargs="?", help="Project id, only used with 'sync'")
+    p_project = sub.add_parser("project", help="Show / discover / sync / create / update / close projects")
+    project_sub = p_project.add_subparsers(dest="project_command", required=True)
+
+    p_project_show = project_sub.add_parser("show", help="Show one registered project")
+    p_project_show.add_argument("id")
+
+    project_sub.add_parser("discover", help="Propose unregistered candidates under the configured projects root(s)")
+
+    p_project_sync = project_sub.add_parser("sync", help="Gather live git/filesystem facts for a registered project")
+    p_project_sync.add_argument("id")
+
+    p_project_create = project_sub.add_parser(
+        "create", help="Register a project and create its record (never copies project source into the vault)")
+    p_project_create.add_argument("--id", required=True, help="Stable slug, e.g. project-widget")
+    p_project_create.add_argument("--name", required=True)
+    p_project_create.add_argument("--path", required=True, help="The project's real working directory (reference only)")
+    p_project_create.add_argument("--status", default="active",
+                                  help="Registry/frontmatter status (default vocabulary: "
+                                       f"{', '.join(paths_mod.DEFAULT_STATUS_BY_TYPE['project'])})")
+    p_project_create.add_argument("--category", default=None)
+    p_project_create.add_argument("--aliases", nargs="*", default=[])
+
+    p_project_update = project_sub.add_parser(
+        "update", help="Change status (moves + registry-syncs) and/or set fields / append text")
+    p_project_update.add_argument("id")
+    p_project_update.add_argument("--status", default=None,
+                                  help="New status — moves the record between status folders and "
+                                       "updates the registry entry in the same call")
+    p_project_update.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE",
+                                  help="Other frontmatter field to set, repeatable (not 'status' — use --status)")
+    p_project_update.add_argument("--append-text", default=None,
+                                  help="Text appended as a new dated '## Update' section")
+
+    p_project_close = project_sub.add_parser(
+        "close", help="Archive a project (status -> archived, moved + registry-synced)")
+    p_project_close.add_argument("id")
+    p_project_close.add_argument("--summary", default=None,
+                                 help="Closing summary appended to the record (not invented — pass your own text)")
+
+    p_decision = sub.add_parser("decision", help="Create a decision record — create / (supersede via --supersedes)")
+    decision_sub = p_decision.add_subparsers(dest="decision_command", required=True)
+    p_decision_create = decision_sub.add_parser(
+        "create", help="Create 40_DECISIONS/decision-<date>-<slug>.md from the decision template")
+    p_decision_create.add_argument("--title", required=True)
+    p_decision_create.add_argument("--context", default="")
+    p_decision_create.add_argument("--options", default="", help="'Options considered' section body")
+    p_decision_create.add_argument("--decision", default="", help="'Decision' section body")
+    p_decision_create.add_argument("--reasoning", default="")
+    p_decision_create.add_argument("--consequences", default="")
+    p_decision_create.add_argument("--status", default="proposed",
+                                   help="default vocabulary: "
+                                        f"{', '.join(paths_mod.DEFAULT_STATUS_BY_TYPE['decision'])}")
+    p_decision_create.add_argument("--people", nargs="*", default=[])
+    p_decision_create.add_argument("--projects", nargs="*", default=[])
+    p_decision_create.add_argument("--tags", nargs="*", default=[])
+    p_decision_create.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
+    p_decision_create.add_argument("--source", default="")
+    p_decision_create.add_argument("--supersedes", default=None,
+                                   help="id of an older decision this replaces — marks it "
+                                        "'superseded' and links forward, never edits its content")
 
     p_timeline = sub.add_parser("timeline", help="List timeline entries, newest first")
     p_timeline.add_argument("--limit", type=int, default=50)
@@ -1013,6 +1165,8 @@ USER_FACING_ERRORS = (
     backup.BackupError,
     gitops.GitError,
     handoff.HandoffError,
+    decision_mod.DecisionError,
+    projectops.ProjectWriteError,
 )
 
 
@@ -1058,14 +1212,21 @@ def _dispatch(config: Config, args, parser) -> int:
     if args.command == "projects":
         return cmd_projects(config, args)
     if args.command == "project":
-        if args.target == "discover":
+        if args.project_command == "show":
+            return cmd_project_show(config, args.id)
+        if args.project_command == "discover":
             return cmd_project_discover(config, args)
-        if args.target == "sync":
-            if not args.sync_id:
-                print("usage: brain project sync <id>", file=sys.stderr)
-                return 2
-            return cmd_project_sync(config, args.sync_id)
-        return cmd_project_show(config, args.target)
+        if args.project_command == "sync":
+            return cmd_project_sync(config, args.id)
+        if args.project_command == "create":
+            return cmd_project_create(config, args)
+        if args.project_command == "update":
+            return cmd_project_update(config, args)
+        if args.project_command == "close":
+            return cmd_project_close(config, args)
+    if args.command == "decision":
+        if args.decision_command == "create":
+            return cmd_decision_create(config, args)
     if args.command == "timeline":
         return cmd_timeline(config, args)
     if args.command == "status":
