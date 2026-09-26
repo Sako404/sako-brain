@@ -23,6 +23,7 @@ staging step rather than an immediate write.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 import sys
 from datetime import datetime
@@ -30,6 +31,7 @@ from pathlib import Path
 
 from . import capture, context as context_mod, discover as discover_mod, memoryqueue, projectsync
 from . import search as search_mod
+from . import state as state_mod
 from . import timeline as timeline_mod
 from . import update as update_mod
 from . import validate as validate_mod
@@ -221,6 +223,20 @@ def tool_project_context(config: Config, id: str) -> dict:
     return {"registry": e.__dict__, "record": record_text, "filesystem_facts": facts.__dict__}
 
 
+def tool_get_operational_state(config: Config, include_restricted: bool = False,
+                                timeline_window_days: int = 14) -> dict:
+    """Deterministic, read-only operational-state snapshot: projects,
+    decisions, memory queue, handoffs, doctor, timeline, systemd timers,
+    and a reference to the last saved integrity manifest. No AI, no
+    network calls, never writes anything. Restricted content excluded
+    unless include_restricted=true."""
+    result = state_mod.get_operational_state(
+        config, include_restricted=include_restricted,
+        timeline_window_days=timeline_window_days,
+    )
+    return dataclasses.asdict(result)
+
+
 TOOLS = {
     "search_memory": (tool_search_memory, {
         "type": "object",
@@ -287,6 +303,13 @@ TOOLS = {
     }),
     "project_context": (tool_project_context, {
         "type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"],
+    }),
+    "get_operational_state": (tool_get_operational_state, {
+        "type": "object",
+        "properties": {
+            "include_restricted": {"type": "boolean", "description": "Default false — set true only when restricted content is directly relevant and intended"},
+            "timeline_window_days": {"type": "integer"},
+        },
     }),
 }
 

@@ -1,7 +1,23 @@
+import contextlib
+import io
+import json
+import os
 import unittest
+from unittest.mock import patch
 
-from brain import mcp_server
+from brain import cli, mcp_server
 from tests.helpers import TempVault
+
+
+def _run_cli(argv, vault):
+    out = io.StringIO()
+    env = dict(os.environ)
+    env["BRAIN_ROOT"] = str(vault.root)
+    env["BRAIN_STATE_DIR"] = str(vault.state_dir)
+    with patch.dict(os.environ, env, clear=False):
+        with contextlib.redirect_stdout(out):
+            cli.main(argv)
+    return out.getvalue()
 
 
 def _call(config, name, arguments):
@@ -219,6 +235,48 @@ class TestClientPermissions(unittest.TestCase):
         mode = log_files[0].stat().st_mode
         self.assertEqual(mode & stat.S_IRWXG, 0, "log file should not be group-accessible")
         self.assertEqual(mode & stat.S_IRWXO, 0, "log file should not be other-accessible")
+
+
+class TestMcpGetOperationalState(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-alpha\n"
+            "    name: Alpha\n"
+            "    path: /tmp/does-not-need-to-exist\n"
+            "    status: active\n"
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_is_listed_in_tools(self):
+        resp = mcp_server.handle_request(self.config, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        names = {t["name"] for t in resp["result"]["tools"]}
+        self.assertIn("get_operational_state", names)
+
+    def test_returns_expected_shape(self):
+        resp = _call(self.config, "get_operational_state", {})
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertIn("projects", payload)
+        self.assertIn("decisions", payload)
+        self.assertEqual(payload["projects"]["by_status"], {"active": 1})
+
+    def test_matches_cli_json_output_for_the_same_vault(self):
+        """One function, two callers — the invariant the design insists on."""
+        cli_out = _run_cli(["state", "--json"], self.vault)
+        cli_payload = json.loads(cli_out)
+
+        mcp_resp = _call(self.config, "get_operational_state", {})
+        mcp_payload = json.loads(mcp_resp["result"]["content"][0]["text"])
+
+        cli_payload.pop("generated_at")
+        mcp_payload.pop("generated_at")
+        self.assertEqual(cli_payload, mcp_payload)
 
 
 if __name__ == "__main__":
