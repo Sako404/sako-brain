@@ -30,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import capture, context as context_mod, discover as discover_mod, memoryqueue, projectsync
+from . import handoff as handoff_mod
 from . import search as search_mod
 from . import state as state_mod
 from . import timeline as timeline_mod
@@ -223,6 +224,23 @@ def tool_project_context(config: Config, id: str) -> dict:
     return {"registry": e.__dict__, "record": record_text, "filesystem_facts": facts.__dict__}
 
 
+def tool_write_handoff(config: Config, project_id: str, attempted: str = "", changed: str = "",
+                        working_state: str = "", unresolved: str = "", next_action: str = "",
+                        files_changed: list | None = None, decisions: list | None = None) -> dict:
+    """Thin wrapper over handoff.write() — the exact function the CLI's
+    `brain handoff write` already calls, including its existing refusal on
+    an all-blank payload. No new logic."""
+    _scan_for_secrets(attempted, changed, working_state, unresolved, next_action,
+                       *(files_changed or []), *(decisions or []))
+    sections = handoff_mod.HandoffSections(
+        attempted=attempted, changed=changed, working_state=working_state,
+        unresolved=unresolved, next_action=next_action,
+        files_changed=files_changed or [], decisions=decisions or [],
+    )
+    path = handoff_mod.write(config, project_id, sections)
+    return {"updated_path": str(path.relative_to(config.brain_root))}
+
+
 def tool_get_operational_state(config: Config, include_restricted: bool = False,
                                 timeline_window_days: int = 14) -> dict:
     """Deterministic, read-only operational-state snapshot: projects,
@@ -303,6 +321,18 @@ TOOLS = {
     }),
     "project_context": (tool_project_context, {
         "type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"],
+    }),
+    "write_handoff": (tool_write_handoff, {
+        "type": "object",
+        "properties": {
+            "project_id": {"type": "string"},
+            "attempted": {"type": "string"}, "changed": {"type": "string"},
+            "working_state": {"type": "string"}, "unresolved": {"type": "string"},
+            "next_action": {"type": "string"},
+            "files_changed": {"type": "array", "items": {"type": "string"}},
+            "decisions": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["project_id"],
     }),
     "get_operational_state": (tool_get_operational_state, {
         "type": "object",

@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, discover, gitops, handoff, indexer, integrity, memoryqueue, projectsync, search, state as state_mod, systemdstatus, timeline, validate
+from . import assistant, backup, capture, context as context_mod, discover, gitops, handoff, indexer, integrity, memoryqueue, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -102,6 +102,38 @@ def cmd_remember(config: Config, args) -> int:
         return 2
     print(f"Captured to {dest.relative_to(config.brain_root)}")
     print("Run 'brain index' to make it searchable, and review 00_INBOX for triage.")
+    return 0
+
+
+def _parse_set_fields(pairs: list[str]) -> dict:
+    fields = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise ValueError(f"--set expects key=value, got '{pair}'")
+        key, _, value = pair.partition("=")
+        fields[key] = value
+    return fields
+
+
+def cmd_update(config: Config, args) -> int:
+    """CLI surface over update_mod.update_memory() — the exact function the
+    MCP update_memory tool already calls. Same trust model as brain remember:
+    a human typing this command is the confirmation; no separate
+    --confirm-restricted friction here, matching cmd_remember."""
+    try:
+        set_fields = _parse_set_fields(args.set or [])
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    try:
+        path = update_mod.update_memory(
+            config, args.id, set_fields=set_fields or None, append_text=args.append_text,
+        )
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Updated {path.relative_to(config.brain_root)}")
+    print("Run 'brain index' to refresh the search index.")
     return 0
 
 
@@ -837,6 +869,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_remember.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
     p_remember.add_argument("--source", default="")
 
+    p_update = sub.add_parser("update", help="Update fields and/or append text on an existing note by id")
+    p_update.add_argument("id")
+    p_update.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE",
+                          help="Frontmatter field to set, repeatable (id/created are never mutated)")
+    p_update.add_argument("--append-text", default=None, help="Text appended as a new dated '## Update' section")
+
     sub.add_parser("projects", help="List registered projects")
 
     p_project = sub.add_parser("project", help="Show / discover / sync projects")
@@ -1015,6 +1053,8 @@ def _dispatch(config: Config, args, parser) -> int:
         return cmd_get(config, args)
     if args.command == "remember":
         return cmd_remember(config, args)
+    if args.command == "update":
+        return cmd_update(config, args)
     if args.command == "projects":
         return cmd_projects(config, args)
     if args.command == "project":

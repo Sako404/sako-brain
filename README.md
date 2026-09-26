@@ -181,7 +181,9 @@ question's worth of context, and `brain state --json` for a deterministic,
 read-only snapshot of the whole vault's operational state (projects,
 decisions, memory queue, handoffs, doctor, recent timeline, systemd timers) —
 built for a script or a scheduled summary to consume, not for asking a
-question.
+question. `brain update <id> --set key=value --append-text "..."` sets
+frontmatter fields and/or appends a dated note to an existing note by id,
+without touching anything else in it.
 
 ## Where things live
 

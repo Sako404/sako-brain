@@ -72,7 +72,7 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertEqual(attr, "brain.__version__")
 
     def test_public_version_baseline(self):
-        self.assertEqual(__version__, "0.3.1")
+        self.assertEqual(__version__, "0.4.0")
 
     def test_template_is_declared_as_package_data(self):
         """Without this the wheel ships a package whose agents-doc is broken."""
