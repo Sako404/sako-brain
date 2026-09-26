@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, discover, gitops, handoff, indexer, integrity, memoryqueue, projectsync, search, systemdstatus, timeline, validate
+from . import assistant, backup, capture, context as context_mod, discover, gitops, handoff, indexer, integrity, memoryqueue, projectsync, search, state as state_mod, systemdstatus, timeline, validate
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -216,6 +217,38 @@ def cmd_doctor(config: Config, args) -> int:
             print(f"  - {item.message}")
         print()
     return 1
+
+
+def cmd_state(config: Config, args) -> int:
+    result = state_mod.get_operational_state(
+        config, include_restricted=args.include_restricted,
+        timeline_window_days=args.timeline_days,
+    )
+    if args.json:
+        print(json.dumps(dataclasses.asdict(result), indent=2, ensure_ascii=False))
+        return 0
+
+    print(f"Operational state — schema v{result.schema_version}, brain {result.brain_version}")
+    print(f"Generated: {result.generated_at}")
+    failed = [name for name, s in result.sources.items() if not s.ok]
+    if failed:
+        print(f"Sources with problems: {', '.join(failed)}")
+
+    print(f"\nProjects: {sum(result.projects.by_status.values())}")
+    for status_, count in sorted(result.projects.by_status.items()):
+        print(f"  {status_}: {count}")
+
+    print(f"\nOpen decisions: {len(result.decisions.open)}")
+    for d in result.decisions.open:
+        print(f"  {d['id']}  {d['title']}")
+
+    print(f"\nMemory queue pending: {result.memory_queue.pending_count}")
+    print(f"Projects with handoffs: {len(result.handoffs.project_ids)}")
+    print(f"Doctor problems: {result.doctor.problem_count} ({result.doctor.blocking_count} blocking)")
+    print(f"Timeline (last {result.timeline_recent.window_days}d): {len(result.timeline_recent.entries)} entries")
+    for t in result.systemd.timers:
+        print(f"  {t.unit}: {t.enabled}/{t.active}")
+    return 0
 
 
 def cmd_git_init(config: Config, args) -> int:
@@ -816,6 +849,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="Vault overview: counts, inbox, projects")
     sub.add_parser("doctor", help="Run health checks")
 
+    p_state = sub.add_parser(
+        "state",
+        help="Deterministic operational-state snapshot (projects, decisions, "
+             "memory queue, handoffs, doctor, timeline, systemd, integrity ref)",
+    )
+    p_state.add_argument("--json", action="store_true")
+    p_state.add_argument("--include-restricted", action="store_true")
+    p_state.add_argument("--timeline-days", type=int, default=14, dest="timeline_days")
+
     p_git = sub.add_parser("git", help="Local git version history (init / status / snapshot / log)")
     git_sub = p_git.add_subparsers(dest="git_command", required=True)
     git_sub.add_parser("init", help="Initialize git history (separate git-dir outside Nextcloud)")
@@ -988,6 +1030,8 @@ def _dispatch(config: Config, args, parser) -> int:
         return cmd_timeline(config, args)
     if args.command == "status":
         return cmd_status(config, args)
+    if args.command == "state":
+        return cmd_state(config, args)
     if args.command == "doctor":
         return cmd_doctor(config, args)
     if args.command == "git":
