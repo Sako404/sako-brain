@@ -60,6 +60,30 @@ def connect(config: Config) -> sqlite3.Connection:
     return conn
 
 
+def count_by_type(config: Config) -> dict[str, int]:
+    """Indexed note counts grouped by type, in the same order the index
+    returns them (`(none)` for a missing/blank type). {} if the index has not
+    been built yet."""
+    if not config.db_path.exists():
+        return {}
+    conn = connect(config)
+    try:
+        rows = conn.execute(
+            "SELECT type, COUNT(*) c FROM notes GROUP BY type ORDER BY type"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {(row["type"] or "(none)"): row["c"] for row in rows}
+
+
+def count_inbox_pending(config: Config) -> int:
+    """Markdown files sitting in the inbox, not yet triaged into the vault."""
+    inbox = config.inbox_dir
+    if not inbox.exists():
+        return 0
+    return len(list(inbox.glob("*.md")))
+
+
 def rebuild(config: Config) -> dict:
     """Wipe and rebuild the index from Markdown. Returns a stats dict."""
     config.db_path.unlink(missing_ok=True)

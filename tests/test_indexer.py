@@ -1,3 +1,4 @@
+import shutil
 import unittest
 
 from brain import indexer
@@ -104,6 +105,41 @@ class TestIndexer(unittest.TestCase):
         row = conn.execute("SELECT * FROM notes WHERE id = 'fact-example'").fetchone()
         conn.close()
         self.assertEqual(row["supersedes"], "fact-a,fact-b")
+
+    def test_count_by_type_before_index_built(self):
+        self.assertEqual(indexer.count_by_type(self.config), {})
+
+    def test_count_by_type_matches_grouped_totals(self):
+        self.vault.write_note("60_KNOWLEDGE", "k.md", id="knowledge-k", type="knowledge")
+        self.vault.write_note("10_PEOPLE", "p1.md", id="person-p1", type="person")
+        self.vault.write_note("10_PEOPLE", "p2.md", id="person-p2", type="person")
+        indexer.rebuild(self.config)
+        counts = indexer.count_by_type(self.config)
+        self.assertEqual(counts, {"knowledge": 1, "person": 2})
+        self.assertEqual(sum(counts.values()), 3)
+
+    def test_count_by_type_buckets_blank_type_as_none_label(self):
+        path = self.vault.root / "60_KNOWLEDGE" / "no-type.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("---\nid: knowledge-untyped\n---\n\n# Untyped\n")
+        indexer.rebuild(self.config)
+        self.assertEqual(indexer.count_by_type(self.config), {"(none)": 1})
+
+    def test_count_inbox_pending_zero_when_inbox_empty(self):
+        self.assertTrue(self.config.inbox_dir.exists())
+        self.assertEqual(indexer.count_inbox_pending(self.config), 0)
+
+    def test_count_inbox_pending_zero_when_inbox_missing(self):
+        shutil.rmtree(self.config.inbox_dir)
+        self.assertEqual(indexer.count_inbox_pending(self.config), 0)
+
+    def test_count_inbox_pending_counts_markdown_files_only(self):
+        inbox = self.config.inbox_dir
+        inbox.mkdir(parents=True, exist_ok=True)
+        (inbox / "a.md").write_text("draft a\n")
+        (inbox / "b.md").write_text("draft b\n")
+        (inbox / "notes.txt").write_text("not markdown\n")
+        self.assertEqual(indexer.count_inbox_pending(self.config), 2)
 
 
 if __name__ == "__main__":

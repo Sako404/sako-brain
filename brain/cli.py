@@ -175,7 +175,6 @@ def cmd_timeline(config: Config, args) -> int:
 
 
 def cmd_status(config: Config, args) -> int:
-    from .indexer import connect
     print(f"Brain root:     {config.brain_root}")
     roots = ", ".join(str(r) for r in config.projects_roots) or "(not configured)"
     print(f"Projects roots: {roots}")
@@ -184,17 +183,13 @@ def cmd_status(config: Config, args) -> int:
     if not config.db_path.exists():
         print("\nIndex: not built yet. Run 'brain index'.")
     else:
-        conn = connect(config)
-        counts = conn.execute("SELECT type, COUNT(*) c FROM notes GROUP BY type ORDER BY type").fetchall()
-        total = conn.execute("SELECT COUNT(*) c FROM notes").fetchone()["c"]
-        conn.close()
+        counts = indexer.count_by_type(config)
+        total = sum(counts.values())
         print(f"\nIndexed notes: {total}")
-        for row in counts:
-            print(f"  {row['type'] or '(none)'}: {row['c']}")
+        for type_name, count in counts.items():
+            print(f"  {type_name}: {count}")
 
-    inbox = config.inbox_dir
-    pending = list(inbox.glob("*.md")) if inbox.exists() else []
-    print(f"\nInbox pending triage: {len(pending)}")
+    print(f"\nInbox pending triage: {indexer.count_inbox_pending(config)}")
 
     entries = load_registry(config)
     by_status: dict[str, int] = {}
