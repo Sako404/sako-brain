@@ -188,7 +188,12 @@ creates a decision record from the decision template (and, with
 `--supersedes`, links an older one forward without editing its content);
 `brain project create/update/close` register a project, move its record
 between status folders, and keep the registry entry in sync — all without
-touching anything else in the vault.
+touching anything else in the vault. `brain note create --type <person|
+knowledge|document|fact> --title ...` creates a note at its canonical
+destination (a fixed bucket for person/knowledge/document; `--area <name>`
+for fact, validated against real existing areas); `brain timeline add
+--title ... --date ...` creates a dated event from the event template.
+Neither ever takes a client-supplied filesystem path.
 
 ## Where things live
 
