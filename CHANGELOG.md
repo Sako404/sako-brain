@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.3.1 — 2026-09-26
+
+### Fixed
+
+- **`registry.load_registry()` now coerces `created`/`updated` to `str`.**
+  An unquoted date-like YAML scalar (`created: 2026-01-15`, the common,
+  human-written style) is auto-typed by PyYAML as `datetime.date`, not
+  `str`, even though `ProjectEntry.created`/`updated` are documented
+  `str | None`. Nothing before `brain state` ever JSON-serialized a
+  `ProjectEntry`, so this was never triggered — `dataclasses.asdict()` on a
+  real registry raised `TypeError: Object of type date is not JSON
+  serializable`. Found running `brain state --json` against a real vault
+  for the first time.
+
 ## 0.3.0 — 2026-09-26
 
 ### Added
