@@ -8,8 +8,10 @@ business logic of its own: no new definition of "stale", "blocked" or
 lives in `cli.py` or elsewhere — see `count_by_type`/`count_inbox_pending` in
 `indexer.py`, extracted for exactly this reason.
 
-Design record: Brain note `project-sako-brain-sako-os-audit` (sections
-16-18) and decision `decision-2026-09-26-sako-brain-brain-state-design-accepted`.
+Design record: the operating vault's own architecture-audit and
+design-decision notes for this component (kept outside this package, per
+the usual separation between the portable core and its deployment's
+private records).
 
 Hard rules this module must never break:
 - Deterministic only. No AI call, no network call, no Matrix/TRON/n8n call.
@@ -133,6 +135,8 @@ def _collect_decisions(config: Config, include_restricted: bool) -> tuple[Decisi
     style (a small, direct query against the index, as `cmd_status` and
     `context.py` already do), filtering only on the canonical, documented
     status vocabulary (`proposed`/`decided`/`superseded`), never a new one."""
+    if not config.db_path.exists():
+        return DecisionsSection(), 0
     conn = connect(config)
     try:
         rows = conn.execute(
@@ -203,6 +207,11 @@ def _collect_timeline(config: Config, window_days: int, include_restricted: bool
             continue
         if entry_date >= cutoff:
             windowed.append(e)
+
+    if not config.db_path.exists():
+        # Nothing is verifiable without the index — omit every windowed
+        # entry rather than assume any of them are safe to show.
+        return TimelineSection(window_days=window_days, entries=[]), len(windowed)
 
     sensitivity_by_id: dict[str, str] = {}
     ids = [e.id for e in windowed if e.id]
