@@ -21,6 +21,27 @@ command line and configuration format may change between minor versions.
   from `brain status`'s own inline logic so `brain state` (and any future
   caller) can reuse it instead of duplicating it. `brain status`'s output is
   unchanged.
+- `scripts/check-release-identity.sh`, installable as a `pre-commit`/
+  `pre-push` hook, refusing to commit or push when the clone's repo-local
+  git identity is missing or is not the approved public address. See
+  Security below.
+
+### Security
+
+- **The seven commits that built this release
+  (`b6508f3`..`1740846`) were authored and committed with a private email
+  address** instead of the approved public identity, because this clone had
+  no repo-local git identity set and silently inherited the global one.
+  Already pushed and merged to `main` before the mistake was found.
+  **Not remediated by rewriting history** — a force-push to already-public
+  `main` was judged a worse outcome than the exposure of an email address
+  (not a credential): it cannot guarantee removal from any existing clone,
+  fork, or cache, and this project's own standing rule is to never rewrite
+  published history. Left in place, recorded here and in the private
+  decision log. `scripts/check-release-identity.sh` (above) exists so this
+  cannot happen a third time — the first incident, 2026-09-08, was a tag's
+  tagger metadata, remediated by recreating the tag before it saw any
+  meaningful distribution.
 
 ## 0.2.0 — 2026-09-10
 

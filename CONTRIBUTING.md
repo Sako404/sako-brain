@@ -77,6 +77,31 @@ is a hard rule rather than a preference.
 - If you need to *name* a forbidden string — a leak scanner has to — put it in
   the one place that already owns that vocabulary rather than typing it again.
 
+## Releasing
+
+Before any commit or tag that will be pushed to this repository, verify the
+clone's **repo-local** git identity — never rely on your global config,
+which is very likely a private address:
+
+```sh
+./scripts/check-release-identity.sh
+```
+
+Install it as a hook once per clone so this can't be forgotten:
+
+```sh
+ln -sf ../../scripts/check-release-identity.sh .git/hooks/pre-commit
+ln -sf ../../scripts/check-release-identity.sh .git/hooks/pre-push
+```
+
+This exists because it has already gone wrong twice: a tag's tagger
+metadata carried a private email (2026-09-08, remediated by recreating the
+tag), and seven commits' author/committer fields did the same
+(2026-09-26, left as-is — a rewrite of already-public history was judged a
+worse remedy than the exposure itself). The second is recorded in
+`CHANGELOG.md`; both are recorded in full in the project's private decision
+log.
+
 ## Pull requests
 
 - One change per PR, with a message explaining *why*, not only what.
