@@ -15,7 +15,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.2.0.** Pre-1.0 means the command line and configuration
+**Current release: 0.7.0.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -82,7 +82,7 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.2.0-py3-none-any.whl
+pipx install ./sako_brain-0.7.0-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
@@ -237,9 +237,12 @@ which key is missing. It never runs on its own.
 
 ## Roadmap
 
-Not implemented, and not promised for any date: an MCP server for agent
-integration, editor- and agent-specific rule packs, macOS verification, and
-PyPI distribution. Everything described above this section exists today.
+An MCP server (`python3 -m brain.mcp_server`, stdio transport) has shipped
+since 0.1.0 — see `brain/mcp_server.py`'s own docstring for how to point an
+MCP-capable client at it. Not implemented, and not promised for any date:
+editor- and agent-specific rule packs beyond `AGENTS.md`, macOS
+verification, and PyPI distribution. Everything else described above this
+section exists today.
 
 ## Contributing
 
