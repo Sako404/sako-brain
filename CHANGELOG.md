@@ -5,6 +5,41 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.8.0 — 2026-09-28
+
+### Added
+
+- **`brain capabilities`** (JSON) — self-description for any client (Claude
+  Code, Codex, a phone quick-capture flow, a future TRON-side agent):
+  version, every CLI command (derived from the real parser, never a second
+  hand-kept list), every MCP tool and its input schema (from the real
+  `mcp_server.TOOLS`). Deliberately does not predict read-vs-write
+  permission per command — that split is enforced server-side by the
+  dispatcher, per connected identity; a disallowed command still gets a
+  clear refusal naming the reason.
+- `get_context()` now prefers a note's *current* dated section
+  (`"## Session <date>"` from a handoff, or `"## Update (<date>)"` from
+  `brain update --append-text`) over whichever window SQLite's `snippet()`
+  happened to match, and sorts current-first. Read-time only — no storage
+  change, no migration, no history rewritten. `ContextItem` gains `updated`
+  and `snippet_from_latest_section`; `brain context` (text mode) now shows
+  `[historical/superseded]` and `(updated <date>)` inline. Found during a
+  cross-project Brain/TRON reconciliation: a plain search could surface an
+  old handoff session's text over a newer, contradicting one purely because
+  it scored better textually.
+
+### Fixed
+
+- Handoff frontmatter no longer hardcodes `source: claude-session`
+  regardless of who actually wrote it. `brain handoff write` reads an
+  optional `"source"` field from its JSON payload (default `"cli"`); the
+  MCP `write_handoff` tool defaults it to the connected client's own
+  reported name instead.
+- README: "Current release" said 0.2.0, never updated across five releases;
+  the Roadmap section claimed no MCP server existed, which has been wrong
+  since v0.1.0 (2026-09-08, the first public release) — `brain/mcp_server.py`
+  has shipped every release since.
+
 ## 0.7.0 — 2026-09-26
 
 ### Added
