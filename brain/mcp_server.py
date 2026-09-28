@@ -231,10 +231,15 @@ def tool_project_context(config: Config, id: str) -> dict:
 
 def tool_write_handoff(config: Config, project_id: str, attempted: str = "", changed: str = "",
                         working_state: str = "", unresolved: str = "", next_action: str = "",
-                        files_changed: list | None = None, decisions: list | None = None) -> dict:
+                        files_changed: list | None = None, decisions: list | None = None,
+                        source: str | None = None) -> dict:
     """Thin wrapper over handoff.write() — the exact function the CLI's
     `brain handoff write` already calls, including its existing refusal on
-    an all-blank payload. No new logic."""
+    an all-blank payload. No new logic. `source` defaults to the connected
+    MCP client's own reported name (`_CURRENT_CLIENT`, set from
+    `initialize`'s clientInfo) rather than a hardcoded value — this is the
+    one call site that previously hardcoded "claude-session" regardless of
+    which client (or human) actually wrote the handoff."""
     _scan_for_secrets(attempted, changed, working_state, unresolved, next_action,
                        *(files_changed or []), *(decisions or []))
     sections = handoff_mod.HandoffSections(
@@ -242,7 +247,7 @@ def tool_write_handoff(config: Config, project_id: str, attempted: str = "", cha
         unresolved=unresolved, next_action=next_action,
         files_changed=files_changed or [], decisions=decisions or [],
     )
-    path = handoff_mod.write(config, project_id, sections)
+    path = handoff_mod.write(config, project_id, sections, source=source or _CURRENT_CLIENT)
     return {"updated_path": str(path.relative_to(config.brain_root))}
 
 
@@ -437,6 +442,7 @@ TOOLS = {
             "next_action": {"type": "string"},
             "files_changed": {"type": "array", "items": {"type": "string"}},
             "decisions": {"type": "array", "items": {"type": "string"}},
+            "source": {"type": "string", "description": "Overrides the auto-detected connected-client name for provenance; usually left unset"},
         },
         "required": ["project_id"],
     }),

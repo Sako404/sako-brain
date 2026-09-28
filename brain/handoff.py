@@ -67,7 +67,7 @@ def _render_session(sections: HandoffSections, session_date: str) -> str:
     )
 
 
-def _frontmatter(project_id: str, entry, today: str) -> str:
+def _frontmatter(project_id: str, entry, today: str, source: str) -> str:
     return (
         "---\n"
         f"id: handoff-{project_id}\n"
@@ -79,7 +79,7 @@ def _frontmatter(project_id: str, entry, today: str) -> str:
         f"projects: [{project_id}]\n"
         f"tags: [{HANDOFF_TAG}]\n"
         "sensitivity: normal\n"
-        "source: claude-session\n"
+        f"source: {source}\n"
         f"source_date: {today}\n"
         "confidence: fact\n"
         "aliases: []\n"
@@ -91,7 +91,7 @@ PROSE_FIELDS = ("attempted", "changed", "working_state", "unresolved", "next_act
 
 
 def write(config: Config, project_id: str, sections: HandoffSections,
-          session_date: str | None = None) -> Path:
+          session_date: str | None = None, source: str = "cli") -> Path:
     # A handoff whose every prose field is blank renders as five "(not noted)"
     # headings — it looks like a written handoff and carries nothing, which is
     # worse than no handoff at all because the next session trusts it. Refuse
@@ -119,10 +119,10 @@ def write(config: Config, project_id: str, sections: HandoffSections,
             title_line, _, rest = body.lstrip("\n").partition("\n")
             new_text = fm + "\n" + title_line + "\n\n" + new_section + "\n" + rest.lstrip("\n")
         else:
-            new_text = _frontmatter(project_id, entry, today) + f"\n# Handoff — {entry.name}\n\n" + new_section + "\n" + text
+            new_text = _frontmatter(project_id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section + "\n" + text
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        new_text = _frontmatter(project_id, entry, today) + f"\n# Handoff — {entry.name}\n\n" + new_section
+        new_text = _frontmatter(project_id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section
 
     path.write_text(new_text, encoding="utf-8")
     return path

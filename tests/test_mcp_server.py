@@ -322,6 +322,30 @@ class TestMcpWriteHandoff(unittest.TestCase):
         from brain import handoff as handoff_mod
         self.assertFalse(handoff_mod.has_handoff(self.config, "project-alpha"))
 
+    def test_source_defaults_to_connected_client_not_a_hardcoded_value(self):
+        mcp_server.handle_request(self.config, {
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"clientInfo": {"name": "codex-cli"}},
+        })
+        _call(self.config, "write_handoff", {
+            "project_id": "project-alpha", "attempted": "did a thing",
+        })
+        from brain import handoff as handoff_mod
+        path = handoff_mod.handoff_path(self.config, "project-alpha")
+        self.assertIn("source: codex-cli", path.read_text())
+
+    def test_explicit_source_argument_overrides_connected_client(self):
+        mcp_server.handle_request(self.config, {
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"clientInfo": {"name": "codex-cli"}},
+        })
+        _call(self.config, "write_handoff", {
+            "project_id": "project-alpha", "attempted": "did a thing", "source": "explicit-override",
+        })
+        from brain import handoff as handoff_mod
+        path = handoff_mod.handoff_path(self.config, "project-alpha")
+        self.assertIn("source: explicit-override", path.read_text())
+
 
 class TestMcpCreateDecision(unittest.TestCase):
     def setUp(self):
