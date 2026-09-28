@@ -909,6 +909,75 @@ def _warn_if_index_stale(config: Config) -> None:
               "Results may miss recent edits — consider running 'brain index'.", file=sys.stderr)
 
 
+def _describe_parser(parser: argparse.ArgumentParser, prefix: str = "") -> list[dict]:
+    """Walk an argparse tree and list every leaf subcommand with its own
+    help text — derived from build_parser() itself, never a hand-kept
+    second list, so this can never silently drift from what the CLI
+    actually accepts. Read-vs-write is deliberately NOT predicted here:
+    that split is enforced by the server-side dispatcher per connected
+    identity (see the `brain` client wrapper's own comment on this), and
+    guessing it a third time client-side is exactly the kind of copy this
+    command exists to avoid. A command a caller isn't allowed to run still
+    gets a clear refusal naming the reason — this just answers "what
+    exists", not "what am I allowed to do."
+    """
+    entries: list[dict] = []
+    sub_action = next(
+        (a for a in parser._actions if isinstance(a, argparse._SubParsersAction)), None
+    )
+    if not sub_action:
+        return entries
+    for name, subparser in sub_action.choices.items():
+        full_name = f"{prefix}{name}"
+        nested = _describe_parser(subparser, prefix=f"{full_name} ")
+        if nested:
+            entries.extend(nested)
+        else:
+            help_text = sub_action._choices_actions
+            help_by_name = {a.dest: a.help for a in help_text}
+            entries.append({"command": full_name, "help": help_by_name.get(name) or ""})
+    return entries
+
+
+def cmd_capabilities(config: Config, args) -> int:
+    """Self-description for any client (Claude Code, Codex, a phone quick-
+    capture flow, a future TRON-side agent) so it can discover what this
+    Brain can do without prior knowledge of its deployment, version, or
+    command surface — the point being usability without knowing
+    infrastructure. Read-only, no network calls, no secrets."""
+    from . import mcp_server
+
+    payload = {
+        "brain_version": __version__,
+        "schema_version": 1,
+        "interfaces": {
+            "cli": {
+                "available": True,
+                "invocation": "brain <command> [args]",
+                "commands": _describe_parser(build_parser()),
+            },
+            "mcp": {
+                "available": True,
+                "transport": "stdio",
+                "run": "python3 -m brain.mcp_server",
+                "protocol_version": mcp_server.PROTOCOL_VERSION,
+                "tools": [
+                    {"name": name, "description": (fn.__doc__ or name).strip().splitlines()[0], "input_schema": schema}
+                    for name, (fn, schema) in mcp_server.TOOLS.items()
+                ],
+            },
+        },
+        "notes": [
+            "Write permission is enforced by the connected identity, not predicted here — "
+            "a refused command names the exact reason.",
+            "This vault may be local or reached via a transparent client-side proxy; "
+            "either way, this output describes the Brain actually being talked to.",
+        ],
+    }
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+    return 0
+
+
 def frontmatter_iter_safe(config: Config):
     from . import frontmatter as frontmatter_mod
     return frontmatter_mod.iter_markdown_files(config.brain_root, config.content_dirs)
@@ -1133,6 +1202,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="Vault overview: counts, inbox, projects")
     sub.add_parser("doctor", help="Run health checks")
+    sub.add_parser("capabilities", help="Machine-readable self-description: version, CLI commands, MCP tools — for any client to discover what this Brain can do")
 
     p_state = sub.add_parser(
         "state",
@@ -1340,6 +1410,8 @@ def _dispatch(config: Config, args, parser) -> int:
         return cmd_state(config, args)
     if args.command == "doctor":
         return cmd_doctor(config, args)
+    if args.command == "capabilities":
+        return cmd_capabilities(config, args)
     if args.command == "git":
         if args.git_command == "init":
             return cmd_git_init(config, args)
