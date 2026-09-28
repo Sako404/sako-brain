@@ -30,6 +30,9 @@ def cmd_index(config: Config, args) -> int:
 
 def cmd_search(config: Config, args) -> int:
     results = search.search(config, args.query, limit=args.limit)
+    if getattr(args, "json", False):
+        print(json.dumps({"results": [r.__dict__ for r in results]}, indent=2, ensure_ascii=False))
+        return 0
     if not results:
         print("No matches.")
         return 0
@@ -103,6 +106,9 @@ def cmd_remember(config: Config, args) -> int:
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
+    if getattr(args, "json", False):
+        print(json.dumps({"created_path": str(dest.relative_to(config.brain_root))}, indent=2, ensure_ascii=False))
+        return 0
     print(f"Captured to {dest.relative_to(config.brain_root)}")
     print("Run 'brain index' to make it searchable, and review 00_INBOX for triage.")
     return 0
@@ -231,12 +237,19 @@ def cmd_project_update(config: Config, args) -> int:
         return 2
 
     lines = []
+    status_change = None
+    updated_path = None
     if args.status:
         try:
             r = projectops.set_project_status(config, args.id, args.status)
         except projectops.ProjectWriteError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+        status_change = {
+            "old_status": r.old_status, "new_status": r.new_status,
+            "moved": r.moved, "registry_updated": r.registry_updated,
+            "updated_path": str(r.new_path.relative_to(config.brain_root)),
+        }
         lines.append(f"Status: {r.old_status} -> {r.new_status}")
         if r.moved:
             lines.append(f"Moved: {r.old_path.relative_to(config.brain_root)} "
@@ -251,11 +264,17 @@ def cmd_project_update(config: Config, args) -> int:
         except FileNotFoundError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+        updated_path = str(path.relative_to(config.brain_root))
         lines.append(f"Updated: {path.relative_to(config.brain_root)}")
 
     if not lines:
         print("Nothing to do — pass --status, --set, and/or --append-text.", file=sys.stderr)
         return 2
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "id": args.id, "status_change": status_change, "updated_path": updated_path,
+        }, indent=2, ensure_ascii=False))
+        return 0
     print("\n".join(lines))
     print("Run 'brain index' to refresh the search index.")
     return 0
@@ -346,6 +365,9 @@ def cmd_note_create(config: Config, args) -> int:
     except memoryops.MemoryWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    if getattr(args, "json", False):
+        print(json.dumps({"created_path": str(path.relative_to(config.brain_root))}, indent=2, ensure_ascii=False))
+        return 0
     print(f"Created {path.relative_to(config.brain_root)}")
     print("Run 'brain index' to make it searchable.")
     return 0
@@ -1053,6 +1075,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_search = sub.add_parser("search", help="Full-text search across the vault")
     p_search.add_argument("query")
     p_search.add_argument("--limit", type=int, default=20)
+    p_search.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_context = sub.add_parser(
         "context",
@@ -1081,6 +1104,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_remember.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
     p_remember.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
     p_remember.add_argument("--source", default="")
+    p_remember.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_update = sub.add_parser("update", help="Update fields and/or append text on an existing note by id")
     p_update.add_argument("id")
@@ -1122,6 +1146,7 @@ def build_parser() -> argparse.ArgumentParser:
                                   help="Other frontmatter field to set, repeatable (not 'status' — use --status)")
     p_project_update.add_argument("--append-text", default=None,
                                   help="Text appended as a new dated '## Update' section")
+    p_project_update.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_project_close = project_sub.add_parser(
         "close", help="Archive a project (status -> archived, moved + registry-synced)")
@@ -1199,6 +1224,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_note_create.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
     p_note_create.add_argument("--source", default="")
     p_note_create.add_argument("--source-date", default="", dest="source_date")
+    p_note_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     sub.add_parser("status", help="Vault overview: counts, inbox, projects")
     sub.add_parser("doctor", help="Run health checks")
