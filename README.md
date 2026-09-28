@@ -237,9 +237,12 @@ which key is missing. It never runs on its own.
 
 ## Roadmap
 
-Not implemented, and not promised for any date: an MCP server for agent
-integration, editor- and agent-specific rule packs, macOS verification, and
-PyPI distribution. Everything described above this section exists today.
+An MCP server (`python3 -m brain.mcp_server`, stdio transport) has shipped
+since 0.1.0 — see `brain/mcp_server.py`'s own docstring for how to point an
+MCP-capable client at it. Not implemented, and not promised for any date:
+editor- and agent-specific rule packs beyond `AGENTS.md`, macOS
+verification, and PyPI distribution. Everything else described above this
+section exists today.
 
 ## Contributing
 
