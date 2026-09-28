@@ -5,6 +5,32 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.9.0 — 2026-09-28
+
+### Added
+
+- **`python3 -m brain.mcp_bridge`** — an MCP server that reaches Brain
+  *exclusively* through the already-installed `brain` CLI executable, as a
+  subprocess. Distinct from `mcp_server.py` (which calls Brain's Python
+  business logic in-process against a locally resolved vault): this bridge
+  is for the common case where the real vault is reached only through the
+  `brain` client wrapper's own transparent proxy, and `mcp_server.py` run
+  directly would either find no vault or silently serve a stale local
+  copy. Zero new credentials, zero new server-side surface, zero direct
+  vault access, zero business logic of its own — `tools/list` is derived
+  live from `brain capabilities`, so its schema can never drift from a
+  second hand-kept copy. Coverage in this first version: search, context,
+  read, remember, note create, a controlled project-status update, and
+  session handoffs (provenance defaults to the connected client's own
+  name). Anything else returns a clear "not yet supported" error rather
+  than guessing. Local-override env vars (`BRAIN_ROOT`, `BRAIN_LOCAL`,
+  `BRAIN_STATE_DIR`, `BRAIN_VAULT`) are stripped from every subprocess
+  call it makes.
+- `--json` on `search`/`remember`/`note create`/`project update` — the
+  stable, machine-readable contract the bridge needs, matching the shape
+  each command's equivalent MCP tool already returns. Human-text output is
+  unchanged when the flag is absent.
+
 ## 0.8.0 — 2026-09-28
 
 ### Added
