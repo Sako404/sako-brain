@@ -133,6 +133,17 @@ class TestExecuteTool(unittest.TestCase):
         self.assertEqual(result["id"], "x")
         self.assertIn("body", result["content"])
 
+    def test_write_handoff_parses_the_fixed_success_line(self):
+        stdout = "Handoff written: 30_PROJECTS/ACTIVE/project-example-handoff.md\n"
+        with patch.object(mcp_bridge, "_run_brain", return_value=_completed(stdout=stdout)):
+            result = mcp_bridge._execute_tool("write_handoff", {"project_id": "project-example", "attempted": "x"})
+        self.assertEqual(result, {"updated_path": "30_PROJECTS/ACTIVE/project-example-handoff.md"})
+
+    def test_write_handoff_unexpected_output_raises_clear_error(self):
+        with patch.object(mcp_bridge, "_run_brain", return_value=_completed(stdout="something unexpected")):
+            with self.assertRaises(mcp_bridge.BridgeError):
+                mcp_bridge._execute_tool("write_handoff", {"project_id": "project-example", "attempted": "x"})
+
     def test_list_projects_parses_two_line_records(self):
         stdout = (
             "project-alpha  [active]  Alpha Project\n"

@@ -258,6 +258,16 @@ def _execute_tool(name: str, arguments: dict) -> dict:
 
     if name == "read_memory":
         return {"id": arguments["id"], "content": proc.stdout}
+    if name == "write_handoff":
+        # `brain handoff write` has no --json (nothing else needs it) —
+        # its one line of success output is a fixed, code-owned format:
+        # "Handoff written: <path>\n". Parsed here rather than adding a
+        # flag for a single caller, same discipline as list_projects below.
+        prefix = "Handoff written: "
+        line = proc.stdout.strip()
+        if not line.startswith(prefix):
+            raise BridgeError(f"unexpected output from `brain handoff write`: {line!r}")
+        return {"updated_path": line[len(prefix):]}
     if name == "list_projects":
         # `brain projects` has no --json (not needed for anything else this
         # bridge does) — parsed here rather than adding one more CLI flag

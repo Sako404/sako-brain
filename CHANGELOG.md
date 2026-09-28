@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.9.1 — 2026-09-28
+
+### Fixed
+
+- `mcp_bridge.py`'s `write_handoff` tried to JSON-parse `brain handoff
+  write`'s plain-text success line (that command has no `--json`, unlike
+  every other write command the bridge calls) and failed on every real
+  call. Found during Claude/Codex live acceptance. Parsed instead, same
+  discipline `list_projects`/`read_memory` already use for CLI output with
+  no JSON mode.
+
 ## 0.9.0 — 2026-09-28
 
 ### Added
