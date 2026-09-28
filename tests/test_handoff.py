@@ -41,6 +41,19 @@ class TestHandoff(unittest.TestCase):
         self.assertIn("src/x.py", text)
         self.assertIn("decision-example", text)
 
+    def test_default_source_is_cli_not_hardcoded_claude_session(self):
+        sections = handoff.HandoffSections(attempted="Implement feature X")
+        path = handoff.write(self.config, "project-example", sections, session_date="2026-07-01")
+        self.assertIn("source: cli", path.read_text())
+
+    def test_explicit_source_is_used_verbatim(self):
+        sections = handoff.HandoffSections(attempted="Implement feature X")
+        path = handoff.write(
+            self.config, "project-example", sections,
+            session_date="2026-07-01", source="codex",
+        )
+        self.assertIn("source: codex", path.read_text())
+
     def test_second_write_prepends_and_keeps_history(self):
         sections1 = handoff.HandoffSections(attempted="Session one work")
         handoff.write(self.config, "project-example", sections1, session_date="2026-07-01")

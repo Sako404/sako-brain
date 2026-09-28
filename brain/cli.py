@@ -860,7 +860,7 @@ def cmd_handoff_write(config: Config, args) -> int:
         decisions=payload.get("decisions", []),
     )
     try:
-        path = handoff.write(config, args.project, sections)
+        path = handoff.write(config, args.project, sections, source=payload.get("source", "cli"))
     except handoff.HandoffError as exc:
         print(f"Could not write handoff: {exc}", file=sys.stderr)
         return 1
@@ -1219,7 +1219,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_handoff = sub.add_parser("handoff", help="Project session handoff — write / show / list")
     handoff_sub = p_handoff.add_subparsers(dest="handoff_command", required=True)
-    p_handoff_write = handoff_sub.add_parser("write", help="Prepend a new session section (reads a JSON payload from stdin)")
+    p_handoff_write = handoff_sub.add_parser("write", help="Prepend a new session section (reads a JSON payload from stdin; optional \"source\" field names the writing client, default \"cli\")")
     p_handoff_write.add_argument("--project", required=True, help="Registered project id")
     p_handoff_show = handoff_sub.add_parser("show", help="Print the most recent session's handoff section")
     p_handoff_show.add_argument("project")
