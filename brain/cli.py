@@ -68,7 +68,10 @@ def cmd_context(config: Config, args) -> int:
         print("No context found.")
         return 0
     for note in payload["notes"]:
-        print(f"{note.get('id', '')}  {note.get('title', '')}")
+        marker = "" if note.get("is_current", True) else "  [historical/superseded]"
+        updated = note.get("updated") or ""
+        suffix = f"  (updated {updated})" if updated else ""
+        print(f"{note.get('id', '')}  {note.get('title', '')}{marker}{suffix}")
         if note.get("snippet"):
             print(f"    {note['snippet']}")
     for project in payload["projects"]:

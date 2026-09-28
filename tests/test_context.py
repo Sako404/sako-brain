@@ -59,6 +59,106 @@ class TestGetContext(unittest.TestCase):
         self.assertEqual(result.projects, [])
         self.assertEqual(result.timeline, [])
 
+
+class TestLatestDatedSection(unittest.TestCase):
+    """Current-vs-historical retrieval fix: a handoff or an
+    `--append-text`-corrected document holds several dated sections in one
+    file/one FTS row. A raw FTS snippet can land in an old one just because
+    it scores better textually. get_context() must prefer the section
+    whose own heading date is latest, not whichever section happens to
+    match — and must do this without changing storage or deleting
+    anything historical."""
+
+    def test_extracts_latest_of_two_handoff_sessions_regardless_of_position(self):
+        body = (
+            "## Session 2026-09-28\n\npersonal.daily_brief is implemented and deployed.\n\n"
+            "## Session 2026-09-26\n\npersonal.daily_brief is still not implemented.\n"
+        )
+        section = context._latest_dated_section(body)
+        self.assertIn("implemented and deployed", section)
+        self.assertNotIn("still not implemented", section)
+
+    def test_extracts_latest_update_appended_after_older_prose(self):
+        body = (
+            "## 2. Ready to work\n\n2.8 daily_brief NOT started.\n\n"
+            "## Update (2026-09-28)\n\ndaily_brief is implemented and deployed.\n"
+        )
+        section = context._latest_dated_section(body)
+        self.assertIn("implemented and deployed", section)
+        self.assertNotIn("NOT started", section)
+
+    def test_no_dated_sections_returns_none(self):
+        self.assertIsNone(context._latest_dated_section("Just plain prose, no session headers."))
+
+
+class TestGetContextPrefersCurrentSection(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-example\n"
+            "    name: Example Project\n"
+            "    path: /tmp/does-not-need-to-exist\n"
+            "    status: active\n"
+        )
+        # A handoff-shaped note: old session claims NOT implemented, new
+        # session (prepended, as real handoffs do) claims implemented.
+        self.vault.write_note(
+            "30_PROJECTS/ACTIVE", "project-example-handoff.md",
+            id="handoff-project-example", type="document", updated="2026-09-28",
+            title="Handoff", body=(
+                "## Session 2026-09-28\n\n"
+                "### What changed\n\ndaily_brief is implemented and deployed.\n\n"
+                "## Session 2026-09-26\n\n"
+                "### What changed\n\ndaily_brief is still not implemented.\n"
+            ),
+        )
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_snippet_comes_from_latest_session_not_oldest(self):
+        result = context.get_context(self.config, "daily_brief implemented", limit=5)
+        item = next(n for n in result.notes if n.id == "handoff-project-example")
+        self.assertIn("implemented and deployed", item.snippet)
+        self.assertNotIn("still not implemented", item.snippet)
+        self.assertTrue(item.snippet_from_latest_section)
+
+    def test_updated_field_is_populated(self):
+        result = context.get_context(self.config, "daily_brief", limit=5)
+        item = next(n for n in result.notes if n.id == "handoff-project-example")
+        self.assertEqual(item.updated, "2026-09-28")
+
+
+class TestGetContextCurrentFirstSort(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.config.registry_path.write_text("projects: []\n")
+        self.vault.write_note(
+            "40_DECISIONS", "decision-old.md", id="decision-old", type="decision",
+            status="superseded", title="Old gadget decision",
+            body="gadget approach A chosen.",
+        )
+        self.vault.write_note(
+            "40_DECISIONS", "decision-new.md", id="decision-new", type="decision",
+            status="decided", title="Old gadget decision revisited",
+            body="gadget approach A chosen.",
+        )
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_current_decision_ranks_above_superseded_one(self):
+        result = context.get_context(self.config, "gadget approach", limit=5)
+        ids = [n.id for n in result.notes]
+        self.assertIn("decision-old", ids)
+        self.assertIn("decision-new", ids)
+        self.assertLess(ids.index("decision-new"), ids.index("decision-old"))
+
     def test_to_dict_is_json_serializable(self):
         import json
         result = context.get_context(self.config, "widget", limit=5)
