@@ -201,7 +201,7 @@ class TestInstalledPackageIsTheOneBeingUsed(InstalledTestCase):
             env=self.world.env(), cwd=str(self.world.cwd),
             capture_output=True, text=True, timeout=120,
         )
-        self.assertEqual(self.assertOk(result).strip(), "0.10.1")
+        self.assertEqual(self.assertOk(result).strip(), "0.11.0")
 
 
 class TestInstalledCliRunsOutsideTheRepository(InstalledTestCase):
@@ -211,7 +211,7 @@ class TestInstalledCliRunsOutsideTheRepository(InstalledTestCase):
         self.assertIn("init", out)
 
     def test_version(self):
-        self.assertEqual(self.assertOk(self.world.run("--version")).strip(), "brain 0.10.1")
+        self.assertEqual(self.assertOk(self.world.run("--version")).strip(), "brain 0.11.0")
 
     def test_with_no_vault_it_refuses_cleanly_rather_than_failing_to_import(self):
         """An expected vault-discovery failure is a pass; an import or resource
@@ -247,6 +247,123 @@ class TestInstalledResources(InstalledTestCase):
         self.assertIn("brain/templates/AGENTS.md.template", names)
         self.assertTrue(any("licenses/LICENSE" in n for n in names),
                         "the wheel does not carry the licence")
+
+    def test_the_wheel_contains_every_shipped_skill_and_integration_doc(self):
+        """v0.11.0: a clean `pip install sako-brain` must carry everything
+        `brain integration install ...` needs — no separate download, no
+        cloning a private tooling repo."""
+        import zipfile
+
+        result = subprocess.run(
+            [str(self.world.python), "-c",
+             "from brain.integrations_cli import shipped_skill_names as s; "
+             "print('\\n'.join(s()))"],
+            env=self.world.env(), cwd=str(self.world.cwd),
+            capture_output=True, text=True, timeout=120,
+        )
+        skill_names = self.assertOk(result).strip().splitlines()
+        self.assertGreaterEqual(len(skill_names), 15)
+
+        with zipfile.ZipFile(self.world.wheel) as z:
+            names = set(z.namelist())
+        for skill in skill_names:
+            self.assertIn(f"brain/integrations/claude-code/skills/{skill}/SKILL.md", names)
+        for expected in (
+            "brain/integrations/claude-code/README.md",
+            "brain/integrations/codex/README.md",
+            "brain/integrations/codex/AGENTS_SNIPPET.md",
+            "brain/integrations/mcp/README.md",
+        ):
+            self.assertIn(expected, names, f"{expected} missing from the wheel")
+
+
+class TestInstalledClientSetupAndIntegrations(InstalledTestCase):
+    """Fresh-machine acceptance (v0.11.0, item 11): clean venv, throwaway
+    HOME, no repository on PYTHONPATH — proving the public installer needs
+    no private file copied in from anywhere. Test methods share the
+    module-level world (see InstalledWorld) and so may see files an
+    earlier method in this class already created; each assertion here
+    checks content/shape, not first-touch freshness."""
+
+    def test_setup_writes_client_config_offline(self):
+        """`brain setup` needs no network when given a local key + a
+        pre-verified known_hosts file (the --show-host-key helper mode is
+        the only part of setup that talks to a network, and is exercised
+        separately, against a real server, in production acceptance)."""
+        key = self.world.base / "fake-read-key"
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", str(key), "-N", "", "-q"], check=True)
+        known_hosts = self.world.base / "fake-known-hosts"
+        known_hosts.write_text(
+            "brain.example.invalid ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGCu4gN8nfZOve44pWp6WQD1bDVuDoOqnthxQtgZgf+S\n",
+            encoding="utf-8",
+        )
+        result = self.world.run(
+            "setup", "--server", "brain.example.invalid", "--port", "2222", "--user", "brain",
+            "--read-identity", str(key), "--known-hosts-file", str(known_hosts), "--json",
+        )
+        payload = json.loads(self.assertOk(result))
+        self.assertTrue(Path(payload["client_config"]).is_file())
+        self.assertTrue(Path(payload["ssh_config"]).is_file())
+        self.assertTrue(Path(payload["ssh_known_hosts"]).is_file())
+        ssh_config_text = Path(payload["ssh_config"]).read_text(encoding="utf-8")
+        self.assertIn("StrictHostKeyChecking yes", ssh_config_text)
+        self.assertNotIn("StrictHostKeyChecking no", ssh_config_text)
+
+    def test_integration_install_claude_code_in_clean_home(self):
+        result = self.world.run("integration", "install", "claude-code", "--json")
+        payload = json.loads(self.assertOk(result))
+        self.assertGreaterEqual(len(payload["skills_installed"]), 15)
+
+        skills_dir = self.world.home / ".claude" / "skills"
+        for name in payload["skills_installed"]:
+            link = skills_dir / name
+            self.assertTrue(link.is_symlink(), f"{link} should be a symlink")
+            target = link.resolve()
+            self.assertTrue(target.is_relative_to(self.world.venv),
+                             f"{link} -> {target} should resolve inside the installed venv, "
+                             "not any private checkout")
+
+        mcp_config = json.loads((self.world.home / ".claude.json").read_text(encoding="utf-8"))
+        self.assertIn("sako-brain", mcp_config["mcpServers"])
+        command = mcp_config["mcpServers"]["sako-brain"]["command"]
+        self.assertTrue(Path(command).is_relative_to(self.world.venv),
+                         f"registered MCP command {command} should be inside the installed venv")
+
+    def test_integration_install_codex_in_clean_home(self):
+        result = self.world.run("integration", "install", "codex", "--json")
+        self.assertOk(result)
+
+        config_toml = (self.world.home / ".codex" / "config.toml").read_text(encoding="utf-8")
+        self.assertIn("[mcp_servers.sako-brain]", config_toml)
+        agents_md = (self.world.home / ".codex" / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("SAKO Brain integration", agents_md)
+
+    def test_integration_doctor_json_runs_clean_with_no_private_assumptions(self):
+        self.world.run("integration", "install", "claude-code")
+        self.world.run("integration", "install", "codex")
+        result = self.world.run("integration", "doctor", "--json")
+        # Connectivity legitimately fails here (no real canonical Brain
+        # configured) — the contract is that it fails *cleanly*, as
+        # structured JSON, never a traceback.
+        self.assertNotIn("Traceback", result.stderr)
+        report = json.loads(result.stdout)
+        self.assertIn("checks", report)
+        dumped = json.dumps(report)
+        for private in ("sako-brain-tooling", "Nextcloud", "TrueNAS"):
+            self.assertNotIn(private, dumped, f"doctor output assumes {private!r}")
+
+    def test_no_dependency_on_a_private_tooling_checkout(self):
+        """Every path the clean install touches must resolve inside the
+        throwaway HOME or the installed venv — never a private checkout.
+        (The venv-containment assertions in the install tests above are the
+        stronger, structural version of this same property.)"""
+        self.world.run("integration", "install", "claude-code")
+        skills_dir = self.world.home / ".claude" / "skills"
+        for link in skills_dir.iterdir():
+            target = str(link.resolve())
+            self.assertNotIn("sako-brain-tooling", target)
+            self.assertTrue(target.startswith(str(self.world.venv)),
+                             f"{target} should resolve inside the installed venv")
 
 
 class TestInstalledCliOnAVault(InstalledTestCase):

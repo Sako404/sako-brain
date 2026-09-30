@@ -5,6 +5,75 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.11.0 — 2026-09-30 — PUBLIC AGENT INTEGRATIONS & CLIENT SETUP
+
+The public product can now be installed, configured, and wired into
+Claude Code and Codex end-to-end by a new user with no access to any
+private file — the last remaining pieces of day-to-day tooling that only
+existed as hand-maintained files outside any repository. Full write-up:
+canonical Brain decision `decision-2026-09-30-sako-brain-v0-11-0-public-agent-integrations-client-setup`.
+
+### Added
+
+- **`brain setup`** — configures this client to reach a remote canonical
+  Brain over SSH: generates a brain-owned, strict SSH config (`ssh -F`,
+  dedicated known_hosts, no host-key relaxation, no forwarding) plus
+  `~/.config/sako-brain/client.toml`, and transparently proxies every
+  command (other than `setup`/`integration`/`init`) over it — no external
+  wrapper script required. `--show-host-key` helps verify a new server's
+  host key out-of-band before trusting it.
+- **`brain integration install claude-code` / `... codex`** — the
+  official agent-integration installer. Symlinks 15 generic Claude Code
+  skills into `~/.claude/skills/` and registers the MCP bridge in
+  `~/.claude.json`; registers the MCP bridge in `~/.codex/config.toml`
+  and merges a generic Brain-usage section into `~/.codex/AGENTS.md`
+  between marker comments. Idempotent, merge-safe — never destroys a
+  skill, MCP entry, or config section it did not itself create.
+- **`brain integration doctor [claude-code|codex] [--json]`** — checks
+  package version, client config, SSH config, canonical Brain
+  connectivity, MCP bridge startup and advertised capabilities, skills
+  installed, and both agents' registration. Prints no secret values.
+- **`brain integration uninstall claude-code` / `... codex`** — removes
+  only what the installer added.
+- 15 generic Claude Code skills now ship inside the package itself
+  (`brain/integrations/claude-code/skills/`), generalized from a
+  previously private, per-deployment set: no assumption of a specific
+  username, host, IP, SSH key name, or infrastructure provider survived
+  the generalization — see the new skills↔CLI contract test below for
+  the regression guard.
+- A generic Codex `AGENTS.md` integration section and MCP registration
+  snippet (`brain/integrations/codex/`).
+- Skills, templates, and integration docs are packaged into both the
+  wheel and the sdist and covered by a new packaging regression test
+  (`tests/test_oss4_installed.py::TestInstalledResources::
+  test_the_wheel_contains_every_shipped_skill_and_integration_doc`) —
+  confirmed against a real built wheel, not just pyproject.toml
+  declarations.
+- **Skills↔CLI contract test** (`tests/test_skills_cli_contract.py`):
+  every `brain <command>` and `--flag` a shipped skill references is
+  checked against `cli.build_parser()` directly — authoritative, not a
+  hand-kept list or a live subprocess call — plus a generic-content guard
+  (no private host/IP/username pattern, no `BRAIN_LOCAL` fallback
+  instruction, no direct-vault-edit instruction).
+- **Fresh-machine acceptance**: a full clean-HOME, clean-venv acceptance
+  suite (`tests/test_oss4_installed.py::
+  TestInstalledClientSetupAndIntegrations`) proving `brain setup` and
+  both `brain integration install` commands work with zero dependency on
+  any specific user's home directory, `sako-brain-tooling`, or any
+  pre-existing agent config.
+
+### Changed
+
+- 834 tests passing (was 786 at v0.10.1).
+
+### Notes
+
+- Skills are versioned with the Brain release that ships them — there is
+  no separate skills repository or compatibility matrix.
+- Out of scope, deliberately untouched: `queue_memory`, People, Tasks,
+  Planner, Calendar, Hermes integration, TRON/Matrix redesign, E2EE,
+  Remote/Web MCP, a general plugin framework.
+
 ## 0.10.1 — 2026-09-30 — CORE HARDENING / FINAL CLIENT ACCEPTANCE
 
 Closes the two real gaps v0.10.0's own acceptance testing found: Codex

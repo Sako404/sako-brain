@@ -16,6 +16,7 @@ from .frontmatter import parse_file
 from . import paths as paths_mod
 from .paths import Config, default_config
 from .registry import find_project, load_registry
+from . import remote, integrations_cli
 
 
 def cmd_index(config: Config, args) -> int:
@@ -1447,6 +1448,41 @@ def build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument("--model", default=assistant.DEFAULT_MODEL)
     p_chat.add_argument("--restricted", action="store_true", help="Start with restricted-context retrieval enabled")
 
+    p_setup = sub.add_parser(
+        "setup", help=f"Configure this client to reach a canonical Brain over SSH "
+                       f"(generates ~/.config/{paths.APP_DIRNAME}/"
+                       f"{{client.toml,ssh_config,ssh_known_hosts}})")
+    p_setup.add_argument("--server", default=None, help="Canonical Brain server hostname/IP")
+    p_setup.add_argument("--port", type=int, default=None, help="SSH port (default 22)")
+    p_setup.add_argument("--user", default=None, help="SSH user on the server")
+    p_setup.add_argument("--read-identity", default=None, help="Path to the read-only SSH private key")
+    p_setup.add_argument("--write-identity", default=None,
+                          help="Path to the write-capable SSH private key (defaults to --read-identity)")
+    p_setup.add_argument("--known-hosts-file", default=None,
+                          help="A known_hosts-format file with this server's already-verified host key(s)")
+    p_setup.add_argument("--show-host-key", action="store_true",
+                          help="Scan --server for its host key(s) and print them (with fingerprints) for "
+                               "out-of-band verification; writes nothing")
+    p_setup.add_argument("--profile", default=None, help="Optional label for this client config")
+    p_setup.add_argument("--json", action="store_true", help="Emit JSON on stdout")
+
+    p_integration = sub.add_parser("integration", help="Install/verify official agent integrations (Claude Code, Codex)")
+    integration_sub = p_integration.add_subparsers(dest="integration_command", required=True)
+
+    p_int_install = integration_sub.add_parser("install", help="Install an integration")
+    p_int_install.add_argument("target", choices=["claude-code", "codex"])
+    p_int_install.add_argument("--force", action="store_true",
+                                help="Overwrite a conflicting non-Brain-managed file/symlink")
+    p_int_install.add_argument("--json", action="store_true")
+
+    p_int_uninstall = integration_sub.add_parser("uninstall", help="Remove an integration this installer added")
+    p_int_uninstall.add_argument("target", choices=["claude-code", "codex"])
+    p_int_uninstall.add_argument("--json", action="store_true")
+
+    p_int_doctor = integration_sub.add_parser("doctor", help="Check Brain + agent-integration health")
+    p_int_doctor.add_argument("target", nargs="?", choices=["claude-code", "codex"], default=None)
+    p_int_doctor.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -1474,18 +1510,47 @@ USER_FACING_ERRORS = (
     memoryops.MemoryWriteError,
     timeline.TimelineWriteError,
     writepolicy.WritePolicyError,
+    remote.RemoteConfigError,
 )
 
 
 def main(argv=None) -> int:
+    raw_argv = sys.argv[1:] if argv is None else list(argv)
+
+    # Transparent remote proxy (v0.11.0): if this client is configured for a
+    # remote canonical Brain, re-exec over SSH before argparse even runs —
+    # the remote side does its own parsing. `setup`/`integration`/`init`
+    # (remote.LOCAL_ONLY_COMMANDS) and an explicit --vault/BRAIN_ROOT always
+    # run locally. See remote.py for why this beats a separate wrapper script.
+    if remote.should_proxy(raw_argv):
+        try:
+            return remote.proxy_to_remote(raw_argv)
+        except remote.RemoteConfigError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # `init` is the one command that must run without a resolvable vault —
-    # it is what creates one.
+    # `init`, `setup`, and `integration` are the commands that must run
+    # without a resolvable vault — `init` is what creates one; `setup` and
+    # `integration` configure this client/its agent integrations and never
+    # touch vault content at all.
     if args.command == "init":
         try:
             return cmd_init(args)
+        except USER_FACING_ERRORS as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "setup":
+        try:
+            return integrations_cli.cmd_setup(args)
+        except USER_FACING_ERRORS as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "integration":
+        try:
+            return integrations_cli.cmd_integration(args)
         except USER_FACING_ERRORS as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1

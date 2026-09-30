@@ -15,7 +15,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.10.1.** Pre-1.0 means the command line and configuration
+**Current release: 0.11.0.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -82,14 +82,14 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.10.1-py3-none-any.whl
+pipx install ./sako_brain-0.11.0-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
 downloaded:
 
 ```sh
-sha256sum ./sako_brain-0.10.1-py3-none-any.whl
+sha256sum ./sako_brain-0.11.0-py3-none-any.whl
 ```
 
 Or build from source:
@@ -98,7 +98,7 @@ Or build from source:
 git clone https://github.com/Sako404/sako-brain.git
 cd sako-brain
 python -m build
-pipx install ./dist/sako_brain-0.10.1-py3-none-any.whl
+pipx install ./dist/sako_brain-0.11.0-py3-none-any.whl
 ```
 
 `pipx` puts `brain` on your PATH and keeps it isolated. A plain virtualenv
@@ -106,7 +106,7 @@ works too:
 
 ```sh
 python -m venv ~/.venvs/brain
-~/.venvs/brain/bin/pip install ./dist/sako_brain-0.10.1-py3-none-any.whl
+~/.venvs/brain/bin/pip install ./dist/sako_brain-0.11.0-py3-none-any.whl
 ```
 
 Either way, exactly one dependency is installed: PyYAML.
@@ -114,7 +114,7 @@ Either way, exactly one dependency is installed: PyYAML.
 ### Update and uninstall
 
 ```sh
-pipx install --force ./dist/sako_brain-0.10.1-py3-none-any.whl
+pipx install --force ./dist/sako_brain-0.11.0-py3-none-any.whl
 pipx uninstall sako-brain
 ```
 
@@ -222,6 +222,79 @@ none of those answers, it refuses rather than guessing.
 The directory layout, note types and status vocabularies are all configurable
 by role, so an existing notes folder can be adopted without renaming anything.
 
+## Remote canonical Brain
+
+By default, "which vault" resolves to something on this machine (see
+"Where things live" below). If your canonical Brain instead lives on a
+server you reach over SSH — a home server, a small VPS, anything running
+its own `brain` behind an SSH forced-command dispatcher — `brain setup`
+configures this client to talk to it transparently: every command (other
+than `setup`, `integration`, and `init`) then proxies over SSH instead of
+resolving a local vault, with no wrapper script to write or maintain.
+
+```sh
+# One-time: see this server's host key(s) for out-of-band verification
+brain setup --show-host-key --server brain.example.com --port 2222
+# ...verify the fingerprint against what the server admin published, save
+# the printed key lines to a file, then:
+brain setup --server brain.example.com --port 2222 --user brain \
+  --read-identity ~/.ssh/brain-read --write-identity ~/.ssh/brain-write \
+  --known-hosts-file ./verified-host-keys
+```
+
+This writes `~/.config/sako-brain/{client.toml,ssh_config,ssh_known_hosts}`
+— a brain-owned SSH config (`ssh -F`, so the system-wide SSH config is
+never consulted), strict host-key checking against the dedicated
+known_hosts file it just wrote, no agent/X11 forwarding. Read and write
+operations use separate SSH identities if you gave both; which identity
+can actually do what is enforced by the server's own dispatcher, not
+guessed client-side. No secret is ever written into the vault or this
+repository — private keys stay exactly where you point `brain setup` at.
+
+## Agent integrations
+
+Official, generic Claude Code and Codex integrations ship inside this
+package — install them with one command each:
+
+```sh
+brain integration install claude-code
+brain integration install codex
+```
+
+Claude Code gets 15 skills symlinked into `~/.claude/skills/` (covering
+the day-to-day workflow: search, remember, decisions, timeline, projects,
+handoffs, session close, and more) plus an MCP server registration in
+`~/.claude.json`. Codex gets an MCP server registration in
+`~/.codex/config.toml` plus a generic Brain-usage section merged into
+`~/.codex/AGENTS.md` between marker comments. Both commands are
+idempotent and merge-safe — re-running after an upgrade updates what they
+installed and leaves everything else (other skills, other MCP servers,
+the rest of your config files) untouched.
+
+```sh
+brain integration doctor            # both, human-readable
+brain integration doctor --json     # both, machine-readable
+brain integration doctor claude-code
+brain integration doctor codex
+brain integration uninstall claude-code
+brain integration uninstall codex
+```
+
+`doctor` checks package version, client config, SSH config, canonical
+Brain connectivity, MCP bridge startup and advertised capabilities, skills
+installed, and both agents' registration — printing no secret values.
+`uninstall` removes only what the installer added.
+
+Skills and integration instructions are versioned with the Brain release
+that ships them — there is no separate skills repository or compatibility
+matrix to track. Upgrade `sako-brain` and re-run `install` to update them.
+
+See `brain integration install claude-code --help` /
+`... codex --help`, or the packaged READMEs
+(`brain.integrations.claude-code`, `.codex`, `.mcp` — readable via
+`python -c "from importlib.resources import files; print((files('brain')/'integrations/claude-code/README.md').read_text())"`
+if you'd rather not install first) for the full detail.
+
 ## Optional features
 
 **Git.** `brain git init` starts version history in a directory outside the
@@ -249,11 +322,15 @@ at whichever one fits, in its own config.
   *exclusively* by shelling out to the already-installed `brain` CLI
   executable, one subprocess call per tool — never a direct vault or
   library call, never a second copy of Brain's business logic. Use this
-  when the real vault is reachable only through the `brain` wrapper's own
-  transport (for example a transparent proxy to a server-canonical vault),
-  so `mcp_server.py` run directly would find no vault, or silently serve a
-  stale local copy. Zero new credentials, zero new server-side surface:
-  the bridge inherits whatever `brain` itself is configured to do.
+  when the real vault is reachable only through the `brain` CLI's own
+  transport — including the transparent SSH proxy to a remote canonical
+  Brain that `brain setup` configures (see "Remote canonical Brain" above)
+  — so `mcp_server.py` run directly would find no vault, or silently serve
+  a stale local copy. Zero new credentials, zero new server-side surface:
+  the bridge inherits whatever `brain` itself is configured to do. This is
+  the server `brain integration install claude-code` / `... codex`
+  register by default, since it works identically whether Brain is local
+  or remote.
   `tools/list` reports Brain's real tool names (from `brain capabilities`,
   never a second hand-kept list) filtered to exactly the ones this bridge
   can execute — it will never advertise a tool `tools/call` would then

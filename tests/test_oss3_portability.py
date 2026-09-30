@@ -651,11 +651,14 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
         section-update` (the /project-sync named-section primitive), and by
         one more (v0.10.1) for writepolicy.WritePolicyError — shared
         secret-pattern-scan refusal, now enforced at the CLI layer too, not
-        just the in-process MCP server.
+        just the in-process MCP server — and by one more (v0.11.0) for
+        remote.RemoteConfigError — a broken/incomplete client.toml for a
+        configured remote canonical Brain.
         """
         from brain import backup, cli, decision, gitops, handoff, memoryops, projectops, timeline, writepolicy
         from brain import init as init_mod
         from brain import paths as paths_mod
+        from brain import remote
 
         self.assertEqual(
             set(cli.USER_FACING_ERRORS),
@@ -665,7 +668,7 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
              decision.DecisionError, projectops.ProjectWriteError,
              projectops.SectionEditError,
              memoryops.MemoryWriteError, timeline.TimelineWriteError,
-             writepolicy.WritePolicyError},
+             writepolicy.WritePolicyError, remote.RemoteConfigError},
         )
 
 

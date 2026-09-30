@@ -72,12 +72,28 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertEqual(attr, "brain.__version__")
 
     def test_public_version_baseline(self):
-        self.assertEqual(__version__, "0.10.1")
+        self.assertEqual(__version__, "0.11.0")
 
     def test_template_is_declared_as_package_data(self):
         """Without this the wheel ships a package whose agents-doc is broken."""
         package_data = self.data["tool"]["setuptools"]["package-data"]
         self.assertIn("templates/*.template", package_data["brain"])
+
+    def test_integration_resources_are_declared_as_package_data(self):
+        """v0.11.0: without these `brain integration install ...` would ship
+        broken on anything but an editable/source checkout. The wheel-level
+        proof (the resources are actually present, not just declared) is
+        tests/test_oss4_installed.py::TestInstalledResources::
+        test_the_wheel_contains_every_shipped_skill_and_integration_doc."""
+        package_data = self.data["tool"]["setuptools"]["package-data"]["brain"]
+        for pattern in (
+            "integrations/claude-code/README.md",
+            "integrations/claude-code/skills/*/SKILL.md",
+            "integrations/codex/README.md",
+            "integrations/codex/AGENTS_SNIPPET.md",
+            "integrations/mcp/README.md",
+        ):
+            self.assertIn(pattern, package_data)
 
     def test_licence_metadata_matches_the_recorded_decision(self):
         self.assertEqual(self.project["license"], "AGPL-3.0-or-later")
@@ -269,12 +285,13 @@ class TestPublicDocumentation(unittest.TestCase):
         self.assertTrue(self._has("not on PyPI"))
 
     def test_unimplemented_features_appear_only_as_roadmap(self):
-        # MCP is excluded from this guard as of 0.9.0/0.9.1: it is a shipped,
-        # documented feature (its own "## MCP servers" section, ahead of
-        # Roadmap), not an aspirational one — the terms below are the ones
+        # MCP is excluded from this guard as of 0.9.0/0.9.1, and Claude Code
+        # skills as of 0.11.0: both are shipped, documented features (their
+        # own "## MCP servers" / "## Agent integrations" sections, ahead of
+        # Roadmap), not aspirational ones — the terms below are the ones
         # still genuinely unimplemented.
         body, _, roadmap = self.text.partition("## Roadmap")
-        for term in ("skills", "cloud sync", "hosted service", "web UI"):
+        for term in ("cloud sync", "hosted service", "web UI"):
             self.assertNotIn(term, body,
                              f"{term!r} is mentioned before the roadmap section")
         self.assertIn("Not implemented", roadmap)
