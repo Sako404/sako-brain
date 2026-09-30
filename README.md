@@ -15,7 +15,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.11.0.** Pre-1.0 means the command line and configuration
+**Current release: 0.11.1.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -82,14 +82,14 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.11.0-py3-none-any.whl
+pipx install ./sako_brain-0.11.1-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
 downloaded:
 
 ```sh
-sha256sum ./sako_brain-0.11.0-py3-none-any.whl
+sha256sum ./sako_brain-0.11.1-py3-none-any.whl
 ```
 
 Or build from source:
@@ -98,7 +98,7 @@ Or build from source:
 git clone https://github.com/Sako404/sako-brain.git
 cd sako-brain
 python -m build
-pipx install ./dist/sako_brain-0.11.0-py3-none-any.whl
+pipx install ./dist/sako_brain-0.11.1-py3-none-any.whl
 ```
 
 `pipx` puts `brain` on your PATH and keeps it isolated. A plain virtualenv
@@ -106,7 +106,7 @@ works too:
 
 ```sh
 python -m venv ~/.venvs/brain
-~/.venvs/brain/bin/pip install ./dist/sako_brain-0.11.0-py3-none-any.whl
+~/.venvs/brain/bin/pip install ./dist/sako_brain-0.11.1-py3-none-any.whl
 ```
 
 Either way, exactly one dependency is installed: PyYAML.
@@ -114,7 +114,7 @@ Either way, exactly one dependency is installed: PyYAML.
 ### Update and uninstall
 
 ```sh
-pipx install --force ./dist/sako_brain-0.11.0-py3-none-any.whl
+pipx install --force ./dist/sako_brain-0.11.1-py3-none-any.whl
 pipx uninstall sako-brain
 ```
 
