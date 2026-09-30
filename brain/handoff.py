@@ -18,7 +18,7 @@ from datetime import date
 from pathlib import Path
 
 from .paths import Config
-from .registry import load_registry
+from .registry import find_project, load_registry
 
 HANDOFF_TAG = "handoff"
 
@@ -39,17 +39,19 @@ class HandoffSections:
 
 
 def _registry_entry(config: Config, project_id: str):
-    entries = {e.id: e for e in load_registry(config)}
-    entry = entries.get(project_id)
+    entry = find_project(config, project_id)
     if not entry:
-        raise HandoffError(f"no registered project with id '{project_id}'")
+        raise HandoffError(f"no registered project with id or alias '{project_id}'")
     return entry
 
 
 def handoff_path(config: Config, project_id: str) -> Path:
     entry = _registry_entry(config, project_id)
     folder = config.taxonomy.folder_for_status(entry.status)
-    return config.projects_dir / folder / f"{project_id}-handoff.md"
+    # Always the canonical id, even when project_id was an alias — the file
+    # on disk is named after the one real id, never after whichever alias
+    # happened to be typed.
+    return config.projects_dir / folder / f"{entry.id}-handoff.md"
 
 
 def _render_session(sections: HandoffSections, session_date: str) -> str:
@@ -104,7 +106,9 @@ def write(config: Config, project_id: str, sections: HandoffSections,
 
     entry = _registry_entry(config, project_id)
     today = session_date or date.today().isoformat()
-    path = handoff_path(config, project_id)
+    # Resolve once, then use the canonical id everywhere below — project_id
+    # itself may have been an alias.
+    path = handoff_path(config, entry.id)
 
     new_section = _render_session(sections, today)
 
@@ -119,10 +123,10 @@ def write(config: Config, project_id: str, sections: HandoffSections,
             title_line, _, rest = body.lstrip("\n").partition("\n")
             new_text = fm + "\n" + title_line + "\n\n" + new_section + "\n" + rest.lstrip("\n")
         else:
-            new_text = _frontmatter(project_id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section + "\n" + text
+            new_text = _frontmatter(entry.id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section + "\n" + text
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        new_text = _frontmatter(project_id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section
+        new_text = _frontmatter(entry.id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section
 
     path.write_text(new_text, encoding="utf-8")
     return path

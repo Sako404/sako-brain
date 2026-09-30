@@ -5,6 +5,81 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.10.0 — 2026-09-30 — CORE COMPLETE
+
+The v0.10.0 push: Claude Code and Codex can now do the full day-to-day
+Brain workflow (search/read, context/state, list/get project, project
+context, timeline read/search, remember/create/update notes, decisions,
+projects, handoffs, timeline events) entirely through the canonical
+`brain` CLI/MCP bridge — no filesystem workarounds, no "not yet
+supported". A full capability audit, ahead of implementation, is recorded
+in canonical Brain's `decision-2026-09-30-sako-brain-v0-10-0-core-complete-capability-audit`.
+
+### Added
+
+- Stable `--json` output on 8 CLI commands that previously only printed
+  human-readable text: `project show`, `project create`, `project close`,
+  `project section-update`, `decision create`, `timeline` (bare list, now
+  also takes `--query` for a substring filter) and `timeline add`, plus
+  the generic `update`. Each shape matches the equivalent MCP tool's
+  existing JSON contract exactly (verified by test and live).
+- `mcp_bridge.py` translators for 9 more tools using those new `--json`
+  contracts: `get_project`, `search_timeline`, `update_memory`,
+  `create_decision`, `create_project`, `close_project`,
+  `update_project_section`, `create_timeline_event`, and `project_context`
+  (a deliberate exception — composes `project show` + `get`, two calls,
+  rather than a 1:1 CLI mapping, and always returns `filesystem_facts:
+  null` over the bridge: the canonical server cannot see a desktop
+  project's git state, and returning stale/wrong facts would be worse
+  than being honest that this bridge can't answer that part). Bridge
+  coverage is now 17 of Brain's real MCP tools (up from 9 in 0.9.2).
+- `registry.find_project()` — the one canonical project-identifier
+  resolver (id or any declared alias), now used everywhere a project
+  identifier is accepted: `project show`/`sync`/`update`/`close`/
+  `section-update`, `handoff write`/`show`/`list`, and the equivalent MCP
+  tools. Previously only some commands checked aliases and others
+  silently required the exact registry id — the same name now works
+  everywhere, or fails everywhere with the same clear message.
+- `brain doctor`'s `missing_project_dirs` check now distinguishes a
+  genuinely missing project directory from one this process simply cannot
+  see from here: a new `Config.remote_project_paths` flag (set via
+  `BRAIN_REMOTE_PROJECT_PATHS=1`, the same deployment-signal pattern as
+  `BRAIN_ROOT`/`BRAIN_STATE_DIR`) makes the check report
+  `project_path_unverifiable` instead of the misleading `missing_project_dirs`
+  when running on a host that was never going to see desktop-local project
+  paths in the first place (the canonical server, via the restricted SSH
+  dispatcher). Neither check is blocking; this only fixes the label.
+- `brain capabilities`'s CLI command enumeration now lists a command with
+  an *optional* sub-subcommand (e.g. bare `timeline`, distinct from
+  `timeline add`) as its own entry — previously invisible from
+  self-description entirely, a real gap for any client trying to
+  discover what's callable.
+
+### Removed
+
+- `get_project_path` MCP tool (and `BrainGatewayClient.get_project_path()`).
+  A pure subset of `get_project`'s own `registry.path` field, with no real
+  caller anywhere in this codebase — deprecated rather than bridged, per
+  the audit's own "don't build parity for parity's sake" instruction.
+
+### Fixed
+
+- `mcp_bridge.py`'s own module docstring and this README's "MCP servers"
+  section, both still describing 0.9.2's partial (9-tool) coverage.
+
+### Notes
+
+- `queue_memory` remains unsupported over the bridge, deliberately: the
+  server dispatcher's security boundary doesn't allow `brain memory` at
+  all (confirmed by reading the dispatcher directly), and extending that
+  boundary "for parity" was explicitly out of this pass's scope.
+- The CLI layer (unlike `mcp_server.py`'s in-process tool wrappers) does
+  no secret-pattern scanning and no `sensitivity: restricted` confirmation
+  gate — this was already true for every previously-bridged write tool
+  (`remember`, `create_memory_note`, `update_project_status`), not
+  introduced by this pass, but is now true for every bridged write tool.
+  Flagged as a real, separate follow-up, not fixed here.
+
 ## 0.9.2 — 2026-09-30
 
 Maintenance pass: no new Brain business capabilities. Prompted by a full

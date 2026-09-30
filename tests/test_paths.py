@@ -38,6 +38,31 @@ class TestDefaultConfig(unittest.TestCase):
             config = default_config(brain_root=fake_root)
             self.assertEqual(config.brain_root, fake_root)
 
+    def test_remote_project_paths_defaults_false(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_root = Path(tmp) / "v"
+            fake_root.mkdir(parents=True)
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("BRAIN_REMOTE_PROJECT_PATHS", None)
+                config = default_config(brain_root=fake_root)
+            self.assertFalse(config.remote_project_paths)
+
+    def test_remote_project_paths_true_when_env_set(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_root = Path(tmp) / "v"
+            fake_root.mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"BRAIN_REMOTE_PROJECT_PATHS": "1"}):
+                config = default_config(brain_root=fake_root)
+            self.assertTrue(config.remote_project_paths)
+
 
 class TestEnsurePrivateFile(unittest.TestCase):
     """Phase 5B finding: log files created via plain `open(path, 'a')`

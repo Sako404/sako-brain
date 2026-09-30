@@ -227,6 +227,15 @@ class Config:
     # locate anything. `vault_name` falls back to the vault's directory name.
     configured_vault_name: str = ""
     areas: tuple[str, ...] = ()
+    # Deployment fact, not library policy — same status as BRAIN_ROOT itself:
+    # "the registered project paths in this vault's registry are on a
+    # different filesystem than the one brain doctor is currently running
+    # on." A restricted-SSH server dispatcher sets this (BRAIN_REMOTE_PROJECT_PATHS=1)
+    # because it knows every registered project path is a desktop path it
+    # can never see, no matter what; a normal desktop run leaves it unset.
+    # Read once here so validate.py never has to guess "am I the server"
+    # from a hardcoded path like "/vault".
+    remote_project_paths: bool = False
 
     def __post_init__(self):
         # frozen dataclass — the documented way to fill a derived default.
@@ -362,6 +371,7 @@ def default_config(brain_root: Path | None = None) -> Config:
         taxonomy=_taxonomy(data),
         configured_vault_name=str(data.get("vault_name") or ""),
         areas=tuple(str(a).strip() for a in (data.get("areas") or []) if str(a).strip()),
+        remote_project_paths=os.environ.get("BRAIN_REMOTE_PROJECT_PATHS") == "1",
     )
 
 

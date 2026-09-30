@@ -75,6 +75,39 @@ class TestValidate(unittest.TestCase):
         checks = {p.check for p in problems}
         self.assertIn("missing_project_dirs", checks)
 
+    def test_missing_project_dir_reported_as_unverifiable_when_remote(self):
+        """A restricted-SSH server dispatcher (config.remote_project_paths)
+        can never see desktop project paths — the same gap must be reported
+        as project_path_unverifiable, never as missing_project_dirs, so it
+        is never mistaken for actual data drift."""
+        import dataclasses
+
+        path = self.vault.root / "30_PROJECTS" / "ACTIVE" / "p.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "---\n"
+            "id: project-ghost\n"
+            "type: project\n"
+            "status: active\n"
+            "path: /nonexistent/ghost/path\n"
+            "---\n\n"
+            "# Ghost project\n"
+        )
+        remote_config = dataclasses.replace(self.config, remote_project_paths=True)
+        problems = validate.run_all(remote_config)
+        checks = {p.check for p in problems}
+        self.assertIn("project_path_unverifiable", checks)
+        self.assertNotIn("missing_project_dirs", checks)
+        unverifiable = [p for p in problems if p.check == "project_path_unverifiable"]
+        self.assertTrue(any("cannot verify from this host" in p.message for p in unverifiable))
+
+    def test_missing_project_dir_is_not_a_blocking_check_in_either_mode(self):
+        import dataclasses
+
+        from brain import gitops
+        self.assertNotIn("missing_project_dirs", gitops.BLOCKING_CHECKS)
+        self.assertNotIn("project_path_unverifiable", gitops.BLOCKING_CHECKS)
+
     def test_detects_registry_duplicate(self):
         self.config.registry_path.write_text(
             "projects:\n"

@@ -77,8 +77,11 @@ class TestToolsListAdvertisedMatchesExecutable(unittest.TestCase):
         caps = {
             "interfaces": {"mcp": {"tools": [
                 {"name": "search_memory", "description": "d", "input_schema": {}},
-                {"name": "get_project", "description": "d", "input_schema": {}},
-                {"name": "create_decision", "description": "d", "input_schema": {}},
+                # queue_memory is deliberately, permanently unsupported here —
+                # the dispatcher's security boundary doesn't allow `brain
+                # memory` at all (see decision record), not merely "not yet
+                # wired up" — so it's a stable fixture for "no translator".
+                {"name": "queue_memory", "description": "d", "input_schema": {}},
             ]}}
         }
         with patch.object(mcp_bridge, "_run_brain", return_value=_completed(stdout=json.dumps(caps))):
@@ -101,6 +104,57 @@ class TestToolsListAdvertisedMatchesExecutable(unittest.TestCase):
         advertised = {t["name"] for t in tools}
         self.assertTrue(advertised.issubset(mcp_bridge.TRANSLATORS.keys()))
         self.assertEqual(advertised, set(mcp_bridge.TRANSLATORS.keys()))
+
+
+class TestTranslatorsPreferJsonOverTextParsing(unittest.TestCase):
+    """Contract: a translator should build a `brain` invocation that emits
+    machine-readable JSON, not rely on _execute_tool parsing human-readable
+    text — the explicit v0.10.0 preference (stable --json over a new
+    parser) for every mapping added this pass. A short, named allowlist of
+    pre-existing exceptions is fine (each documented in _execute_tool's own
+    special-casing); a translator silently added without --json and
+    without joining that allowlist is the drift this test exists to catch."""
+
+    # Tools whose underlying CLI command has no --json mode (by design —
+    # `brain projects`/`brain handoff write`/`brain get` predate --json and
+    # each is parsed in _execute_tool instead, see its own comments there).
+    TEXT_PARSED_EXCEPTIONS = {"read_memory", "list_projects", "write_handoff"}
+
+    MINIMAL_ARGS = {
+        "search_memory": {"query": "x"},
+        "get_context": {"query": "x"},
+        "read_memory": {"id": "x"},
+        "list_projects": {},
+        "get_operational_state": {},
+        "remember": {"type": "fact", "title": "x"},
+        "create_memory_note": {"type": "fact", "title": "x"},
+        "update_project_status": {"id": "x", "status": "active"},
+        "write_handoff": {"project_id": "x"},
+        "get_project": {"id": "x"},
+        "search_timeline": {},
+        "update_memory": {"id": "x"},
+        "create_decision": {"title": "x"},
+        "create_project": {"id": "x", "name": "n", "path": "/tmp/x"},
+        "close_project": {"id": "x"},
+        "update_project_section": {"id": "x", "section": "s", "mode": "append", "content": "c"},
+        "create_timeline_event": {"title": "t", "valid_from": "2026-01-01"},
+    }
+
+    def test_every_non_exempt_translator_argv_includes_json(self):
+        checked = 0
+        for name, fn in mcp_bridge.TRANSLATORS.items():
+            if fn is None or name in self.TEXT_PARSED_EXCEPTIONS:
+                continue
+            self.assertIn(name, self.MINIMAL_ARGS, f"{name} has no MINIMAL_ARGS fixture — add one")
+            argv, _ = fn(self.MINIMAL_ARGS[name])
+            self.assertIn("--json", argv, f"{name}'s translator does not request --json: {argv}")
+            checked += 1
+        # Sanity: this test actually exercised something, not an empty loop.
+        self.assertGreaterEqual(checked, 13)
+
+    def test_minimal_args_fixture_covers_every_callable_translator(self):
+        callable_names = {n for n, fn in mcp_bridge.TRANSLATORS.items() if fn is not None}
+        self.assertEqual(set(self.MINIMAL_ARGS.keys()), callable_names)
 
 
 class TestTranslators(unittest.TestCase):
@@ -147,11 +201,107 @@ class TestTranslators(unittest.TestCase):
         argv, _ = mcp_bridge._t_update_project_status({"id": "project-example", "status": "on-hold"})
         self.assertEqual(argv, ["project", "update", "project-example", "--status", "on-hold", "--json"])
 
+    def test_get_project_argv(self):
+        argv, stdin = mcp_bridge._t_get_project({"id": "project-example"})
+        self.assertEqual(argv, ["project", "show", "project-example", "--json"])
+        self.assertIsNone(stdin)
+
+    def test_search_timeline_argv_with_query(self):
+        argv, _ = mcp_bridge._t_search_timeline({"query": "launch", "limit": 10})
+        self.assertEqual(argv, ["timeline", "--json", "--limit", "10", "--query", "launch"])
+
+    def test_search_timeline_argv_no_query_uses_default_limit(self):
+        argv, _ = mcp_bridge._t_search_timeline({})
+        self.assertEqual(argv, ["timeline", "--json", "--limit", "50"])
+        self.assertNotIn("--query", argv)
+
+    def test_update_memory_argv_set_fields_and_append_text(self):
+        argv, _ = mcp_bridge._t_update_memory({
+            "id": "knowledge-x", "set_fields": {"status": "current"}, "append_text": "more detail",
+        })
+        self.assertEqual(argv, ["update", "knowledge-x", "--json",
+                                 "--set", "status=current", "--append-text", "more detail"])
+
+    def test_create_decision_argv_minimal(self):
+        argv, _ = mcp_bridge._t_create_decision({"title": "Use widgets"})
+        self.assertEqual(argv, ["decision", "create", "--title", "Use widgets", "--json"])
+
+    def test_create_decision_argv_full(self):
+        argv, _ = mcp_bridge._t_create_decision({
+            "title": "Use widgets", "status": "decided", "supersedes": "decision-old",
+            "people": ["person-a"], "projects": ["project-x"], "tags": ["t1"],
+        })
+        self.assertIn("--status", argv)
+        self.assertEqual(argv[argv.index("--status") + 1], "decided")
+        self.assertIn("--supersedes", argv)
+        self.assertIn("--people", argv)
+        self.assertIn("--projects", argv)
+        self.assertIn("--tags", argv)
+
+    def test_create_project_argv(self):
+        argv, _ = mcp_bridge._t_create_project({
+            "id": "project-x", "name": "Project X", "path": "/tmp/x", "aliases": ["px"],
+        })
+        self.assertEqual(argv, ["project", "create", "--id", "project-x", "--name", "Project X",
+                                 "--path", "/tmp/x", "--json", "--aliases", "px"])
+
+    def test_close_project_argv_with_summary(self):
+        argv, _ = mcp_bridge._t_close_project({"id": "project-x", "summary": "done"})
+        self.assertEqual(argv, ["project", "close", "project-x", "--json", "--summary", "done"])
+
+    def test_update_project_section_argv(self):
+        argv, _ = mcp_bridge._t_update_project_section({
+            "id": "project-x", "section": "Next actions", "mode": "append", "content": "do the thing",
+        })
+        self.assertEqual(argv, ["project", "section-update", "project-x", "--section", "Next actions",
+                                 "--mode", "append", "--content", "do the thing", "--json"])
+
+    def test_create_timeline_event_argv(self):
+        argv, _ = mcp_bridge._t_create_timeline_event({
+            "title": "Launch day", "valid_from": "2026-10-01", "what_happened": "shipped it",
+        })
+        self.assertEqual(argv, ["timeline", "add", "--title", "Launch day", "--date", "2026-10-01",
+                                 "--json", "--what-happened", "shipped it"])
+
+
+class TestProjectContext(unittest.TestCase):
+    """project_context is not a 1:1 CLI translation — see mcp_bridge.py's
+    _execute_project_context docstring. It composes two `brain` calls and
+    always returns filesystem_facts: None over the bridge (the server
+    cannot see a desktop project's git state)."""
+
+    def test_composes_project_show_and_get(self):
+        show_payload = json.dumps({"registry": {"id": "project-x", "path": "/tmp/x"}, "path_exists": True})
+        note_text = "---\nid: project-x\n---\nbody"
+        calls = []
+
+        def fake_run_brain(argv, stdin_data=None):
+            calls.append(argv)
+            if argv[:2] == ["project", "show"]:
+                return _completed(stdout=show_payload)
+            if argv[0] == "get":
+                return _completed(stdout=note_text)
+            raise AssertionError(f"unexpected argv {argv}")
+
+        with patch.object(mcp_bridge, "_run_brain", side_effect=fake_run_brain):
+            result = mcp_bridge._execute_tool("project_context", {"id": "project-x"})
+
+        self.assertEqual(result["registry"], {"id": "project-x", "path": "/tmp/x"})
+        self.assertEqual(result["record"], note_text)
+        self.assertIsNone(result["filesystem_facts"])
+        self.assertEqual(calls, [["project", "show", "project-x", "--json"], ["get", "project-x"]])
+
+    def test_project_show_failure_raises_bridge_error(self):
+        with patch.object(mcp_bridge, "_run_brain",
+                           return_value=_completed(stderr="no such project", returncode=1)):
+            with self.assertRaises(mcp_bridge.BridgeError):
+                mcp_bridge._execute_tool("project_context", {"id": "project-x"})
+
 
 class TestExecuteTool(unittest.TestCase):
     def test_unsupported_tool_raises_clear_error(self):
         with self.assertRaises(mcp_bridge.BridgeError) as ctx:
-            mcp_bridge._execute_tool("create_decision", {})
+            mcp_bridge._execute_tool("queue_memory", {})
         self.assertIn("not yet supported", str(ctx.exception))
 
     def test_nonzero_exit_raises_with_stderr(self):

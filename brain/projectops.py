@@ -26,7 +26,7 @@ import yaml
 
 from . import frontmatter
 from .paths import Config
-from .registry import load_registry
+from .registry import find_project, load_registry
 from .update import find_note_path
 
 _ENTRY_RE = re.compile(r"^  - id: (\S+)\s*$")
@@ -184,6 +184,14 @@ def set_project_status(config: Config, project_id: str, new_status: str) -> Stat
     if allowed and new_status not in allowed:
         raise ProjectWriteError(f"status must be one of {allowed}")
 
+    # Resolve once, up front — project_id may be an alias; everything below
+    # (file lookup, registry update, the result's own id) must use the one
+    # canonical id, never the alias, or the two would silently diverge.
+    entry = find_project(config, project_id)
+    if entry is None:
+        raise ProjectWriteError(f"no project record with id or alias '{project_id}'")
+    project_id = entry.id
+
     old_path = find_note_path(config, project_id)
     if old_path is None:
         raise ProjectWriteError(f"no project record with id '{project_id}'")
@@ -227,7 +235,9 @@ def close_project(config: Config, project_id: str, summary: str = "") -> StatusC
     result = set_project_status(config, project_id, "archived")
     if summary:
         from . import update as update_mod
-        update_mod.update_memory(config, project_id, append_text=summary)
+        # result.id is always the canonical id, even when project_id (the
+        # caller's argument) was an alias.
+        update_mod.update_memory(config, result.id, append_text=summary)
     return result
 
 
@@ -282,9 +292,15 @@ def update_section(config: Config, project_id: str, section: str, mode: str, con
     if mode not in ("replace", "append"):
         raise SectionEditError("mode must be 'replace' or 'append'")
 
+    # project_id may be an alias — resolve to the canonical id before any
+    # file lookup, same discipline as set_project_status.
+    entry = find_project(config, project_id)
+    if entry is not None:
+        project_id = entry.id
+
     path = find_note_path(config, project_id)
     if path is None:
-        raise SectionEditError(f"no project record with id '{project_id}'")
+        raise SectionEditError(f"no project record with id or alias '{project_id}'")
     note = frontmatter.parse_file(path)
     if note.type != "project":
         raise SectionEditError(f"'{project_id}' is not a project record (type={note.type!r})")

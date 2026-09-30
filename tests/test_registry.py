@@ -2,7 +2,7 @@ import dataclasses
 import json
 import unittest
 
-from brain.registry import ProjectEntry, find_duplicates, load_registry
+from brain.registry import ProjectEntry, find_duplicates, find_project, load_registry
 from tests.helpers import TempVault
 
 
@@ -73,6 +73,62 @@ class TestRegistry(unittest.TestCase):
             ProjectEntry(id="project-b", name="B", path="/tmp/b", status="planned"),
         ]
         self.assertEqual(find_duplicates(entries), [])
+
+
+class TestFindProject(unittest.TestCase):
+    """The one canonical project-identifier resolver every project/handoff
+    operation should use — a name that works in one command must work in
+    every other one that takes a project identifier."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-sako-brain\n"
+            "    name: Sako Brain\n"
+            "    path: /tmp/sako-brain\n"
+            "    status: active\n"
+            "    aliases: [sako-brain, brain, personal-ai]\n"
+            "  - id: project-other\n"
+            "    name: Other\n"
+            "    path: /tmp/other\n"
+            "    status: active\n"
+            "    aliases: [brain-other]\n"
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_resolves_by_canonical_id(self):
+        e = find_project(self.config, "project-sako-brain")
+        self.assertIsNotNone(e)
+        self.assertEqual(e.id, "project-sako-brain")
+
+    def test_resolves_by_alias(self):
+        e = find_project(self.config, "sako-brain")
+        self.assertIsNotNone(e)
+        self.assertEqual(e.id, "project-sako-brain")
+
+    def test_resolves_by_second_alias(self):
+        e = find_project(self.config, "personal-ai")
+        self.assertEqual(e.id, "project-sako-brain")
+
+    def test_unknown_identifier_returns_none(self):
+        self.assertIsNone(find_project(self.config, "project-does-not-exist"))
+
+    def test_id_match_wins_over_a_different_entrys_alias(self):
+        # "project-other" is a real id; it must resolve to itself even
+        # though nothing else aliases it — sanity check that id-priority
+        # logic doesn't accidentally short-circuit on the wrong entry.
+        e = find_project(self.config, "project-other")
+        self.assertEqual(e.id, "project-other")
+
+    def test_alias_match_is_case_sensitive(self):
+        # Exact-match only, same discipline as id matching — a fuzzy or
+        # case-insensitive match would make behavior depend on what else
+        # is registered, not on what the caller actually typed.
+        self.assertIsNone(find_project(self.config, "Sako-Brain"))
 
 
 if __name__ == "__main__":

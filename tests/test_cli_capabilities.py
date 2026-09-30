@@ -53,6 +53,19 @@ class TestCapabilitiesCommand(unittest.TestCase):
         # Group parsers themselves (e.g. bare "project") are never leaves.
         self.assertNotIn("project", names)
 
+    def test_optional_subparser_group_lists_its_own_bare_command_too(self):
+        # `timeline` has an OPTIONAL sub-subcommand (`add`) -- bare
+        # `brain timeline` (list/search) is a real, separately invocable
+        # leaf in its own right, not just a stepping stone to `timeline
+        # add`. Regression guard: this used to be silently missing from
+        # capabilities entirely (the walker only ever emitted actual
+        # argparse subparser choices, and "no subcommand given" isn't one),
+        # which meant no self-description client could discover it exists.
+        _, out = run_cli(["capabilities"], self.vault)
+        names = {c["command"] for c in json.loads(out)["interfaces"]["cli"]["commands"]}
+        self.assertIn("timeline", names)
+        self.assertIn("timeline add", names)
+
     def test_every_cli_command_has_help_text(self):
         _, out = run_cli(["capabilities"], self.vault)
         commands = json.loads(out)["interfaces"]["cli"]["commands"]
