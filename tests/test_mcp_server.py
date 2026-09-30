@@ -39,7 +39,7 @@ class TestMcpToolsList(unittest.TestCase):
         resp = mcp_server.handle_request(self.config, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         names = {t["name"] for t in resp["result"]["tools"]}
         for expected in ("search_memory", "read_memory", "list_projects", "get_project",
-                          "get_project_path", "search_timeline"):
+                          "search_timeline"):
             self.assertIn(expected, names)
 
 

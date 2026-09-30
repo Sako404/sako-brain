@@ -26,18 +26,32 @@ every tool's *existence and schema* comes from `brain capabilities` (the
 same TOOLS dict `mcp_server.py` itself serves) — never a second, hand-kept
 list that could drift from what `brain` actually does.
 
-Coverage is intentionally partial in this first version: exactly the tools
-needed for Claude/Codex live acceptance (search, context, read, remember,
-note create, a controlled project-status update, session handoffs) plus the
-operational-state snapshot. Invariant: `tools/list` must never advertise a
-tool `tools/call` cannot actually execute — so it reports Brain's real tool
-set (from `brain capabilities`, never a second hand-kept list) filtered down
-to exactly the names this bridge has a translator for (see TRANSLATORS
-below); a name `brain capabilities` adds tomorrow is invisible here until a
-translator exists for it, rather than being advertised and then failing.
-`tools/call` on an untranslated name (reachable only by a client that cached
-an older, unfiltered tools/list) returns a clear, honest error rather than
-guessing — it never silently does the wrong thing.
+As of v0.10.0, coverage is the full v0.10.0 "CORE COMPLETE" set: every read
+and write a normal Claude/Codex session needs day to day (search, context,
+state, list/get project, project context, timeline read/search, remember/
+note/update, decisions, projects — create/update-status/close/section-
+update, handoffs, timeline events). Two tools are deliberately NOT here,
+neither is a gap:
+- `queue_memory` — the server dispatcher's own security boundary doesn't
+  allow `brain memory` at all (see the v0.10.0 capability audit's decision
+  record); extending that boundary "for parity" was explicitly out of
+  scope, not an oversight.
+- `get_project_path` no longer exists as an MCP tool at all (removed from
+  `mcp_server.TOOLS` the same pass) — it was a pure subset of `get_project`
+  (registry.path), never used by any real caller, so it was deprecated
+  rather than bridged.
+`project_context` is the one tool NOT a 1:1 CLI translation — see
+`_execute_project_context`'s own docstring for why (the server can't see a
+desktop project's git state, so filesystem_facts is always null here).
+Invariant: `tools/list` must never advertise a tool `tools/call` cannot
+actually execute — so it reports Brain's real tool set (from `brain
+capabilities`, never a second hand-kept list) filtered down to exactly the
+names this bridge has a translator for (see TRANSLATORS below); a name
+`brain capabilities` adds tomorrow is invisible here until a translator
+exists for it, rather than being advertised and then failing. `tools/call`
+on an untranslated name (reachable only by a client that cached an older,
+unfiltered tools/list) returns a clear, honest error rather than guessing —
+it never silently does the wrong thing.
 
 Run with: python3 -m brain.mcp_bridge
 Never expose this over a network socket — stdio only, local use only.
@@ -239,6 +253,86 @@ def _t_write_handoff(a: dict):
     return ["handoff", "write", "--project", a["project_id"]], json.dumps(payload)
 
 
+def _t_get_project(a: dict):
+    return ["project", "show", a["id"], "--json"], None
+
+
+def _t_search_timeline(a: dict):
+    argv = ["timeline", "--json", "--limit", str(a.get("limit", 50))]
+    if a.get("query"):
+        argv += ["--query", a["query"]]
+    return argv, None
+
+
+def _set_flags(a: dict, key: str = "set_fields") -> list[str]:
+    fields = a.get(key) or {}
+    out = []
+    for k, v in fields.items():
+        out += ["--set", f"{k}={v}"]
+    return out
+
+
+def _t_update_memory(a: dict):
+    argv = ["update", a["id"], "--json"]
+    argv += _set_flags(a)
+    if a.get("append_text"):
+        argv += ["--append-text", a["append_text"]]
+    return argv, None
+
+
+def _t_create_decision(a: dict):
+    argv = ["decision", "create", "--title", a["title"], "--json"]
+    for key, flag in (
+        ("context", "--context"), ("options", "--options"), ("decision", "--decision"),
+        ("reasoning", "--reasoning"), ("consequences", "--consequences"),
+        ("status", "--status"), ("sensitivity", "--sensitivity"), ("source", "--source"),
+        ("supersedes", "--supersedes"),
+    ):
+        if a.get(key):
+            argv += [flag, a[key]]
+    argv += _list_flags(a, "people") + _list_flags(a, "projects") + _list_flags(a, "tags")
+    return argv, None
+
+
+def _t_create_project(a: dict):
+    argv = ["project", "create", "--id", a["id"], "--name", a["name"], "--path", a["path"], "--json"]
+    if a.get("status"):
+        argv += ["--status", a["status"]]
+    if a.get("category"):
+        argv += ["--category", a["category"]]
+    argv += _list_flags(a, "aliases")
+    return argv, None
+
+
+def _t_close_project(a: dict):
+    argv = ["project", "close", a["id"], "--json"]
+    if a.get("summary"):
+        argv += ["--summary", a["summary"]]
+    return argv, None
+
+
+def _t_update_project_section(a: dict):
+    argv = ["project", "section-update", a["id"], "--section", a["section"],
+            "--mode", a["mode"], "--content", a["content"], "--json"]
+    if a.get("if_match"):
+        argv += ["--if-match", a["if_match"]]
+    return argv, None
+
+
+def _t_create_timeline_event(a: dict):
+    argv = ["timeline", "add", "--title", a["title"], "--date", a["valid_from"], "--json"]
+    if a.get("what_happened"):
+        argv += ["--what-happened", a["what_happened"]]
+    if a.get("why_it_matters"):
+        argv += ["--why-it-matters", a["why_it_matters"]]
+    if a.get("sensitivity"):
+        argv += ["--sensitivity", a["sensitivity"]]
+    if a.get("source"):
+        argv += ["--source", a["source"]]
+    argv += _list_flags(a, "people") + _list_flags(a, "projects") + _list_flags(a, "tags")
+    return argv, None
+
+
 TRANSLATORS = {
     "search_memory": _t_search_memory,
     "get_context": _t_get_context,
@@ -249,7 +343,51 @@ TRANSLATORS = {
     "create_memory_note": _t_create_memory_note,
     "update_project_status": _t_update_project_status,
     "write_handoff": _t_write_handoff,
+    "get_project": _t_get_project,
+    "search_timeline": _t_search_timeline,
+    "update_memory": _t_update_memory,
+    "create_decision": _t_create_decision,
+    "create_project": _t_create_project,
+    "close_project": _t_close_project,
+    "update_project_section": _t_update_project_section,
+    "create_timeline_event": _t_create_timeline_event,
+    # project_context is deliberately NOT a 1:1 CLI translation — see
+    # _execute_project_context below and its own docstring for why.
+    "project_context": None,
 }
+
+
+def _execute_project_context(arguments: dict) -> dict:
+    """project_context over the bridge is NOT the same operation as
+    mcp_server.py's in-process version. That version's `filesystem_facts`
+    (git log/status et al, via projectsync.gather) inspects the project's
+    *working directory on disk* — meaningful when brain runs in-process on
+    the same machine as the project, meaningless (and unreachable) when
+    brain runs on the canonical server: the server has no visibility into
+    a desktop project's git state at all. Rather than guess or silently
+    return stale/wrong facts, the bridge composes the two calls that ARE
+    meaningful server-side (the registry entry, and the note body) and
+    returns filesystem_facts: null, explicit about why. A caller that
+    wants git/filesystem state for a project it already has checked out
+    locally can just run git itself — it's already on that machine."""
+    project_id = arguments["id"]
+    proc = _run_brain(["project", "show", project_id, "--json"])
+    if proc.returncode != 0:
+        raise BridgeError((proc.stderr or proc.stdout or f"brain exited {proc.returncode}").strip())
+    try:
+        show_result = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise BridgeError(f"brain produced non-JSON output for 'project show': {exc}") from exc
+
+    proc2 = _run_brain(["get", project_id])
+    if proc2.returncode != 0:
+        raise BridgeError((proc2.stderr or proc2.stdout or f"brain exited {proc2.returncode}").strip())
+
+    return {
+        "registry": show_result.get("registry"),
+        "record": proc2.stdout,
+        "filesystem_facts": None,
+    }
 
 
 def _execute_tool(name: str, arguments: dict) -> dict:
@@ -259,6 +397,8 @@ def _execute_tool(name: str, arguments: dict) -> dict:
             "transport) — it exists (see tools/list) but has no CLI translation here "
             "yet. Use the in-process mcp_server.py, or `brain` directly, for now."
         )
+    if name == "project_context":
+        return _execute_project_context(arguments)
     argv, stdin_data = TRANSLATORS[name](arguments)
     proc = _run_brain(argv, stdin_data=stdin_data)
     if proc.returncode != 0:

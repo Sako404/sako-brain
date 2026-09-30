@@ -177,9 +177,6 @@ class BrainGatewayClient:
     def get_project(self, project_id: str) -> dict:
         return self._call_tool("get_project", id=project_id)
 
-    def get_project_path(self, project_id: str) -> str:
-        return self._call_tool("get_project_path", id=project_id).get("path", "")
-
     def get_project_context(self, project_id: str) -> dict:
         return self._call_tool("project_context", id=project_id)
 

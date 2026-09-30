@@ -49,6 +49,26 @@ def load_registry(config: Config) -> list[ProjectEntry]:
     return entries
 
 
+def find_project(config: Config, id_or_alias: str) -> ProjectEntry | None:
+    """Resolve a project registry entry by its canonical id OR any of its
+    declared aliases — the one resolver every project/handoff operation
+    should use, so a name that works in one command works in every other
+    one that takes a project identifier. Exact-match only (case-sensitive,
+    same discipline as id matching everywhere else in this vault) — never
+    a fuzzy/substring match, which would make command behavior depend on
+    what else happens to be registered. Canonical id takes priority: if
+    id_or_alias equals one entry's id, that wins even if it also happens
+    to be a different entry's alias — a real id is a stronger claim."""
+    entries = load_registry(config)
+    for e in entries:
+        if e.id == id_or_alias:
+            return e
+    for e in entries:
+        if id_or_alias in (e.aliases or []):
+            return e
+    return None
+
+
 def find_duplicates(entries: list[ProjectEntry]) -> list[str]:
     problems = []
     seen_ids: dict[str, int] = {}

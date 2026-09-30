@@ -44,7 +44,7 @@ from . import validate as validate_mod
 from . import paths as paths_mod
 from . import __version__
 from .paths import Config, default_config
-from .registry import load_registry
+from .registry import find_project, load_registry
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = paths_mod.APP_DIRNAME
@@ -192,10 +192,9 @@ def tool_list_projects(config: Config) -> dict:
 
 
 def tool_get_project(config: Config, id: str) -> dict:
-    entries = {e.id: e for e in load_registry(config)}
-    e = entries.get(id)
+    e = find_project(config, id)
     if not e:
-        raise KeyError(f"no registered project with id '{id}'")
+        raise KeyError(f"no registered project with id or alias '{id}'")
     return {"registry": e.__dict__, "path_exists": Path(e.path).exists()}
 
 
@@ -207,23 +206,14 @@ def tool_search_timeline(config: Config, query: str = "", limit: int = 50) -> di
     return {"entries": [e.__dict__ for e in entries[:limit]]}
 
 
-def tool_get_project_path(config: Config, id: str) -> dict:
-    entries = {e.id: e for e in load_registry(config)}
-    e = entries.get(id)
-    if not e:
-        raise KeyError(f"no registered project with id '{id}'")
-    return {"path": e.path}
-
-
 def tool_project_context(config: Config, id: str) -> dict:
-    entries = {e.id: e for e in load_registry(config)}
-    e = entries.get(id)
+    e = find_project(config, id)
     if not e:
-        raise KeyError(f"no registered project with id '{id}'")
+        raise KeyError(f"no registered project with id or alias '{id}'")
     facts = projectsync.gather(e.path)
     record_text = ""
     try:
-        record_text = _read_note_text(config, id)
+        record_text = _read_note_text(config, e.id)
     except FileNotFoundError:
         pass
     return {"registry": e.__dict__, "record": record_text, "filesystem_facts": facts.__dict__}
@@ -426,9 +416,6 @@ TOOLS = {
     }),
     "search_timeline": (tool_search_timeline, {
         "type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
-    }),
-    "get_project_path": (tool_get_project_path, {
-        "type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"],
     }),
     "project_context": (tool_project_context, {
         "type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"],

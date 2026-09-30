@@ -15,7 +15,7 @@ from .gateway_client import BrainGatewayError
 from .frontmatter import parse_file
 from . import paths as paths_mod
 from .paths import Config, default_config
-from .registry import load_registry
+from .registry import find_project, load_registry
 
 
 def cmd_index(config: Config, args) -> int:
@@ -141,6 +141,10 @@ def cmd_update(config: Config, args) -> int:
     except FileNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    if getattr(args, "json", False):
+        print(json.dumps({"updated_path": str(path.relative_to(config.brain_root))},
+                          indent=2, ensure_ascii=False))
+        return 0
     print(f"Updated {path.relative_to(config.brain_root)}")
     print("Run 'brain index' to refresh the search index.")
     return 0
@@ -158,15 +162,22 @@ def cmd_projects(config: Config, args) -> int:
     return 0
 
 
-def cmd_project_show(config: Config, project_id: str) -> int:
-    entries = {e.id: e for e in load_registry(config)}
-    e = entries.get(project_id)
+def cmd_project_show(config: Config, project_id: str, as_json: bool = False) -> int:
+    e = find_project(config, project_id)
     if not e:
-        print(f"No registered project with id '{project_id}'.", file=sys.stderr)
+        if as_json:
+            print(json.dumps({"error": f"no registered project with id or alias '{project_id}'"}), file=sys.stderr)
+        else:
+            print(f"No registered project with id or alias '{project_id}'.", file=sys.stderr)
         return 1
-    print(f"id: {e.id}\nname: {e.name}\nstatus: {e.status}\npath: {e.path}\ncategory: {e.category}")
     p = Path(e.path)
-    print(f"path exists: {p.exists()}")
+    path_exists = p.exists()
+    if as_json:
+        print(json.dumps({"registry": e.__dict__, "path_exists": path_exists},
+                          indent=2, ensure_ascii=False, default=str))
+        return 0
+    print(f"id: {e.id}\nname: {e.name}\nstatus: {e.status}\npath: {e.path}\ncategory: {e.category}")
+    print(f"path exists: {path_exists}")
     return 0
 
 
@@ -196,10 +207,9 @@ def cmd_project_discover(config: Config, args) -> int:
 
 
 def cmd_project_sync(config: Config, project_id: str) -> int:
-    entries = {e.id: e for e in load_registry(config)}
-    e = entries.get(project_id)
+    e = find_project(config, project_id)
     if not e:
-        print(f"No registered project with id '{project_id}'.", file=sys.stderr)
+        print(f"No registered project with id or alias '{project_id}'.", file=sys.stderr)
         return 1
     facts = projectsync.gather(e.path)
     print(json.dumps(facts.__dict__, indent=2))
@@ -215,6 +225,10 @@ def cmd_project_create(config: Config, args) -> int:
     except projectops.ProjectWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    if getattr(args, "json", False):
+        print(json.dumps({"created_path": str(dest.relative_to(config.brain_root))},
+                          indent=2, ensure_ascii=False))
+        return 0
     print(f"Registry entry added: {args.id}")
     print(f"Created {dest.relative_to(config.brain_root)}")
     print("Run 'brain index' to make it searchable.")
@@ -235,6 +249,13 @@ def cmd_project_update(config: Config, args) -> int:
               "status folder, and the registry entry in sync — --set status="
               "... would only touch frontmatter).", file=sys.stderr)
         return 2
+
+    # Resolve once — args.id may be an alias; set_project_status resolves
+    # internally, but update_mod.update_memory below does an exact id match,
+    # so both branches must act on the same canonical id.
+    entry = find_project(config, args.id)
+    if entry is not None:
+        args.id = entry.id
 
     lines = []
     status_change = None
@@ -286,6 +307,13 @@ def cmd_project_close(config: Config, args) -> int:
     except projectops.ProjectWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "id": r.id, "old_status": r.old_status, "new_status": r.new_status,
+            "moved": r.moved, "registry_updated": r.registry_updated,
+            "updated_path": str(r.new_path.relative_to(config.brain_root)),
+        }, indent=2, ensure_ascii=False))
+        return 0
     print(f"Closed {args.id}: {r.old_status} -> {r.new_status}")
     if r.moved:
         print(f"Moved to {r.new_path.relative_to(config.brain_root)}")
@@ -302,6 +330,10 @@ def cmd_project_section_update(config: Config, args) -> int:
     except projectops.SectionEditError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    if getattr(args, "json", False):
+        print(json.dumps({"updated_path": str(path.relative_to(config.brain_root))},
+                          indent=2, ensure_ascii=False))
+        return 0
     print(f"Updated section '{args.section}' in {path.relative_to(config.brain_root)}")
     print("Run 'brain index' to make it searchable.")
     return 0
@@ -320,6 +352,10 @@ def cmd_decision_create(config: Config, args) -> int:
     except decision_mod.DecisionError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    if getattr(args, "json", False):
+        print(json.dumps({"created_path": str(dest.relative_to(config.brain_root))},
+                          indent=2, ensure_ascii=False))
+        return 0
     print(f"Created {dest.relative_to(config.brain_root)}")
     if args.supersedes:
         print(f"Marked {args.supersedes} as superseded, linked forward.")
@@ -329,10 +365,19 @@ def cmd_decision_create(config: Config, args) -> int:
 
 def cmd_timeline(config: Config, args) -> int:
     entries = timeline.list_timeline(config)
+    query = getattr(args, "query", None)
+    if query:
+        q = query.lower()
+        entries = [e for e in entries if q in e.title.lower() or q in e.id.lower()]
+    entries = entries[: args.limit]
+    if getattr(args, "json", False):
+        print(json.dumps({"entries": [e.__dict__ for e in entries]},
+                          indent=2, ensure_ascii=False, default=str))
+        return 0
     if not entries:
         print("No timeline entries yet.")
         return 0
-    for entry in entries[: args.limit]:
+    for entry in entries:
         print(f"{entry.date}  {entry.id}  {entry.title}")
     return 0
 
@@ -348,6 +393,10 @@ def cmd_timeline_add(config: Config, args) -> int:
     except timeline.TimelineWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    if getattr(args, "json", False):
+        print(json.dumps({"created_path": str(path.relative_to(config.brain_root))},
+                          indent=2, ensure_ascii=False))
+        return 0
     print(f"Created {path.relative_to(config.brain_root)}")
     print("Run 'brain index' to make it searchable.")
     return 0
@@ -931,7 +980,7 @@ def _warn_if_index_stale(config: Config) -> None:
               "Results may miss recent edits — consider running 'brain index'.", file=sys.stderr)
 
 
-def _describe_parser(parser: argparse.ArgumentParser, prefix: str = "") -> list[dict]:
+def _describe_parser(parser: argparse.ArgumentParser, prefix: str = "", own_help: str = "") -> list[dict]:
     """Walk an argparse tree and list every leaf subcommand with its own
     help text — derived from build_parser() itself, never a hand-kept
     second list, so this can never silently drift from what the CLI
@@ -949,15 +998,24 @@ def _describe_parser(parser: argparse.ArgumentParser, prefix: str = "") -> list[
     )
     if not sub_action:
         return entries
+    # An optional subparsers group (required=False, e.g. `timeline`: bare
+    # `brain timeline` lists, `brain timeline add` writes) means the parent
+    # command itself, with no further subcommand, is ALSO a real, separately
+    # invocable leaf — list it explicitly (using the help text the PARENT
+    # gave this command when it added it, passed down as `own_help`), or a
+    # client relying on this self-description would never learn it exists.
+    if not sub_action.required and prefix:
+        entries.append({"command": prefix.strip(), "help": own_help})
+    help_text = sub_action._choices_actions
+    help_by_name = {a.dest: a.help for a in help_text}
     for name, subparser in sub_action.choices.items():
         full_name = f"{prefix}{name}"
-        nested = _describe_parser(subparser, prefix=f"{full_name} ")
+        child_help = help_by_name.get(name) or ""
+        nested = _describe_parser(subparser, prefix=f"{full_name} ", own_help=child_help)
         if nested:
             entries.extend(nested)
         else:
-            help_text = sub_action._choices_actions
-            help_by_name = {a.dest: a.help for a in help_text}
-            entries.append({"command": full_name, "help": help_by_name.get(name) or ""})
+            entries.append({"command": full_name, "help": child_help})
     return entries
 
 
@@ -1111,6 +1169,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE",
                           help="Frontmatter field to set, repeatable (id/created are never mutated)")
     p_update.add_argument("--append-text", default=None, help="Text appended as a new dated '## Update' section")
+    p_update.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     sub.add_parser("projects", help="List registered projects")
 
@@ -1119,6 +1178,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_project_show = project_sub.add_parser("show", help="Show one registered project")
     p_project_show.add_argument("id")
+    p_project_show.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     project_sub.add_parser("discover", help="Propose unregistered candidates under the configured projects root(s)")
 
@@ -1135,6 +1195,7 @@ def build_parser() -> argparse.ArgumentParser:
                                        f"{', '.join(paths_mod.DEFAULT_STATUS_BY_TYPE['project'])})")
     p_project_create.add_argument("--category", default=None)
     p_project_create.add_argument("--aliases", nargs="*", default=[])
+    p_project_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_project_update = project_sub.add_parser(
         "update", help="Change status (moves + registry-syncs) and/or set fields / append text")
@@ -1153,6 +1214,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_close.add_argument("id")
     p_project_close.add_argument("--summary", default=None,
                                  help="Closing summary appended to the record (not invented — pass your own text)")
+    p_project_close.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_project_section = project_sub.add_parser(
         "section-update",
@@ -1165,6 +1227,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_section.add_argument("--if-match", default=None, dest="if_match",
                                    help="sha256 of the section's content as last read — optimistic-concurrency "
                                         "guard, refuses the write if the section changed since. Optional.")
+    p_project_section.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_decision = sub.add_parser("decision", help="Create a decision record — create / (supersede via --supersedes)")
     decision_sub = p_decision.add_subparsers(dest="decision_command", required=True)
@@ -1187,9 +1250,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_decision_create.add_argument("--supersedes", default=None,
                                    help="id of an older decision this replaces — marks it "
                                         "'superseded' and links forward, never edits its content")
+    p_decision_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_timeline = sub.add_parser("timeline", help="List timeline entries, newest first (or 'add' one)")
     p_timeline.add_argument("--limit", type=int, default=50)
+    p_timeline.add_argument("--query", default=None,
+                            help="Case-insensitive substring filter over title/id")
+    p_timeline.add_argument("--json", action="store_true", help="Emit JSON on stdout")
     timeline_sub = p_timeline.add_subparsers(dest="timeline_command", required=False)
     p_timeline_add = timeline_sub.add_parser(
         "add", help="Create 50_TIMELINE/event-<date>-<slug>.md from the event template")
@@ -1203,6 +1270,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_timeline_add.add_argument("--tags", nargs="*", default=[])
     p_timeline_add.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
     p_timeline_add.add_argument("--source", default="")
+    p_timeline_add.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_note = sub.add_parser(
         "note", help="Create a memory note at its canonical destination (person/knowledge/document/fact)")
@@ -1407,7 +1475,7 @@ def _dispatch(config: Config, args, parser) -> int:
         return cmd_projects(config, args)
     if args.command == "project":
         if args.project_command == "show":
-            return cmd_project_show(config, args.id)
+            return cmd_project_show(config, args.id, as_json=getattr(args, "json", False))
         if args.project_command == "discover":
             return cmd_project_discover(config, args)
         if args.project_command == "sync":

@@ -95,15 +95,25 @@ def check_broken_links(notes) -> list[Problem]:
 
 
 def check_missing_project_dirs(config: Config, notes) -> list[Problem]:
+    """A registered project path that Path.exists() can't find is only
+    genuinely "missing" when this process could plausibly see it in the
+    first place. On a restricted-SSH server dispatcher (config.remote_project_paths),
+    every registered path is a desktop path this host never has and never
+    will — reporting that as "missing" is a false positive baked into the
+    architecture, not a real data problem. Report it as unverifiable
+    instead: still visible in `brain doctor`'s output (nothing is hidden),
+    but honestly labeled, and never mistaken for actual drift."""
+    check_name = "project_path_unverifiable" if config.remote_project_paths else "missing_project_dirs"
+    verb = "cannot verify from this host (not locally visible)" if config.remote_project_paths else "does not exist"
     problems = []
     for e in load_registry(config):
         if e.path and not Path(e.path).exists():
-            problems.append(Problem("missing_project_dirs", f"registry entry '{e.id}': path does not exist: {e.path}"))
+            problems.append(Problem(check_name, f"registry entry '{e.id}': path {verb}: {e.path}"))
     for n in notes:
         if n.type == "project":
             p = n.meta.get("path")
             if p and not Path(p).exists():
-                problems.append(Problem("missing_project_dirs", f"{n.path}: project path does not exist: {p}"))
+                problems.append(Problem(check_name, f"{n.path}: project path {verb}: {p}"))
     return problems
 
 
