@@ -207,6 +207,7 @@ def _t_remember(a: dict):
     argv += _list_flags(a, "tags") + _list_flags(a, "people") + _list_flags(a, "projects")
     if a.get("sensitivity"):
         argv += ["--sensitivity", a["sensitivity"]]
+    argv += _confirm_restricted_flag(a)
     if a.get("confidence"):
         argv += ["--confidence", a["confidence"]]
     # Default provenance to the connected client, same discipline as
@@ -227,6 +228,7 @@ def _t_create_memory_note(a: dict):
     argv += _list_flags(a, "tags") + _list_flags(a, "people") + _list_flags(a, "projects")
     if a.get("sensitivity"):
         argv += ["--sensitivity", a["sensitivity"]]
+    argv += _confirm_restricted_flag(a)
     if a.get("confidence"):
         argv += ["--confidence", a["confidence"]]
     argv += ["--source", a.get("source") or f"mcp-bridge:{_CURRENT_CLIENT}"]
@@ -264,6 +266,18 @@ def _t_search_timeline(a: dict):
     return argv, None
 
 
+def _confirm_restricted_flag(a: dict) -> list[str]:
+    """Pure forwarding, never a decision: the bridge never sets
+    confirm_restricted on a caller's behalf — it only relays whatever the
+    MCP tool call's own confirm_restricted argument already said, as
+    --confirm-restricted, the CLI's equivalent. If the caller didn't pass
+    it, this passes nothing, and the shared write-policy layer (the CLI
+    itself calls it, same as mcp_server.py) refuses the write — the
+    bridge cannot bypass that refusal by omission or otherwise, because
+    it has no other way to reach Brain than this same CLI command."""
+    return ["--confirm-restricted"] if a.get("confirm_restricted") else []
+
+
 def _set_flags(a: dict, key: str = "set_fields") -> list[str]:
     fields = a.get(key) or {}
     out = []
@@ -277,6 +291,7 @@ def _t_update_memory(a: dict):
     argv += _set_flags(a)
     if a.get("append_text"):
         argv += ["--append-text", a["append_text"]]
+    argv += _confirm_restricted_flag(a)
     return argv, None
 
 
@@ -290,6 +305,7 @@ def _t_create_decision(a: dict):
     ):
         if a.get(key):
             argv += [flag, a[key]]
+    argv += _confirm_restricted_flag(a)
     argv += _list_flags(a, "people") + _list_flags(a, "projects") + _list_flags(a, "tags")
     return argv, None
 
@@ -327,6 +343,7 @@ def _t_create_timeline_event(a: dict):
         argv += ["--why-it-matters", a["why_it_matters"]]
     if a.get("sensitivity"):
         argv += ["--sensitivity", a["sensitivity"]]
+    argv += _confirm_restricted_flag(a)
     if a.get("source"):
         argv += ["--source", a["source"]]
     argv += _list_flags(a, "people") + _list_flags(a, "projects") + _list_flags(a, "tags")
@@ -379,7 +396,13 @@ def _execute_project_context(arguments: dict) -> dict:
     except json.JSONDecodeError as exc:
         raise BridgeError(f"brain produced non-JSON output for 'project show': {exc}") from exc
 
-    proc2 = _run_brain(["get", project_id])
+    # project_id may have been an alias — `project show` resolves aliases
+    # (registry.find_project), but `get` does an exact note-id match only.
+    # Use the resolved canonical id for the second call, or an alias would
+    # 404 even though the project itself was found just above. Found live
+    # during v0.10.1 Codex acceptance testing.
+    canonical_id = (show_result.get("registry") or {}).get("id") or project_id
+    proc2 = _run_brain(["get", canonical_id])
     if proc2.returncode != 0:
         raise BridgeError((proc2.stderr or proc2.stdout or f"brain exited {proc2.returncode}").strip())
 

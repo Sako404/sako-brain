@@ -5,6 +5,94 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.10.1 — 2026-09-30 — CORE HARDENING / FINAL CLIENT ACCEPTANCE
+
+Closes the two real gaps v0.10.0's own acceptance testing found: Codex
+could not reach canonical Brain at all under its sandbox, and the CLI/
+bridge write path had no secret-scan or restricted-confirmation
+protection even though the in-process MCP server did. Full write-up:
+canonical Brain decision `decision-2026-09-30-sako-brain-v0-10-1-core-hardening-final-client-acceptance`.
+
+### Fixed
+
+- **Codex acceptance.** Root cause was two independent, stacked issues,
+  both confirmed by direct measurement, neither a Brain/bridge defect:
+  (1) Codex's sandbox presents `/etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf`
+  (pulled in by `/etc/ssh/ssh_config`'s own `Include`) as owned by
+  `nobody:nobody`, mode `777` — a sandbox filesystem-virtualization
+  artifact (the real file is `root:root`, `0644`) — which OpenSSH
+  correctly refuses to trust. Fixed with a minimal, brain-owned
+  `~/.config/sako-brain/ssh_config` (`ssh -F`, which replaces rather than
+  supplements the system config per `ssh(1)`) pinned to the 3
+  already-trusted host keys for the brain SSH proxy port — no blind
+  trust-on-first-use, no system permission changes. (2) Codex's sandbox
+  additionally blocks outbound sockets by default in every tier except
+  with `sandbox_workspace_write.network_access=true` explicitly set —
+  unrelated to (1), and **not changed globally**: the `sako-brain` MCP
+  server process itself is not subject to this per-shell-command sandbox
+  at all (proven: it worked with zero configuration changes, in every
+  sandbox tier, throughout this investigation), so the actual, intended
+  integration path was never blocked. `~/.codex/AGENTS.md` updated to
+  prefer the MCP tool path explicitly.
+- **Shared write security.** `mcp_server.py` had secret-pattern scanning
+  and `sensitivity: restricted` confirmation; the CLI (and therefore
+  `mcp_bridge.py`, which shells out to the CLI for every write tool) had
+  neither — found in the v0.10.0 audit, closed here. New `writepolicy.py`
+  is the one shared implementation both transports call:
+  - Secret-pattern scanning is now unconditional on every free-text CLI
+    write command (`remember`, `update`, `project create/update/close/
+    section-update`, `decision create`, `timeline add`, `note create`,
+    `handoff write`) — exactly the same `SECRET_PATTERNS` `brain doctor`
+    already used.
+  - A new `--confirm-restricted` CLI flag, required whenever
+    `--sensitivity restricted` (or `--set sensitivity=restricted`) is
+    used — on `remember`, `note create`, `decision create`, `timeline
+    add`, `update`, `project update`. This is a real behavior change:
+    "a human typed this command" is no longer treated as implicit
+    confirmation, because the same CLI command is also how the bridge
+    writes on an automated caller's behalf. `mcp_bridge.py` forwards the
+    MCP tool call's own `confirm_restricted` argument to this flag —
+    pure relay, the bridge never sets it on a caller's behalf and has no
+    other way to reach Brain than this same CLI command, so it cannot
+    bypass the policy by omission or otherwise.
+  - Provenance: reviewed against the existing data model rather than
+    adding new schema — a restricted note's own `sensitivity: restricted`
+    frontmatter field, combined with the fact that writing it now
+    unconditionally requires confirmation, already is the provenance
+    record. No new field added.
+- **Least privilege: `project show`.** `project show`/`discover`/`sync`
+  are genuinely read-only (print a registry entry / propose unregistered
+  candidates / gather+print live filesystem facts — none mutate
+  anything) but were only reachable via the WRITE SSH identity, because
+  the server dispatcher's allowlist bundles all of `project` together.
+  `brain-dispatch.py` (now version-controlled in `sako-brain-tooling`,
+  previously server-only with no history) gained `READ_ONLY_SUBCOMMANDS`
+  — the mirror image of the existing `WRITE_ONLY_SUBCOMMANDS` mechanism
+  — granting exactly these three `(top, sub)` pairs to the READ identity
+  without touching `WRITE_ALLOWED` or opening any actual write
+  subcommand. Negative tests confirm every real write subcommand stays
+  refused under the read identity.
+- **`project_context` alias bug**, found live during this pass's own
+  Codex acceptance testing: the bridge's composed implementation used the
+  caller's raw id for both of its two `brain` calls, but only the first
+  (`project show`) resolves aliases — the second (`get`) does an exact
+  note-id match, so calling `project_context` by alias 404'd on the
+  record half even though the project itself was found. Fixed to reuse
+  the first call's own resolved canonical id for the second.
+
+### Notes
+
+- `queue_memory` untouched, as instructed — not part of this pass.
+- 785 tests passing (up from 734 at v0.10.0), covering: the new
+  `writepolicy.py` module directly; CLI secret-scan and
+  restricted-confirmation parity (positive + negative, per command); the
+  bridge's `confirm_restricted`-forwarding per translator; real
+  (non-mocked) end-to-end bridge integration against an actual `brain`
+  CLI subprocess; and the previously-untested in-process MCP
+  `create_timeline_event` restricted-confirmation path. Plus 25 dispatcher
+  routing tests in `sako-brain-tooling` (a separate repo, not counted in
+  this total).
+
 ## 0.10.0 — 2026-09-30 — CORE COMPLETE
 
 The v0.10.0 push: Claude Code and Codex can now do the full day-to-day
