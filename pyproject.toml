@@ -73,4 +73,11 @@ version = { attr = "brain.__version__" }
 # travel inside the wheel. Loaded via importlib.resources, never by a path
 # relative to the source tree.
 [tool.setuptools.package-data]
-brain = ["templates/*.template"]
+brain = [
+    "templates/*.template",
+    "integrations/claude-code/README.md",
+    "integrations/claude-code/skills/*/SKILL.md",
+    "integrations/codex/README.md",
+    "integrations/codex/AGENTS_SNIPPET.md",
+    "integrations/mcp/README.md",
+]
