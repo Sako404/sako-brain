@@ -5,6 +5,77 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.12.0 — 2026-09-30 — REMOTE / WEB AI ACCESS
+
+A single, vendor-neutral remote MCP gateway so ChatGPT web and Claude.ai
+web can reach canonical Brain over HTTPS, live — without either ever
+touching the vault filesystem, SSH, or bypassing Brain's own write
+safety. Full write-up: canonical Brain decision
+`decision-2026-09-30-sako-brain-v0-12-0-remote-web-ai-access`.
+
+### Added
+
+- **`brain remote-gateway`** — an optional, self-hosted component
+  (`pip install sako-brain[remote-gateway]`) implementing:
+  - A standards-compliant **OAuth 2.1 authorization server**: PKCE
+    (S256-only), Dynamic Client Registration (RFC 7591), Protected
+    Resource Metadata (RFC 9728), Authorization Server Metadata
+    (RFC 8414), Resource Indicators (RFC 8707) for audience binding,
+    refresh-token rotation, and revocation (RFC 7009-shaped). Every
+    cryptographic primitive is stdlib (`secrets`, `hashlib`) — no
+    hand-rolled cipher or signature scheme; see
+    `remote_gateway/oauth.py`'s module docstring for the full reasoning.
+  - A **Streamable HTTP MCP transport** (`POST /mcp`) that defers every
+    tool call to the *existing* `brain.mcp_bridge.handle_request` —
+    the same dispatch Claude Code and Codex already use — so this is a
+    new transport around the existing capability surface, never a
+    second implementation of Brain's tools. Critically, this reaches
+    canonical Brain through the same SSH forced-command dispatcher every
+    other client uses (via this process's own `brain setup`-configured
+    identity) — the gateway never gets direct vault filesystem access.
+  - Three OAuth scopes — `brain.read`, `brain.write`,
+    `brain.restricted` — mapped to the 19 existing MCP tools by policy
+    (`remote_gateway/scopes.py`), enforced as an *outer* gate in front
+    of Brain's own unchanged writepolicy (secret scanning, restricted
+    confirmation), never a replacement for it. `tools/list` is filtered
+    to what the presented token can actually call.
+  - A minimal owner-login + consent screen (`GET/POST /authorize`) —
+    password hashed with `hashlib.scrypt`, a session cookie HMAC-signed
+    with a server secret generated once into the gateway's own SQLite.
+  - Vendor-neutral MCP server instructions (`initialize`'s
+    `instructions` field) steering any compliant client — ChatGPT,
+    Claude.ai, or a future one — toward querying Brain before answering
+    when relevant, without per-vendor special-casing.
+  - `brain remote-gateway init / serve / set-owner-password /
+    list-clients / revoke-client / revoke-all` — the full operator
+    surface, including a one-command kill-switch that cuts off every
+    remote (ChatGPT/Claude.ai/etc.) token without touching Claude Code,
+    Codex, or any other client using `brain setup`'s own SSH proxy.
+- **`brain integration doctor remote --base-url <url>`** — checks a
+  deployed gateway from a genuine external HTTP vantage point (HTTPS,
+  reachability, protected-resource/authorization-server metadata,
+  scopes advertised, PKCE method, fail-closed on missing/invalid
+  tokens) using only stdlib `urllib` — no extra dependency needed just
+  to check a remote deployment.
+- New test suite (`tests/test_remote_gateway.py`, 35 tests): HTTP MCP
+  transport, OAuth discovery, invalid/expired/wrong-audience tokens,
+  missing/read/write/restricted scope enforcement, PKCE verification,
+  one-time-use authorization codes, refresh-token rotation, revocation
+  (single client and kill-switch), tool annotations, server
+  instructions, an explicit regression guard proving the gateway never
+  imports the direct-vault `mcp_server` module, and that a secret-shaped
+  write still reaches the shared writepolicy layer unmodified.
+- New packaging regression tests confirming `brain.remote_gateway`
+  travels in the wheel, and that the core CLI still imports cleanly
+  with zero hard dependency on the optional Flask/waitress extra.
+
+### Notes
+
+- Out of scope, deliberately untouched: Hermes, People, Tasks, Planner,
+  Calendar, family multi-user, Matrix/TRON redesign, E2EE, mobile app, a
+  general plugin/marketplace framework.
+- 873 tests passing (was 836 at v0.11.1).
+
 ## 0.11.1 — 2026-09-30 — client write-identity fix for `brain index`
 
 ### Fixed

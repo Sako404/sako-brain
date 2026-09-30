@@ -15,7 +15,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.11.1.** Pre-1.0 means the command line and configuration
+**Current release: 0.12.0.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -82,14 +82,14 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.11.1-py3-none-any.whl
+pipx install ./sako_brain-0.12.0-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
 downloaded:
 
 ```sh
-sha256sum ./sako_brain-0.11.1-py3-none-any.whl
+sha256sum ./sako_brain-0.12.0-py3-none-any.whl
 ```
 
 Or build from source:
@@ -98,7 +98,7 @@ Or build from source:
 git clone https://github.com/Sako404/sako-brain.git
 cd sako-brain
 python -m build
-pipx install ./dist/sako_brain-0.11.1-py3-none-any.whl
+pipx install ./dist/sako_brain-0.12.0-py3-none-any.whl
 ```
 
 `pipx` puts `brain` on your PATH and keeps it isolated. A plain virtualenv
@@ -106,7 +106,7 @@ works too:
 
 ```sh
 python -m venv ~/.venvs/brain
-~/.venvs/brain/bin/pip install ./dist/sako_brain-0.11.1-py3-none-any.whl
+~/.venvs/brain/bin/pip install ./dist/sako_brain-0.12.0-py3-none-any.whl
 ```
 
 Either way, exactly one dependency is installed: PyYAML.
@@ -114,7 +114,7 @@ Either way, exactly one dependency is installed: PyYAML.
 ### Update and uninstall
 
 ```sh
-pipx install --force ./dist/sako_brain-0.11.1-py3-none-any.whl
+pipx install --force ./dist/sako_brain-0.12.0-py3-none-any.whl
 pipx uninstall sako-brain
 ```
 
@@ -294,6 +294,30 @@ See `brain integration install claude-code --help` /
 (`brain.integrations.claude-code`, `.codex`, `.mcp` — readable via
 `python -c "from importlib.resources import files; print((files('brain')/'integrations/claude-code/README.md').read_text())"`
 if you'd rather not install first) for the full detail.
+
+## Remote / web AI access
+
+`brain remote-gateway` is an optional, self-hosted OAuth 2.1 + Streamable
+HTTP MCP server so ChatGPT web and Claude.ai web can reach your canonical
+Brain live — without either ever touching the vault filesystem, SSH, or
+bypassing Brain's write safety. Every tool call it handles is forwarded,
+unmodified, to the same `brain.mcp_bridge` dispatch Claude Code and Codex
+already use.
+
+```sh
+pip install 'sako-brain[remote-gateway]'
+brain setup --server ... --read-identity ... --write-identity ... --known-hosts-file ...
+brain remote-gateway init --canonical-uri https://your-hostname/mcp
+brain remote-gateway set-owner-password
+brain remote-gateway serve
+```
+
+Three scopes (`brain.read`, `brain.write`, `brain.restricted`), a human
+consent screen for every new client, and a one-command kill-switch
+(`brain remote-gateway revoke-all`) that cuts off every remote web AI
+connection without touching Claude Code, Codex, or any local client. Full
+architecture, security model, deployment guidance, and ChatGPT/Claude.ai
+connection steps: [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
 
 ## Optional features
 

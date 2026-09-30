@@ -39,7 +39,7 @@ SLUG = paths_mod.APP_DIRNAME
 # Commands that must run locally even when a remote server is configured —
 # they configure *this* client, or (for `init`) create a local vault; they
 # are never something to hand to a remote canonical Brain.
-LOCAL_ONLY_COMMANDS = {"setup", "integration", "init"}
+LOCAL_ONLY_COMMANDS = {"setup", "integration", "init", "remote-gateway"}
 
 # Mirrors the server dispatcher's WRITE_ONLY_SUBCOMMANDS / READ_ONLY_SUBCOMMANDS
 # at the granularity the client can cheaply check. Getting this wrong picks

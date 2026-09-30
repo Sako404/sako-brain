@@ -53,10 +53,16 @@ class TestPackagingMetadata(unittest.TestCase):
                  for d in self.project["dependencies"]]
         self.assertEqual(names, ["pyyaml"])
 
-    def test_no_optional_dependency_groups(self):
-        """Everything optional in this tool is an external binary. pip must
-        never be asked to install restic, rclone, git or systemd."""
-        self.assertNotIn("optional-dependencies", self.project)
+    def test_optional_dependency_groups_are_exactly_the_declared_exception(self):
+        """Everything optional in the *core* tool is an external binary —
+        pip must never be asked to install restic, rclone, git or systemd.
+        v0.12.0 adds exactly one deliberate exception: the self-hosted
+        remote-gateway component (a real Python web stack, Flask/waitress),
+        which is not needed by, and not installed for, the CLI/MCP core."""
+        self.assertEqual(set(self.project.get("optional-dependencies", {})), {"remote-gateway"})
+        names = [d.split(">")[0].split("=")[0].split("[")[0].strip().lower()
+                 for d in self.project["optional-dependencies"]["remote-gateway"]]
+        self.assertEqual(set(names), {"flask", "waitress"})
 
     def test_console_script_points_at_the_cli(self):
         self.assertEqual(self.project["scripts"], {"brain": "brain.cli:main"})
@@ -72,7 +78,7 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertEqual(attr, "brain.__version__")
 
     def test_public_version_baseline(self):
-        self.assertEqual(__version__, "0.11.1")
+        self.assertEqual(__version__, "0.12.0")
 
     def test_template_is_declared_as_package_data(self):
         """Without this the wheel ships a package whose agents-doc is broken."""
@@ -241,7 +247,8 @@ class TestPublicDocumentation(unittest.TestCase):
     published-package pretence, a widened platform promise).
     """
 
-    FILES = ("README.md", "CONTRIBUTING.md", "SECURITY.md", "TRADEMARK.md", "CHANGELOG.md")
+    FILES = ("README.md", "CONTRIBUTING.md", "SECURITY.md", "TRADEMARK.md", "CHANGELOG.md",
+             "docs/REMOTE_ACCESS.md")
 
     def setUp(self):
         readme = PROJECT_ROOT / "README.md"
