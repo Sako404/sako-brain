@@ -64,6 +64,45 @@ class TestToolsListDerivedFromCapabilities(unittest.TestCase):
                 mcp_bridge._tools_list_payload()
 
 
+class TestToolsListAdvertisedMatchesExecutable(unittest.TestCase):
+    """Contract: `tools/list` must never advertise a tool `tools/call` cannot
+    execute (the bridge's own documented invariant — see mcp_bridge.py's
+    module docstring). This is regression coverage for the v0.9.2 parity
+    audit, which found `tools/list` blindly forwarding all of Brain's real
+    tools (20, per `brain capabilities`) while only 9 had a TRANSLATORS
+    entry — a client could see and attempt to call 11 tools that would
+    always fail with 'not yet supported'."""
+
+    def test_tools_list_drops_tools_with_no_translator(self):
+        caps = {
+            "interfaces": {"mcp": {"tools": [
+                {"name": "search_memory", "description": "d", "input_schema": {}},
+                {"name": "get_project", "description": "d", "input_schema": {}},
+                {"name": "create_decision", "description": "d", "input_schema": {}},
+            ]}}
+        }
+        with patch.object(mcp_bridge, "_run_brain", return_value=_completed(stdout=json.dumps(caps))):
+            tools = mcp_bridge._tools_list_payload()
+        self.assertEqual({t["name"] for t in tools}, {"search_memory"})
+
+    def test_advertised_tools_are_always_a_subset_of_translators(self):
+        """General form: no matter what `brain capabilities` returns, every
+        name tools/list surfaces must be in TRANSLATORS — and every
+        translator this bridge has should surface when Brain still knows
+        about that name, so nothing silently drops out of the other end."""
+        caps = {
+            "interfaces": {"mcp": {"tools": [
+                {"name": name, "description": "d", "input_schema": {}}
+                for name in [*mcp_bridge.TRANSLATORS, "some_future_tool_not_yet_wired"]
+            ]}}
+        }
+        with patch.object(mcp_bridge, "_run_brain", return_value=_completed(stdout=json.dumps(caps))):
+            tools = mcp_bridge._tools_list_payload()
+        advertised = {t["name"] for t in tools}
+        self.assertTrue(advertised.issubset(mcp_bridge.TRANSLATORS.keys()))
+        self.assertEqual(advertised, set(mcp_bridge.TRANSLATORS.keys()))
+
+
 class TestTranslators(unittest.TestCase):
     def test_search_memory_argv(self):
         argv, stdin = mcp_bridge._t_search_memory({"query": "widget", "limit": 5})

@@ -29,10 +29,15 @@ list that could drift from what `brain` actually does.
 Coverage is intentionally partial in this first version: exactly the tools
 needed for Claude/Codex live acceptance (search, context, read, remember,
 note create, a controlled project-status update, session handoffs) plus the
-operational-state snapshot. `tools/list` still reports Brain's FULL real
-tool set (from `brain capabilities`, so a caller always sees the truth);
-`tools/call` on a tool this bridge does not yet translate returns a clear,
-honest error rather than guessing — it never silently does the wrong thing.
+operational-state snapshot. Invariant: `tools/list` must never advertise a
+tool `tools/call` cannot actually execute — so it reports Brain's real tool
+set (from `brain capabilities`, never a second hand-kept list) filtered down
+to exactly the names this bridge has a translator for (see TRANSLATORS
+below); a name `brain capabilities` adds tomorrow is invisible here until a
+translator exists for it, rather than being advertised and then failing.
+`tools/call` on an untranslated name (reachable only by a client that cached
+an older, unfiltered tools/list) returns a clear, honest error rather than
+guessing — it never silently does the wrong thing.
 
 Run with: python3 -m brain.mcp_bridge
 Never expose this over a network socket — stdio only, local use only.
@@ -134,9 +139,12 @@ def _tools_list_payload() -> list[dict]:
         caps = json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
         raise BridgeError(f"brain capabilities produced non-JSON output: {exc}") from exc
+    # Invariant: never advertise a tool this bridge cannot execute — filter
+    # Brain's real tool set down to exactly the names TRANSLATORS covers.
     return [
         {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
         for t in caps["interfaces"]["mcp"]["tools"]
+        if t["name"] in TRANSLATORS
     ]
 
 

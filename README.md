@@ -15,7 +15,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.7.0.** Pre-1.0 means the command line and configuration
+**Current release: 0.9.2.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -82,14 +82,14 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.7.0-py3-none-any.whl
+pipx install ./sako_brain-0.9.2-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
 downloaded:
 
 ```sh
-sha256sum ./sako_brain-0.1.0-py3-none-any.whl
+sha256sum ./sako_brain-0.9.2-py3-none-any.whl
 ```
 
 Or build from source:
@@ -98,7 +98,7 @@ Or build from source:
 git clone https://github.com/Sako404/sako-brain.git
 cd sako-brain
 python -m build
-pipx install ./dist/sako_brain-0.1.0-py3-none-any.whl
+pipx install ./dist/sako_brain-0.9.2-py3-none-any.whl
 ```
 
 `pipx` puts `brain` on your PATH and keeps it isolated. A plain virtualenv
@@ -106,7 +106,7 @@ works too:
 
 ```sh
 python -m venv ~/.venvs/brain
-~/.venvs/brain/bin/pip install ./dist/sako_brain-0.1.0-py3-none-any.whl
+~/.venvs/brain/bin/pip install ./dist/sako_brain-0.9.2-py3-none-any.whl
 ```
 
 Either way, exactly one dependency is installed: PyYAML.
@@ -114,7 +114,7 @@ Either way, exactly one dependency is installed: PyYAML.
 ### Update and uninstall
 
 ```sh
-pipx install --force ./dist/sako_brain-0.1.0-py3-none-any.whl
+pipx install --force ./dist/sako_brain-0.9.2-py3-none-any.whl
 pipx uninstall sako-brain
 ```
 
@@ -235,14 +235,37 @@ deduplicated, versioned backups. It ships **no default destination**: set
 password in a file outside the vault. Until you do, `brain backup` tells you
 which key is missing. It never runs on its own.
 
+## MCP servers
+
+Two stdio MCP servers ship in this package, for two different deployment
+shapes — neither is auto-wired by `brain init`; point an MCP-capable client
+at whichever one fits, in its own config.
+
+- **`python3 -m brain.mcp_server`** — shipped since 0.1.0. Calls Brain's
+  Python business logic in-process, against whatever vault the usual
+  `--vault` / `BRAIN_ROOT` / config-file resolution finds on this machine.
+  Correct when Brain *is* local to wherever the MCP client runs.
+- **`python3 -m brain.mcp_bridge`** — shipped in 0.9.0. Reaches Brain
+  *exclusively* by shelling out to the already-installed `brain` CLI
+  executable, one subprocess call per tool — never a direct vault or
+  library call, never a second copy of Brain's business logic. Use this
+  when the real vault is reachable only through the `brain` wrapper's own
+  transport (for example a transparent proxy to a server-canonical vault),
+  so `mcp_server.py` run directly would find no vault, or silently serve a
+  stale local copy. Zero new credentials, zero new server-side surface:
+  the bridge inherits whatever `brain` itself is configured to do.
+  `tools/list` reports Brain's real tool names (from `brain capabilities`,
+  never a second hand-kept list) filtered to exactly the ones this bridge
+  can execute — it will never advertise a tool `tools/call` would then
+  refuse. Coverage is intentionally partial — see `brain/mcp_bridge.py`'s
+  own docstring, or `tools/list` itself, for exactly which tools are wired
+  up today.
+
 ## Roadmap
 
-An MCP server (`python3 -m brain.mcp_server`, stdio transport) has shipped
-since 0.1.0 — see `brain/mcp_server.py`'s own docstring for how to point an
-MCP-capable client at it. Not implemented, and not promised for any date:
-editor- and agent-specific rule packs beyond `AGENTS.md`, macOS
-verification, and PyPI distribution. Everything else described above this
-section exists today.
+Not implemented, and not promised for any date: editor- and agent-specific
+rule packs beyond `AGENTS.md`, macOS verification, and PyPI distribution.
+Everything else described above this section exists today.
 
 ## Contributing
 
