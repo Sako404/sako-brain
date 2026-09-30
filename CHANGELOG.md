@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.9.2 — 2026-09-30
+
+Maintenance pass: no new Brain business capabilities. Prompted by a full
+`mcp_bridge` parity audit (advertised MCP tools vs. what the bridge can
+actually execute).
+
+### Fixed
+
+- `mcp_bridge.py`'s `tools/list` advertised all 20 of Brain's real MCP
+  tools (from `brain capabilities`) while only 9 had a CLI translator
+  wired up — a client could see, and attempt to call, 11 tools that would
+  always fail with "not yet supported". `tools/list` now filters to
+  exactly the tool names `TRANSLATORS` covers, restoring the bridge's own
+  documented invariant: never advertise a tool `tools/call` cannot
+  execute. Added regression coverage (`TestToolsListAdvertisedMatchesExecutable`
+  in `tests/test_mcp_bridge.py`) asserting this for any shape `brain
+  capabilities` returns, not just today's 9-vs-20 split.
+- The remaining gap (4 read tools Claude/Codex would want —
+  `get_project`, `get_project_path`, `project_context`,
+  `search_timeline` — have no `--json` CLI output or, for the latter two,
+  no single CLI command to shell out to at all) is not fixed in this pass;
+  it needs a scoped decision on its own, not a rushed one bundled into a
+  maintenance release. See the full advertised/mapping/read-write parity
+  table from this audit for exact gaps.
+
+### Documentation
+
+- README: current release corrected 0.7.0 → 0.9.1 (now 0.9.2), all
+  install-example wheel filenames corrected to match, and a new "MCP
+  servers" section explains `mcp_server.py` (in-process, shipped 0.1.0)
+  vs. `mcp_bridge.py` (subprocess/CLI-only, shipped 0.9.0) side by side —
+  previously the Roadmap section mentioned only the former, making the
+  latter's existence undiscoverable from the README.
+
 ## 0.9.1 — 2026-09-28
 
 ### Fixed

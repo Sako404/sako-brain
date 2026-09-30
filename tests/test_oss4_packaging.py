@@ -72,7 +72,7 @@ class TestPackagingMetadata(unittest.TestCase):
         self.assertEqual(attr, "brain.__version__")
 
     def test_public_version_baseline(self):
-        self.assertEqual(__version__, "0.9.1")
+        self.assertEqual(__version__, "0.9.2")
 
     def test_template_is_declared_as_package_data(self):
         """Without this the wheel ships a package whose agents-doc is broken."""
@@ -269,8 +269,12 @@ class TestPublicDocumentation(unittest.TestCase):
         self.assertTrue(self._has("not on PyPI"))
 
     def test_unimplemented_features_appear_only_as_roadmap(self):
+        # MCP is excluded from this guard as of 0.9.0/0.9.1: it is a shipped,
+        # documented feature (its own "## MCP servers" section, ahead of
+        # Roadmap), not an aspirational one — the terms below are the ones
+        # still genuinely unimplemented.
         body, _, roadmap = self.text.partition("## Roadmap")
-        for term in ("MCP", "skills", "cloud sync", "hosted service", "web UI"):
+        for term in ("skills", "cloud sync", "hosted service", "web UI"):
             self.assertNotIn(term, body,
                              f"{term!r} is mentioned before the roadmap section")
         self.assertIn("Not implemented", roadmap)
