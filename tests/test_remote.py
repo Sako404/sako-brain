@@ -32,6 +32,14 @@ class TestIsWriteSubcommand(unittest.TestCase):
         for top in ("remember", "decision", "handoff", "note", "update", "memory"):
             self.assertTrue(remote._is_write_subcommand([top]), top)
 
+    def test_index_is_write(self):
+        """Regression: the server dispatcher's WRITE_ALLOWED includes
+        'index' but READ_ALLOWED does not — every `brain index` call
+        (which every skill recommends after a write) was being sent under
+        the read identity and refused, regardless of which identity was
+        actually configured. Found live during v0.11.0 session-close."""
+        self.assertTrue(remote._is_write_subcommand(["index"]))
+
     def test_empty_argv_is_not_write(self):
         self.assertFalse(remote._is_write_subcommand([]))
 

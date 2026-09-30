@@ -46,7 +46,7 @@ LOCAL_ONLY_COMMANDS = {"setup", "integration", "init"}
 # the "wrong" key and gets a clear server-side refusal (or, for `project
 # show`/`discover`/`sync` under a read-only-only setup, a spurious one) — it
 # never grants or denies anything the server wouldn't enforce anyway.
-_WRITE_TOP_LEVEL = {"decision", "update", "note", "handoff", "remember", "memory"}
+_WRITE_TOP_LEVEL = {"decision", "update", "note", "handoff", "remember", "memory", "index"}
 _PROJECT_READ_ONLY_SUBS = {"show", "discover", "sync"}
 
 

@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.11.1 — 2026-09-30 — client write-identity fix for `brain index`
+
+### Fixed
+
+- `brain setup`'s client-side identity selection classified `index` as a
+  read operation and sent it under the read identity, but the server
+  dispatcher's `READ_ALLOWED` does not include `index` (only
+  `WRITE_ALLOWED` does) — so every `brain index` call against a remote
+  canonical Brain was refused, regardless of which identity was actually
+  configured. Every shipped skill recommends running `brain index` after
+  a write, so this affected the core day-to-day workflow. Found live
+  during this session's own `/session-close` acceptance check, right
+  after v0.11.0 shipped.
+
 ## 0.11.0 — 2026-09-30 — PUBLIC AGENT INTEGRATIONS & CLIENT SETUP
 
 The public product can now be installed, configured, and wired into
