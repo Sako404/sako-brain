@@ -455,7 +455,14 @@ def cmd_integration(args) -> int:
         return 0
 
     if action == "doctor":
-        report = run_doctor(target)
+        if target == "remote":
+            base_url = getattr(args, "base_url", None)
+            if not base_url:
+                print("Error: `brain integration doctor remote` requires --base-url", file=sys.stderr)
+                return 2
+            report = run_remote_doctor(base_url)
+        else:
+            report = run_doctor(target)
         if as_json:
             print(json.dumps(report, indent=2))
         else:
@@ -609,3 +616,120 @@ def run_doctor(target: str | None = None) -> dict:
                           else f"BRAIN_ROOT points at a retired local-vault-shaped path: {old_vault_env}"))
 
     return {"ok": all(c["ok"] for c in checks), "checks": checks}
+
+
+# ---------------------------------------------------------------------------
+# brain integration doctor remote (v0.12.0, item 16) — checked purely as an
+# external HTTP client, exactly the vantage point ChatGPT/Claude.ai have.
+# stdlib `urllib.request` only: this is a client-side check, not part of the
+# gateway itself, so it must work without the 'remote-gateway' extra.
+# ---------------------------------------------------------------------------
+
+class _CaseInsensitiveHeaders(dict):
+    """`dict(http.client.HTTPMessage)` loses case-insensitive lookup —
+    this keeps it, since server header casing (WWW-Authenticate vs.
+    Www-Authenticate) isn't something a client should have to guess."""
+
+    def __init__(self, message):
+        super().__init__((k.lower(), v) for k, v in (message.items() if message else []))
+
+    def get(self, key, default=None):
+        return super().get(key.lower(), default)
+
+    def __contains__(self, key):
+        return super().__contains__(key.lower())
+
+
+def _http_get(url: str, headers: dict | None = None, timeout: float = 10.0):
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(url, headers=headers or {}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.getcode(), _CaseInsensitiveHeaders(resp.headers), resp.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, _CaseInsensitiveHeaders(exc.headers), exc.read()
+    except Exception as exc:  # noqa: BLE001 — network/TLS failures, reported as a failed check
+        return None, _CaseInsensitiveHeaders(None), str(exc).encode()
+
+
+def _http_post_json(url: str, payload: dict, headers: dict | None = None, timeout: float = 10.0):
+    import urllib.error
+    import urllib.request
+
+    body = json.dumps(payload).encode("utf-8")
+    req_headers = {"Content-Type": "application/json", **(headers or {})}
+    req = urllib.request.Request(url, data=body, headers=req_headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.getcode(), _CaseInsensitiveHeaders(resp.headers), resp.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, _CaseInsensitiveHeaders(exc.headers), exc.read()
+    except Exception as exc:  # noqa: BLE001
+        return None, _CaseInsensitiveHeaders(None), str(exc).encode()
+
+
+def run_remote_doctor(base_url: str) -> dict:
+    checks: list[dict] = []
+    base_url = base_url.rstrip("/")
+    mcp_url = f"{base_url}/mcp"
+
+    is_https = base_url.startswith("https://")
+    checks.append(_check("https_endpoint", is_https,
+                          base_url if is_https else f"{base_url} is not HTTPS"))
+
+    status, _headers, body = _http_get(f"{base_url}/healthz")
+    checks.append(_check("endpoint_reachable", status == 200,
+                          "reachable" if status == 200 else f"status={status} body={body[:200]!r}"))
+
+    status, headers, body = _http_get(f"{base_url}/.well-known/oauth-protected-resource")
+    prm_ok = status == 200
+    prm = {}
+    if prm_ok:
+        try:
+            prm = json.loads(body)
+            prm_ok = "authorization_servers" in prm and prm.get("resource", "").rstrip("/") == mcp_url
+        except json.JSONDecodeError:
+            prm_ok = False
+    checks.append(_check("protected_resource_metadata", prm_ok,
+                          f"resource={prm.get('resource')!r}" if prm_ok else f"status={status}"))
+
+    as_url = prm.get("authorization_servers", [base_url])[0] if prm_ok else base_url
+    status, _headers, body = _http_get(f"{as_url}/.well-known/oauth-authorization-server")
+    asm_ok = status == 200
+    asm = {}
+    if asm_ok:
+        try:
+            asm = json.loads(body)
+            asm_ok = "authorization_endpoint" in asm and "token_endpoint" in asm
+        except json.JSONDecodeError:
+            asm_ok = False
+    checks.append(_check("authorization_server_metadata", asm_ok,
+                          f"endpoints present" if asm_ok else f"status={status}"))
+
+    scopes_ok = asm_ok and set(asm.get("scopes_supported", [])) == {"brain.read", "brain.write", "brain.restricted"}
+    checks.append(_check("scopes_advertised", scopes_ok,
+                          str(asm.get("scopes_supported")) if asm_ok else "n/a"))
+
+    pkce_ok = asm_ok and asm.get("code_challenge_methods_supported") == ["S256"]
+    checks.append(_check("pkce_s256_only", pkce_ok,
+                          str(asm.get("code_challenge_methods_supported")) if asm_ok else "n/a"))
+
+    status, headers, body = _http_post_json(mcp_url, {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                                         "params": {}})
+    unauth_ok = status == 401 and "WWW-Authenticate" in headers and "resource_metadata" in headers.get("WWW-Authenticate", "")
+    checks.append(_check("rejects_unauthenticated", unauth_ok,
+                          headers.get("WWW-Authenticate", f"status={status}") if status else str(body[:200])))
+
+    status, _headers, body = _http_post_json(mcp_url, {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                                          "params": {}},
+                                               headers={"Authorization": "Bearer not-a-real-token"})
+    invalid_ok = status == 401
+    checks.append(_check("rejects_invalid_token", invalid_ok, f"status={status}"))
+
+    return {"ok": all(c["ok"] for c in checks), "checks": checks,
+            "note": "read/write/restricted-scope live calls and server-instructions/tool-annotation checks "
+                    "require a real access token — see docs/REMOTE_ACCESS.md's acceptance runbook for the "
+                    "full authenticated pass; this unauthenticated check proves discovery and the fail-closed "
+                    "boundary from a genuine external vantage point."}

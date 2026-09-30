@@ -17,6 +17,7 @@ from . import paths as paths_mod
 from .paths import Config, default_config
 from .registry import find_project, load_registry
 from . import remote, integrations_cli
+from .remote_gateway import cli as remote_gateway_cli
 
 
 def cmd_index(config: Config, args) -> int:
@@ -1480,8 +1481,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_int_uninstall.add_argument("--json", action="store_true")
 
     p_int_doctor = integration_sub.add_parser("doctor", help="Check Brain + agent-integration health")
-    p_int_doctor.add_argument("target", nargs="?", choices=["claude-code", "codex"], default=None)
+    p_int_doctor.add_argument("target", nargs="?", choices=["claude-code", "codex", "remote"], default=None)
+    p_int_doctor.add_argument("--base-url", default=None, help="Remote gateway base URL (for the 'remote' check)")
     p_int_doctor.add_argument("--json", action="store_true")
+
+    p_gw = sub.add_parser("remote-gateway", help="Run/administer the remote MCP gateway (ChatGPT/Claude.ai web access)")
+    gw_sub = p_gw.add_subparsers(dest="gateway_command", required=True)
+
+    p_gw_init = gw_sub.add_parser("init", help="Write the gateway's own config (canonical_uri, host, port)")
+    p_gw_init.add_argument("--canonical-uri", required=True,
+                            help="This gateway's public MCP endpoint, e.g. https://brain-mcp.example.com/mcp")
+    p_gw_init.add_argument("--host", default=None)
+    p_gw_init.add_argument("--port", type=int, default=None)
+
+    p_gw_serve = gw_sub.add_parser("serve", help="Run the gateway (requires the 'remote-gateway' extra; "
+                                                   "run `init` first)")
+    p_gw_serve.add_argument("--host", default=None, help="Override the configured host")
+    p_gw_serve.add_argument("--port", type=int, default=None, help="Override the configured port")
+
+    p_gw_owner = gw_sub.add_parser("set-owner-password", help="Set/change the consent-screen owner password")
+    p_gw_owner.add_argument("--password", default=None, help="Omit to be prompted (recommended — avoids shell history)")
+
+    p_gw_list = gw_sub.add_parser("list-clients", help="List registered OAuth clients")
+    p_gw_list.add_argument("--json", action="store_true")
+
+    p_gw_revoke_client = gw_sub.add_parser("revoke-client", help="Revoke all tokens for one client")
+    p_gw_revoke_client.add_argument("client_id")
+    p_gw_revoke_client.add_argument("--forget", action="store_true", help="Also delete the client registration")
+
+    gw_sub.add_parser("revoke-all", help="Revoke every outstanding token — cuts off all remote web AI access")
 
     return parser
 
@@ -1554,6 +1582,12 @@ def main(argv=None) -> int:
         except USER_FACING_ERRORS as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+    if args.command == "remote-gateway":
+        try:
+            return _dispatch_remote_gateway(args)
+        except USER_FACING_ERRORS as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
 
     try:
         config = default_config(args.vault)
@@ -1566,6 +1600,24 @@ def main(argv=None) -> int:
     except USER_FACING_ERRORS as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+
+def _dispatch_remote_gateway(args) -> int:
+    cmd = args.gateway_command
+    if cmd == "init":
+        return remote_gateway_cli.cmd_init(args)
+    if cmd == "serve":
+        return remote_gateway_cli.cmd_serve(args)
+    if cmd == "set-owner-password":
+        return remote_gateway_cli.cmd_set_owner_password(args)
+    if cmd == "list-clients":
+        return remote_gateway_cli.cmd_list_clients(args)
+    if cmd == "revoke-client":
+        return remote_gateway_cli.cmd_revoke_client(args)
+    if cmd == "revoke-all":
+        return remote_gateway_cli.cmd_revoke_all(args)
+    print(f"Error: unknown remote-gateway command {cmd!r}", file=sys.stderr)
+    return 2
 
 
 def _dispatch(config: Config, args, parser) -> int:

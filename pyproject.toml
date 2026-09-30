@@ -52,6 +52,17 @@ classifiers = [
     "Topic :: Utilities",
 ]
 
+# The remote/web gateway (v0.12.0) is an optional component: a self-hosting
+# user who never runs `brain remote-gateway serve` should never need a web
+# stack on their machine. `brain.remote_gateway` lazy-imports these and
+# gives a clear message naming this extra if they are absent, the same
+# pattern already used for restic/git being genuinely optional. No OAuth
+# library dependency: the gateway's OAuth 2.1 protocol bookkeeping is
+# self-contained (see remote_gateway/oauth.py's module docstring for why —
+# every actual cryptographic primitive it uses is stdlib `secrets`/`hashlib`).
+[project.optional-dependencies]
+remote-gateway = ["Flask>=3.0", "waitress>=3.0"]
+
 # Real URLs only. These were deliberately absent until the repository actually
 # existed; nothing here is aspirational.
 [project.urls]
@@ -64,7 +75,7 @@ Changelog = "https://github.com/Sako404/sako-brain/blob/main/CHANGELOG.md"
 brain = "brain.cli:main"
 
 [tool.setuptools]
-packages = ["brain"]
+packages = ["brain", "brain.remote_gateway"]
 
 [tool.setuptools.dynamic]
 version = { attr = "brain.__version__" }

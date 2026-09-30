@@ -201,7 +201,7 @@ class TestInstalledPackageIsTheOneBeingUsed(InstalledTestCase):
             env=self.world.env(), cwd=str(self.world.cwd),
             capture_output=True, text=True, timeout=120,
         )
-        self.assertEqual(self.assertOk(result).strip(), "0.11.1")
+        self.assertEqual(self.assertOk(result).strip(), "0.12.0")
 
 
 class TestInstalledCliRunsOutsideTheRepository(InstalledTestCase):
@@ -211,7 +211,7 @@ class TestInstalledCliRunsOutsideTheRepository(InstalledTestCase):
         self.assertIn("init", out)
 
     def test_version(self):
-        self.assertEqual(self.assertOk(self.world.run("--version")).strip(), "brain 0.11.1")
+        self.assertEqual(self.assertOk(self.world.run("--version")).strip(), "brain 0.12.0")
 
     def test_with_no_vault_it_refuses_cleanly_rather_than_failing_to_import(self):
         """An expected vault-discovery failure is a pass; an import or resource
@@ -275,6 +275,30 @@ class TestInstalledResources(InstalledTestCase):
             "brain/integrations/mcp/README.md",
         ):
             self.assertIn(expected, names, f"{expected} missing from the wheel")
+
+    def test_the_wheel_contains_the_remote_gateway_package(self):
+        """v0.12.0: `brain.remote_gateway` must travel in the wheel too —
+        `packages = [...]` in pyproject.toml has to list it explicitly
+        (setuptools does not auto-discover subpackages from that form)."""
+        import zipfile
+
+        with zipfile.ZipFile(self.world.wheel) as z:
+            names = set(z.namelist())
+        for module in ("__init__", "app", "cli", "config", "mcp_transport",
+                        "oauth", "owner_auth", "scopes", "storage", "instructions"):
+            self.assertIn(f"brain/remote_gateway/{module}.py", names)
+
+    def test_core_cli_imports_without_the_remote_gateway_extra(self):
+        """The CLI's single-runtime-dependency footprint (PyYAML) must
+        hold regardless of whether Flask/waitress are installed — the
+        gateway extra is lazy-imported, never a hard import at CLI
+        startup."""
+        result = subprocess.run(
+            [str(self.world.python), "-c", "import brain.cli; print('ok')"],
+            env=self.world.env(), cwd=str(self.world.cwd),
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(self.assertOk(result).strip(), "ok")
 
 
 class TestInstalledClientSetupAndIntegrations(InstalledTestCase):
