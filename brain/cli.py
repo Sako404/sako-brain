@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, indexer, integrity, memoryops, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate
+from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, indexer, integrity, memoryops, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, writepolicy
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -97,6 +97,8 @@ def cmd_get(config: Config, args) -> int:
 
 
 def cmd_remember(config: Config, args) -> int:
+    writepolicy.require_restricted_confirmation(args.sensitivity, getattr(args, "confirm_restricted", False))
+    writepolicy.scan_for_secrets(args.title, args.text or "")
     try:
         dest = capture.capture(
             config, type_=args.type, title=args.title, text=args.text or "",
@@ -126,14 +128,20 @@ def _parse_set_fields(pairs: list[str]) -> dict:
 
 def cmd_update(config: Config, args) -> int:
     """CLI surface over update_mod.update_memory() — the exact function the
-    MCP update_memory tool already calls. Same trust model as brain remember:
-    a human typing this command is the confirmation; no separate
-    --confirm-restricted friction here, matching cmd_remember."""
+    MCP update_memory tool already calls. v0.10.1: setting sensitivity to
+    restricted (via --set sensitivity=restricted) requires
+    --confirm-restricted, exactly like the MCP tool requires
+    confirm_restricted=true — "a human typed this" is no longer treated as
+    implicit confirmation, since this same command is also how the MCP
+    bridge performs a write on an automated caller's behalf."""
     try:
         set_fields = _parse_set_fields(args.set or [])
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
+    if set_fields.get("sensitivity") == "restricted":
+        writepolicy.require_restricted_confirmation("restricted", getattr(args, "confirm_restricted", False))
+    writepolicy.scan_for_secrets(args.append_text or "", *(str(v) for v in set_fields.values()))
     try:
         path = update_mod.update_memory(
             config, args.id, set_fields=set_fields or None, append_text=args.append_text,
@@ -217,6 +225,7 @@ def cmd_project_sync(config: Config, project_id: str) -> int:
 
 
 def cmd_project_create(config: Config, args) -> int:
+    writepolicy.scan_for_secrets(args.name, args.category or "")
     try:
         dest = projectops.create_project(
             config, id=args.id, name=args.name, path=args.path, status=args.status,
@@ -256,6 +265,10 @@ def cmd_project_update(config: Config, args) -> int:
     entry = find_project(config, args.id)
     if entry is not None:
         args.id = entry.id
+
+    if set_fields.get("sensitivity") == "restricted":
+        writepolicy.require_restricted_confirmation("restricted", getattr(args, "confirm_restricted", False))
+    writepolicy.scan_for_secrets(args.append_text or "", *(str(v) for v in set_fields.values()))
 
     lines = []
     status_change = None
@@ -302,6 +315,7 @@ def cmd_project_update(config: Config, args) -> int:
 
 
 def cmd_project_close(config: Config, args) -> int:
+    writepolicy.scan_for_secrets(args.summary or "")
     try:
         r = projectops.close_project(config, args.id, summary=args.summary or "")
     except projectops.ProjectWriteError as exc:
@@ -323,6 +337,7 @@ def cmd_project_close(config: Config, args) -> int:
 
 
 def cmd_project_section_update(config: Config, args) -> int:
+    writepolicy.scan_for_secrets(args.content)
     try:
         path = projectops.update_section(
             config, args.id, args.section, args.mode, args.content, if_match=args.if_match,
@@ -340,6 +355,9 @@ def cmd_project_section_update(config: Config, args) -> int:
 
 
 def cmd_decision_create(config: Config, args) -> int:
+    writepolicy.require_restricted_confirmation(args.sensitivity, getattr(args, "confirm_restricted", False))
+    writepolicy.scan_for_secrets(args.title, args.context or "", args.options or "",
+                                  args.decision or "", args.reasoning or "", args.consequences or "")
     try:
         dest = decision_mod.create_decision(
             config, title=args.title, context=args.context or "", options=args.options or "",
@@ -383,6 +401,8 @@ def cmd_timeline(config: Config, args) -> int:
 
 
 def cmd_timeline_add(config: Config, args) -> int:
+    writepolicy.require_restricted_confirmation(args.sensitivity, getattr(args, "confirm_restricted", False))
+    writepolicy.scan_for_secrets(args.title, args.what_happened or "", args.why_it_matters or "")
     try:
         path = timeline.create_event(
             config, title=args.title, valid_from=args.date,
@@ -403,6 +423,8 @@ def cmd_timeline_add(config: Config, args) -> int:
 
 
 def cmd_note_create(config: Config, args) -> int:
+    writepolicy.require_restricted_confirmation(args.sensitivity, getattr(args, "confirm_restricted", False))
+    writepolicy.scan_for_secrets(args.title, args.text or "")
     try:
         path = memoryops.create_memory(
             config, type_=args.type, title=args.title, text=args.text or "",
@@ -933,6 +955,9 @@ def cmd_handoff_write(config: Config, args) -> int:
         files_changed=payload.get("files_changed", []),
         decisions=payload.get("decisions", []),
     )
+    writepolicy.scan_for_secrets(sections.attempted, sections.changed, sections.working_state,
+                                  sections.unresolved, sections.next_action,
+                                  *sections.files_changed, *sections.decisions)
     try:
         path = handoff.write(config, args.project, sections, source=payload.get("source", "cli"))
     except handoff.HandoffError as exc:
@@ -1160,6 +1185,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_remember.add_argument("--people", nargs="*", default=[])
     p_remember.add_argument("--projects", nargs="*", default=[])
     p_remember.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
+    p_remember.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
+                            help="Required when --sensitivity restricted — a deliberate, explicit "
+                                 "acknowledgement so a restricted write can never happen as an "
+                                 "unnoticed side effect. Never set this on a caller's behalf.")
     p_remember.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
     p_remember.add_argument("--source", default="")
     p_remember.add_argument("--json", action="store_true", help="Emit JSON on stdout")
@@ -1169,6 +1198,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE",
                           help="Frontmatter field to set, repeatable (id/created are never mutated)")
     p_update.add_argument("--append-text", default=None, help="Text appended as a new dated '## Update' section")
+    p_update.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
+                          help="Required when --set sensitivity=restricted. Never set this on a "
+                               "caller's behalf.")
     p_update.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     sub.add_parser("projects", help="List registered projects")
@@ -1207,6 +1239,9 @@ def build_parser() -> argparse.ArgumentParser:
                                   help="Other frontmatter field to set, repeatable (not 'status' — use --status)")
     p_project_update.add_argument("--append-text", default=None,
                                   help="Text appended as a new dated '## Update' section")
+    p_project_update.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
+                                  help="Required when --set sensitivity=restricted. Never set this on "
+                                       "a caller's behalf.")
     p_project_update.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_project_close = project_sub.add_parser(
@@ -1246,6 +1281,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_decision_create.add_argument("--projects", nargs="*", default=[])
     p_decision_create.add_argument("--tags", nargs="*", default=[])
     p_decision_create.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
+    p_decision_create.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
+                                   help="Required when --sensitivity restricted. Never set this on a "
+                                        "caller's behalf.")
     p_decision_create.add_argument("--source", default="")
     p_decision_create.add_argument("--supersedes", default=None,
                                    help="id of an older decision this replaces — marks it "
@@ -1269,6 +1307,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_timeline_add.add_argument("--projects", nargs="*", default=[])
     p_timeline_add.add_argument("--tags", nargs="*", default=[])
     p_timeline_add.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
+    p_timeline_add.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
+                                help="Required when --sensitivity restricted. Never set this on a "
+                                     "caller's behalf.")
     p_timeline_add.add_argument("--source", default="")
     p_timeline_add.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
@@ -1289,6 +1330,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_note_create.add_argument("--people", nargs="*", default=[])
     p_note_create.add_argument("--projects", nargs="*", default=[])
     p_note_create.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
+    p_note_create.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
+                               help="Required when --sensitivity restricted. Never set this on a "
+                                    "caller's behalf.")
     p_note_create.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
     p_note_create.add_argument("--source", default="")
     p_note_create.add_argument("--source-date", default="", dest="source_date")
@@ -1429,6 +1473,7 @@ USER_FACING_ERRORS = (
     projectops.SectionEditError,
     memoryops.MemoryWriteError,
     timeline.TimelineWriteError,
+    writepolicy.WritePolicyError,
 )
 
 

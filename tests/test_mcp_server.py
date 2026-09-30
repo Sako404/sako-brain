@@ -532,6 +532,23 @@ class TestMcpCreateTimelineEvent(unittest.TestCase):
         })
         self.assertIn("error", resp)
 
+    def test_restricted_without_confirmation_refused(self):
+        # Pre-existing gap closed in v0.10.1: tool_create_timeline_event
+        # has always called _require_restricted_confirmation, but this
+        # specific tool never had a test proving it.
+        resp = _call(self.config, "create_timeline_event", {
+            "title": "X", "valid_from": "2026-09-26", "sensitivity": "restricted",
+        })
+        self.assertIn("error", resp)
+        self.assertIn("confirm_restricted", resp["error"]["message"])
+
+    def test_restricted_with_confirmation_succeeds(self):
+        resp = _call(self.config, "create_timeline_event", {
+            "title": "X", "valid_from": "2026-09-26",
+            "sensitivity": "restricted", "confirm_restricted": True,
+        })
+        self.assertNotIn("error", resp)
+
 
 if __name__ == "__main__":
     unittest.main()

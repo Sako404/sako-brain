@@ -647,10 +647,13 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
         Grew by one in OSS-4 when `brain init` gained InitError. Grew by two
         for the V2 write primitives (`brain decision create`, `brain project
         create/update/close`), by two more for `brain note create` /
-        `brain timeline add`, and by one more for `brain project
-        section-update` (the /project-sync named-section primitive).
+        `brain timeline add`, by one more for `brain project
+        section-update` (the /project-sync named-section primitive), and by
+        one more (v0.10.1) for writepolicy.WritePolicyError — shared
+        secret-pattern-scan refusal, now enforced at the CLI layer too, not
+        just the in-process MCP server.
         """
-        from brain import backup, cli, decision, gitops, handoff, memoryops, projectops, timeline
+        from brain import backup, cli, decision, gitops, handoff, memoryops, projectops, timeline, writepolicy
         from brain import init as init_mod
         from brain import paths as paths_mod
 
@@ -661,7 +664,8 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
              handoff.HandoffError, init_mod.InitError,
              decision.DecisionError, projectops.ProjectWriteError,
              projectops.SectionEditError,
-             memoryops.MemoryWriteError, timeline.TimelineWriteError},
+             memoryops.MemoryWriteError, timeline.TimelineWriteError,
+             writepolicy.WritePolicyError},
         )
 
 

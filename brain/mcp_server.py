@@ -15,12 +15,17 @@ Write-policy note: every write tool here (`remember`, `update_memory`,
 `create_timeline_event`) is a thin wrapper over the same business-logic
 function the CLI calls — no tool
 duplicates logic the CLI doesn't also have. None bypasses
-what a human typing the equivalent `brain` command would be subject to, and
-each free-text-carrying tool runs the same secret-pattern scan `brain doctor`
+what a human typing the equivalent `brain` command would be subject to —
+as of v0.10.1 this is literally true, not just aspirational: the
+secret-pattern scan and the confirm_restricted gate both live in
+writepolicy.py (shared with the CLI, which mcp_bridge.py shells out to
+for every one of its own write tools), not duplicated here. Each
+free-text-carrying tool runs the same secret-pattern scan `brain doctor`
 uses (refusing outright on a match, the same as `brain git snapshot`/`brain
 backup run` do); writing `sensitivity: restricted` content requires an
-explicit `confirm_restricted: true` argument, so a restricted write can never
-happen as an unnoticed side effect of a tool call. `queue_memory` exposes the
+explicit `confirm_restricted: true` argument (the CLI's equivalent:
+`--confirm-restricted`), so a restricted write can never happen as an
+unnoticed side effect of a tool call. `queue_memory` exposes the
 Level 2 pending-memory queue (see `memoryqueue.py`) for MCP-only clients —
 the "durable-seeming but not explicitly confirmed" case — as a
 non-authoritative staging step rather than an immediate write.
@@ -41,6 +46,7 @@ from . import state as state_mod
 from . import timeline as timeline_mod
 from . import update as update_mod
 from . import validate as validate_mod
+from . import writepolicy
 from . import paths as paths_mod
 from . import __version__
 from .paths import Config, default_config
@@ -61,8 +67,13 @@ _CURRENT_CLIENT = "unknown"
 _SAFE_DETAIL_KEYS = ("id", "created_path", "updated_path", "queued_id", "path")
 
 
-class McpWriteRefused(RuntimeError):
-    pass
+# Shared write policy (secret-pattern scanning, restricted-confirmation)
+# now lives in writepolicy.py — used by this server AND by the CLI write
+# path the MCP bridge shells out to, so both transports enforce the same
+# rule instead of one having it and the other silently not. Kept as a
+# module-level alias so any code still catching McpWriteRefused by name
+# keeps working.
+McpWriteRefused = writepolicy.WritePolicyError
 
 
 def _log_call(config: Config, tool: str, success: bool, result=None, error: str = "") -> None:
@@ -99,28 +110,8 @@ def _read_note_text(config: Config, note_id: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _scan_for_secrets(*texts: str) -> None:
-    """Same patterns `brain doctor` flags as `secret_pattern` — refuse the
-    write outright rather than let it land and rely on a later doctor run
-    to notice."""
-    for text in texts:
-        if not text:
-            continue
-        for line in text.splitlines():
-            for label, pattern in validate_mod.SECRET_PATTERNS:
-                if pattern.search(line):
-                    raise McpWriteRefused(
-                        f"refusing to write: possible {label} found in the provided text. "
-                        "Remove/rotate the credential — secrets must never be stored in the Brain."
-                    )
-
-
-def _require_restricted_confirmation(sensitivity: str, confirm_restricted: bool) -> None:
-    if sensitivity == "restricted" and not confirm_restricted:
-        raise McpWriteRefused(
-            "sensitivity='restricted' requires confirm_restricted=true — this is a deliberate "
-            "friction point so a restricted write can never happen as an unnoticed side effect."
-        )
+_scan_for_secrets = writepolicy.scan_for_secrets
+_require_restricted_confirmation = writepolicy.require_restricted_confirmation
 
 
 # ---- tool implementations -------------------------------------------------

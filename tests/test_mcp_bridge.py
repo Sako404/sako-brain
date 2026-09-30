@@ -264,6 +264,62 @@ class TestTranslators(unittest.TestCase):
                                  "--json", "--what-happened", "shipped it"])
 
 
+class TestConfirmRestrictedForwarding(unittest.TestCase):
+    """v0.10.1: the bridge never decides confirm_restricted on a caller's
+    behalf — it only relays whatever the MCP tool call's own argument
+    already said, as --confirm-restricted. One positive + one negative
+    argv test per translator that accepts confirm_restricted."""
+
+    def test_confirm_restricted_flag_present_when_true(self):
+        self.assertEqual(mcp_bridge._confirm_restricted_flag({"confirm_restricted": True}),
+                          ["--confirm-restricted"])
+
+    def test_confirm_restricted_flag_absent_when_false(self):
+        self.assertEqual(mcp_bridge._confirm_restricted_flag({"confirm_restricted": False}), [])
+
+    def test_confirm_restricted_flag_absent_when_missing(self):
+        self.assertEqual(mcp_bridge._confirm_restricted_flag({}), [])
+
+    def test_remember_forwards_confirm_restricted(self):
+        argv, _ = mcp_bridge._t_remember({
+            "type": "fact", "title": "x", "sensitivity": "restricted", "confirm_restricted": True,
+        })
+        self.assertIn("--confirm-restricted", argv)
+
+    def test_remember_omits_confirm_restricted_when_not_given(self):
+        argv, _ = mcp_bridge._t_remember({"type": "fact", "title": "x", "sensitivity": "restricted"})
+        self.assertNotIn("--confirm-restricted", argv)
+
+    def test_create_memory_note_forwards_confirm_restricted(self):
+        argv, _ = mcp_bridge._t_create_memory_note({
+            "type": "fact", "title": "x", "sensitivity": "restricted", "confirm_restricted": True,
+        })
+        self.assertIn("--confirm-restricted", argv)
+
+    def test_create_decision_forwards_confirm_restricted(self):
+        argv, _ = mcp_bridge._t_create_decision({
+            "title": "x", "sensitivity": "restricted", "confirm_restricted": True,
+        })
+        self.assertIn("--confirm-restricted", argv)
+
+    def test_create_timeline_event_forwards_confirm_restricted(self):
+        argv, _ = mcp_bridge._t_create_timeline_event({
+            "title": "x", "valid_from": "2026-01-01",
+            "sensitivity": "restricted", "confirm_restricted": True,
+        })
+        self.assertIn("--confirm-restricted", argv)
+
+    def test_update_memory_forwards_confirm_restricted(self):
+        argv, _ = mcp_bridge._t_update_memory({
+            "id": "x", "set_fields": {"sensitivity": "restricted"}, "confirm_restricted": True,
+        })
+        self.assertIn("--confirm-restricted", argv)
+
+    def test_update_memory_omits_confirm_restricted_when_not_given(self):
+        argv, _ = mcp_bridge._t_update_memory({"id": "x", "set_fields": {"sensitivity": "restricted"}})
+        self.assertNotIn("--confirm-restricted", argv)
+
+
 class TestProjectContext(unittest.TestCase):
     """project_context is not a 1:1 CLI translation — see mcp_bridge.py's
     _execute_project_context docstring. It composes two `brain` calls and
@@ -290,6 +346,36 @@ class TestProjectContext(unittest.TestCase):
         self.assertEqual(result["record"], note_text)
         self.assertIsNone(result["filesystem_facts"])
         self.assertEqual(calls, [["project", "show", "project-x", "--json"], ["get", "project-x"]])
+
+    def test_uses_resolved_canonical_id_for_get_when_called_by_alias(self):
+        # Regression test for a real bug found live during v0.10.1 Codex
+        # acceptance: `project show <alias>` resolves fine (find_project
+        # handles aliases), but `get <alias>` does an exact note-id match
+        # only — calling `get` with the raw alias 404s even though the
+        # project itself was just found. The canonical id from the first
+        # call's own registry response must be used for the second.
+        show_payload = json.dumps({
+            "registry": {"id": "project-sako-brain", "path": "/tmp/x"}, "path_exists": True,
+        })
+        note_text = "---\nid: project-sako-brain\n---\nbody"
+        calls = []
+
+        def fake_run_brain(argv, stdin_data=None):
+            calls.append(argv)
+            if argv[:2] == ["project", "show"]:
+                return _completed(stdout=show_payload)
+            if argv[0] == "get":
+                return _completed(stdout=note_text)
+            raise AssertionError(f"unexpected argv {argv}")
+
+        with patch.object(mcp_bridge, "_run_brain", side_effect=fake_run_brain):
+            result = mcp_bridge._execute_tool("project_context", {"id": "sako-brain"})
+
+        self.assertEqual(result["record"], note_text)
+        self.assertEqual(calls, [
+            ["project", "show", "sako-brain", "--json"],
+            ["get", "project-sako-brain"],  # canonical id, NOT the alias "sako-brain"
+        ])
 
     def test_project_show_failure_raises_bridge_error(self):
         with patch.object(mcp_bridge, "_run_brain",
@@ -401,6 +487,109 @@ class TestHandleRequest(unittest.TestCase):
     def test_notification_with_no_id_gets_no_response(self):
         resp = mcp_bridge.handle_request({"jsonrpc": "2.0", "method": "notifications/initialized"})
         self.assertIsNone(resp)
+
+
+class TestBridgeCannotBypassSharedWritePolicy(unittest.TestCase):
+    """Real, non-mocked integration test: the bridge shells out to the ACTUAL
+    `brain` CLI (not a mock at the _run_brain boundary, unlike every other
+    test in this file) against a real temp vault, proving the bridge has no
+    private, unprotected path to Brain data — it is exactly as constrained
+    by writepolicy.py as a human typing the same `brain` command would be,
+    because it IS that same command. This is the concrete evidence for the
+    v0.10.1 fix: before it, this exact test would have PASSED where it now
+    fails (remember written straight through with a secret in it)."""
+
+    SECRET = "AKIAABCDEFGHIJKLMNOP"
+
+    def setUp(self):
+        import sys
+        import tempfile
+        from pathlib import Path
+
+        self.repo_root = Path(__file__).resolve().parent.parent
+        self._tmp = tempfile.TemporaryDirectory()
+        vault_root = Path(self._tmp.name) / "vault"
+        state_dir = Path(self._tmp.name) / "state"
+        vault_root.mkdir()
+        state_dir.mkdir()
+
+        # A minimal real vault the CLI itself can operate on (mirrors what
+        # `brain init` produces for the one directory `remember` needs).
+        (vault_root / "00_INBOX").mkdir()
+        (vault_root / "90_SYSTEM").mkdir()
+        # BRAIN_ROOT/BRAIN_STATE_DIR are deliberately stripped by the
+        # bridge's own _clean_env() (never let a local-override env var
+        # leak into a subprocess call meant for the canonical server) — so
+        # this test cannot point the shim at the temp vault that way
+        # either, by design. Use the two mechanisms that survive
+        # _clean_env instead: --vault baked into the shim's own argv, and
+        # state_dir: in the vault's own config.yaml.
+        (vault_root / "90_SYSTEM" / "config.yaml").write_text(f"state_dir: {state_dir}\n")
+
+        # A real shim executable: `_run_brain` shells out to whatever
+        # BRAIN_MCP_BRIDGE_EXECUTABLE names, so point it at the actual,
+        # installed-from-source `brain.cli`, not a mock.
+        shim = Path(self._tmp.name) / "brain-shim"
+        shim.write_text(
+            f"#!/usr/bin/env bash\nexec {sys.executable} -m brain.cli --vault {vault_root} \"$@\"\n"
+        )
+        shim.chmod(0o755)
+
+        self._env_patch = patch.dict(os.environ, {
+            "BRAIN_MCP_BRIDGE_EXECUTABLE": str(shim),
+            "PYTHONPATH": str(self.repo_root),
+        })
+        self._env_patch.start()
+
+    def tearDown(self):
+        self._env_patch.stop()
+        self._tmp.cleanup()
+
+    def test_remember_with_secret_is_refused_through_the_real_cli(self):
+        with self.assertRaises(mcp_bridge.BridgeError) as ctx:
+            mcp_bridge._execute_tool("remember", {
+                "type": "fact", "title": "ok title", "text": f"api key: {self.SECRET}",
+            })
+        self.assertIn("possible", str(ctx.exception).lower())
+        self.assertNotIn(self.SECRET, str(ctx.exception))
+
+    def test_remember_without_a_secret_succeeds_through_the_real_cli(self):
+        result = mcp_bridge._execute_tool("remember", {
+            "type": "fact", "title": "ordinary fact", "text": "nothing sensitive here",
+        })
+        self.assertIn("created_path", result)
+
+    def test_restricted_remember_without_confirmation_is_refused_through_the_real_cli(self):
+        # The other half of the v0.10.1 fix: a bridge call that sets
+        # sensitivity=restricted but omits confirm_restricted must be
+        # refused by the real CLI, exactly as if a human had typed
+        # `brain remember --sensitivity restricted` with no
+        # --confirm-restricted.
+        with self.assertRaises(mcp_bridge.BridgeError) as ctx:
+            mcp_bridge._execute_tool("remember", {
+                "type": "fact", "title": "ok title", "text": "sensitive but not secret-shaped",
+                "sensitivity": "restricted",
+            })
+        self.assertIn("confirm_restricted", str(ctx.exception))
+
+    def test_restricted_remember_with_confirmation_succeeds_through_the_real_cli(self):
+        result = mcp_bridge._execute_tool("remember", {
+            "type": "fact", "title": "ok title", "text": "sensitive but not secret-shaped",
+            "sensitivity": "restricted", "confirm_restricted": True,
+        })
+        self.assertIn("created_path", result)
+
+    def test_bridge_cannot_implicitly_grant_confirmation(self):
+        """The specific requirement: the bridge must never add confirmation
+        implicitly. Calling the tool exactly as a naive/malicious client
+        might — sensitivity=restricted, confirm_restricted simply absent
+        from the arguments dict rather than explicitly False — must still
+        be refused, not silently treated as confirmed."""
+        arguments = {"type": "fact", "title": "ok title", "text": "x", "sensitivity": "restricted"}
+        self.assertNotIn("confirm_restricted", arguments)
+        with self.assertRaises(mcp_bridge.BridgeError) as ctx:
+            mcp_bridge._execute_tool("remember", arguments)
+        self.assertIn("confirm_restricted", str(ctx.exception))
 
 
 if __name__ == "__main__":
