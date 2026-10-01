@@ -122,6 +122,34 @@ class TestGroupLifecycle(IdentityTestCase):
         self.assertEqual(identity.groups_for_principal(self.config, "principal-marcin"), [])
 
 
+class TestDeletePrincipal(IdentityTestCase):
+    def test_deletes_an_unreferenced_principal(self):
+        identity.create_principal(self.config, display_name="Throwaway Test", kind="service", role="test")
+        identity.delete_principal(self.config, "principal-throwaway-test")
+        self.assertIsNone(identity.get_principal(self.config, "principal-throwaway-test"))
+
+    def test_delete_nonexistent_principal_raises(self):
+        with self.assertRaises(identity.IdentityError):
+            identity.delete_principal(self.config, "principal-does-not-exist")
+
+    def test_refuses_to_delete_a_principal_still_in_a_group(self):
+        identity.create_principal(self.config, display_name="Ania")
+        identity.create_group(self.config, display_name="Household")
+        identity.add_group_member(self.config, "group-household", "principal-ania")
+        with self.assertRaises(identity.IdentityError):
+            identity.delete_principal(self.config, "principal-ania")
+        # Still there, unaffected by the refused attempt.
+        self.assertIsNotNone(identity.get_principal(self.config, "principal-ania"))
+
+    def test_delete_is_audited(self):
+        identity.create_principal(self.config, display_name="Throwaway Test")
+        identity.delete_principal(self.config, "principal-throwaway-test")
+        log_files = list(self.config.logs_dir.glob("brain-audit-*.log"))
+        lines = log_files[0].read_text(encoding="utf-8").splitlines()
+        self.assertTrue(any("event=principal.delete" in l and "principal=principal-throwaway-test" in l
+                             for l in lines), lines)
+
+
 class TestBreakGlass(IdentityTestCase):
     def test_restores_disabled_principal_to_active(self):
         identity.create_principal(self.config, display_name="Marcin", role="admin")
