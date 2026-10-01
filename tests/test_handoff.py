@@ -1,6 +1,7 @@
+import dataclasses
 import unittest
 
-from brain import handoff
+from brain import frontmatter, handoff
 from tests.helpers import TempVault
 
 
@@ -133,6 +134,60 @@ class TestEmptyHandoffIsRefused(unittest.TestCase):
         sections = handoff.HandoffSections(next_action="Start OSS-3")
         path = handoff.write(self.config, "project-x", sections)
         self.assertIn("Start OSS-3", path.read_text())
+
+
+class TestHandoffVisibility(unittest.TestCase):
+    """Stage 2 (multi-user visibility): a handoff's visibility comes from
+    its OWN frontmatter, read live — not inherited from its parent
+    project. `write()` and `handoff_path()`/`_registry_entry()` stay
+    unfiltered (write-path project resolution is out of Stage 2's scope);
+    only read_latest/has_handoff/list_projects_with_handoffs enforce it."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-example\n"
+            "    name: Example Project\n"
+            "    path: /tmp/does-not-need-to-exist-for-this-test\n"
+            "    status: active\n"
+        )
+        sections = handoff.HandoffSections(attempted="x", changed="y")
+        self.path = handoff.write(self.config, "project-example", sections, session_date="2026-07-01")
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _set_owner_and_audience(self, owner_principal: str, audience: list):
+        note = frontmatter.parse_file(self.path)
+        note.meta["owner_principal"] = owner_principal
+        note.meta["audience"] = audience
+        self.path.write_text(frontmatter.render(note), encoding="utf-8")
+
+    def _as(self, principal_id: str):
+        return dataclasses.replace(self.config, acting_principal=principal_id)
+
+    def test_owner_reads_their_own_handoff(self):
+        self._set_owner_and_audience("principal:marcin", [])
+        self.assertIsNotNone(handoff.read_latest(self._as("principal-marcin"), "project-example"))
+        self.assertTrue(handoff.has_handoff(self._as("principal-marcin"), "project-example"))
+
+    def test_non_owner_cannot_read_a_private_handoff(self):
+        self._set_owner_and_audience("principal:marcin", [])
+        self.assertIsNone(handoff.read_latest(self._as("principal-ania"), "project-example"))
+        self.assertFalse(handoff.has_handoff(self._as("principal-ania"), "project-example"))
+
+    def test_audience_principal_can_read_a_shared_handoff(self):
+        self._set_owner_and_audience("principal:marcin", ["principal:ania"])
+        self.assertIsNotNone(handoff.read_latest(self._as("principal-ania"), "project-example"))
+        self.assertTrue(handoff.has_handoff(self._as("principal-ania"), "project-example"))
+
+    def test_list_projects_with_handoffs_omits_invisible_ones(self):
+        self._set_owner_and_audience("principal:marcin", [])
+        self.assertEqual(handoff.list_projects_with_handoffs(self._as("principal-marcin")),
+                          ["project-example"])
+        self.assertEqual(handoff.list_projects_with_handoffs(self._as("principal-ania")), [])
 
 
 if __name__ == "__main__":

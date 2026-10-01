@@ -17,7 +17,9 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from . import frontmatter
 from . import indexer
+from . import visibility
 from .paths import Config
 from .registry import find_project, load_registry
 
@@ -145,10 +147,27 @@ def _touch_updated(frontmatter_block: str, today: str) -> str:
     return "\n".join(out) + "\n"
 
 
-def read_latest(config: Config, project_id: str) -> str | None:
-    """Just the most recent session's section text, for /resume."""
-    path = handoff_path(config, project_id)
+def _handoff_visible(config: Config, principal_id: str, path: Path) -> bool:
+    """Stage 2: a handoff's visibility comes from its OWN frontmatter,
+    read live — not inherited from its parent project. Pre-migration (or
+    any handoff missing the field) falls back to the same default as
+    every other record, via visibility.can_view's own missing-owner
+    handling."""
     if not path.exists():
+        return False
+    try:
+        note = frontmatter.parse_file(path)
+    except frontmatter.FrontmatterError:
+        return False
+    return visibility.can_view_note(config, principal_id, note)
+
+
+def read_latest(config: Config, project_id: str, principal_id: str | None = None) -> str | None:
+    """Just the most recent session's section text, for /resume."""
+    if principal_id is None:
+        principal_id = config.acting_principal
+    path = handoff_path(config, project_id)
+    if not _handoff_visible(config, principal_id, path):
         return None
     text = path.read_text(encoding="utf-8")
     _, _, body = text.partition("\n---\n")
@@ -164,9 +183,14 @@ def read_latest(config: Config, project_id: str) -> str | None:
     return rest if next_marker == -1 else rest[:next_marker]
 
 
-def has_handoff(config: Config, project_id: str) -> bool:
-    return handoff_path(config, project_id).exists()
+def has_handoff(config: Config, project_id: str, principal_id: str | None = None) -> bool:
+    if principal_id is None:
+        principal_id = config.acting_principal
+    return _handoff_visible(config, principal_id, handoff_path(config, project_id))
 
 
-def list_projects_with_handoffs(config: Config) -> list[str]:
-    return [e.id for e in load_registry(config) if handoff_path(config, e.id).exists()]
+def list_projects_with_handoffs(config: Config, principal_id: str | None = None) -> list[str]:
+    if principal_id is None:
+        principal_id = config.acting_principal
+    return [e.id for e in load_registry(config)
+            if _handoff_visible(config, principal_id, handoff_path(config, e.id))]
