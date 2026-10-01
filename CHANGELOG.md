@@ -5,6 +5,32 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.13.1 — 2026-10-01 — fix gateway crash on an existing (pre-Stage-1) database
+
+### Fixed
+
+- `brain remote-gateway serve` (and anything else opening `Storage`)
+  crashed outright against any database that predated v0.13.0 — i.e.
+  every real deployed gateway. `CREATE INDEX idx_tokens_principal ON
+  tokens(principal_id)` ran as part of the main schema script, before
+  the migration step that adds that column to a pre-existing `tokens`
+  table had run; `CREATE TABLE IF NOT EXISTS` is a no-op against a table
+  that already exists, so the column genuinely wasn't there yet at that
+  point for any real database, only for one built from nothing. v0.13.0's
+  own tests didn't catch this because they only ever opened a `Storage`
+  against a database that didn't have `tokens` pre-existing at all.
+  Found live, redeploying against the real `mcp.sako.systems` gateway's
+  actual database — reproduced locally against a database shaped
+  identically to the real one (pre-existing tables, real client/token
+  rows) before fixing the ordering. Fixed by creating that index after
+  the column-migration step, not as part of the initial schema script.
+  New regression coverage (`TestOpeningARealPreStage1DatabaseDoesNotCrash`)
+  builds a database with every table already populated, the way every
+  real deployment actually looks, specifically so a fresh-table
+  assumption like this one can't hide again.
+
+934 tests passing (was 929).
+
 ## 0.13.0 — 2026-10-01 — Identity + Authorization Foundation (Stage 1, multi-user)
 
 First step of SAKO Brain multi-user support — identity/credential

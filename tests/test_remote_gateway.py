@@ -420,6 +420,130 @@ class TestLegacyOwnerMigration(unittest.TestCase):
         self.assertEqual(storage.list_credential_principals(), [])
 
 
+def _build_full_legacy_schema_db(db_path: Path) -> None:
+    """A deployed v0.12.x gateway.db, byte-for-byte: every pre-Stage-1
+    table already exists on disk, `tokens`/`authorization_codes` have no
+    `principal_id` column yet, and — critically, the part the original
+    (insufficient) migration test missed — `oauth_clients`/`tokens`
+    already hold real rows from real client registrations. This is what
+    actually caught the real production bug: `CREATE TABLE IF NOT EXISTS
+    tokens (...)` is a no-op against an existing table, so a fresh-table
+    assumption anywhere in the new schema/migration code has no way to
+    surface against a database this test builds from scratch — it only
+    surfaces against one where the tables already existed first, exactly
+    like every real deployed gateway's database."""
+    import sqlite3
+    import time as time_mod
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript("""
+        CREATE TABLE oauth_clients (
+            client_id TEXT PRIMARY KEY, client_name TEXT NOT NULL, redirect_uris TEXT NOT NULL,
+            token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none', client_secret_hash TEXT,
+            registration_access_token_hash TEXT, created_at REAL NOT NULL
+        );
+        CREATE TABLE authorization_codes (
+            code TEXT PRIMARY KEY, client_id TEXT NOT NULL, redirect_uri TEXT NOT NULL,
+            code_challenge TEXT NOT NULL, code_challenge_method TEXT NOT NULL, scope TEXT NOT NULL,
+            resource TEXT NOT NULL, expires_at REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0,
+            created_at REAL NOT NULL
+        );
+        CREATE TABLE tokens (
+            access_token TEXT PRIMARY KEY, refresh_token TEXT UNIQUE, client_id TEXT NOT NULL,
+            scope TEXT NOT NULL, resource TEXT NOT NULL, expires_at REAL NOT NULL,
+            refresh_expires_at REAL, revoked_at REAL, created_at REAL NOT NULL, last_used_at REAL
+        );
+        CREATE TABLE owner (
+            id INTEGER PRIMARY KEY CHECK (id = 1), password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL, updated_at REAL NOT NULL
+        );
+        CREATE TABLE server_secret (id INTEGER PRIMARY KEY CHECK (id = 1), secret TEXT NOT NULL);
+        CREATE INDEX idx_tokens_client ON tokens(client_id);
+        CREATE INDEX idx_codes_client ON authorization_codes(client_id);
+    """)
+    now = time_mod.time()
+    conn.execute("INSERT INTO owner (id, password_hash, salt, updated_at) VALUES (1, ?, ?, ?)",
+                 ("real-legacy-hash", "real-legacy-salt", now))
+    conn.execute(
+        "INSERT INTO oauth_clients (client_id, client_name, redirect_uris, created_at) VALUES (?, ?, ?, ?)",
+        ("real-chatgpt-client", "ChatGPT", '["https://chatgpt.com/connector_platform_oauth_redirect"]', now),
+    )
+    conn.execute(
+        "INSERT INTO tokens (access_token, refresh_token, client_id, scope, resource, expires_at, "
+        "refresh_expires_at, created_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ("real-access-token", "real-refresh-token", "real-chatgpt-client", "brain.read brain.write",
+         "https://mcp.sako.systems/mcp", now + 3600, now + 90 * 86400, now, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestOpeningARealPreStage1DatabaseDoesNotCrash(unittest.TestCase):
+    """Regression for a real production incident: redeploying v0.13.0
+    against the live mcp.sako.systems gateway's actual database crashed
+    the container outright — `CREATE INDEX idx_tokens_principal ON
+    tokens(principal_id)` ran as part of the main schema script, before
+    the migration step that adds that column had run, so it failed
+    against any `tokens` table that already existed (every real
+    deployment). `TestLegacyOwnerMigration` above didn't catch this
+    because it only ever built a database with the `owner` table and
+    nothing else — `tokens` didn't pre-exist, so CREATE TABLE IF NOT
+    EXISTS created it fresh, with the column already on it, masking the
+    bug entirely. Reproduced locally against a database shaped like the
+    real one (including real oauth_clients/tokens rows) before fixing
+    the ordering; this test keeps that reproduction permanent."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.db_path = Path(self._tmp.name) / "real_shaped_legacy.db"
+        _build_full_legacy_schema_db(self.db_path)
+
+    def test_storage_opens_without_raising(self):
+        storage = Storage(self.db_path)
+        self.addCleanup(storage.close)
+
+    def test_existing_client_and_token_rows_survive_the_upgrade(self):
+        storage = Storage(self.db_path)
+        self.addCleanup(storage.close)
+        client = storage.get_client("real-chatgpt-client")
+        self.assertIsNotNone(client)
+        self.assertEqual(client["client_name"], "ChatGPT")
+        token = storage.get_token("real-access-token")
+        self.assertIsNotNone(token)
+        # Pre-existing tokens predate principal binding — the migrated
+        # column defaults to '', never crashes a caller that reads it.
+        self.assertEqual(token["principal_id"], "")
+
+    def test_owner_password_still_migrates_on_a_fully_populated_database(self):
+        storage = Storage(self.db_path)
+        self.addCleanup(storage.close)
+        cred = storage.get_credential("principal-marcin")
+        self.assertIsNotNone(cred)
+        self.assertEqual(cred["password_hash"], "real-legacy-hash")
+
+    def test_create_app_starts_successfully_against_a_real_shaped_database(self):
+        if not GATEWAY_AVAILABLE:
+            self.skipTest("remote-gateway extra (Flask/waitress) not installed")
+        storage = Storage(self.db_path)
+        self.addCleanup(storage.close)
+        gw_config = config_mod.GatewayConfig(canonical_uri="https://mcp.sako.systems/mcp", db_path=self.db_path)
+        app = app_mod.create_app(gw_config, storage)
+        client = app.test_client()
+        r = client.get("/healthz")
+        self.assertEqual(r.status_code, 200)
+
+    def test_opening_the_same_database_twice_is_idempotent(self):
+        """The real deployment restarts the container (reopening the same
+        database) on every boot — a second open must never re-fail on
+        the index or re-migrate incorrectly."""
+        storage1 = Storage(self.db_path)
+        storage1.close()
+        storage2 = Storage(self.db_path)
+        self.addCleanup(storage2.close)
+        cred = storage2.get_credential("principal-marcin")
+        self.assertEqual(cred["password_hash"], "real-legacy-hash")
+
+
 class TestRevocation(GatewayTestCase):
     def test_revoke_endpoint_disables_the_token(self):
         tok = self.get_token()
