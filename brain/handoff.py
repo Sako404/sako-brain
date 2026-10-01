@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from . import audit
 from . import frontmatter
 from . import indexer
 from . import visibility
@@ -137,6 +138,9 @@ def write(config: Config, project_id: str, sections: HandoffSections,
 
     path.write_text(new_text, encoding="utf-8")
     indexer.index_note(config, path)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id=handoff-{entry.id}")
     return path
 
 

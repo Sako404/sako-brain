@@ -20,6 +20,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+from . import audit
 from . import frontmatter
 from . import indexer
 from . import visibility
@@ -117,4 +118,7 @@ def create_memory(config: Config, type_: str, title: str, text: str = "",
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(frontmatter.render(note), encoding="utf-8")
     indexer.index_note(config, dest)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id={note_id}")
     return dest

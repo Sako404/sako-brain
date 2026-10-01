@@ -12,6 +12,7 @@ import datetime as dt
 import re
 from pathlib import Path
 
+from . import audit
 from . import indexer
 from . import visibility
 from .paths import DEFAULT_NOTE_TYPES, Config
@@ -74,4 +75,7 @@ def capture(config: Config, type_: str, title: str, text: str = "", tags: list[s
     ]
     dest.write_text("\n".join(meta_lines), encoding="utf-8")
     indexer.index_note(config, dest)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id={dest.stem}")
     return dest

@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+from . import audit
 from . import frontmatter
 from . import indexer
 from . import visibility
@@ -78,6 +79,9 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
         indexer.index_note(config, old_path)
 
     indexer.index_note(config, dest)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id={note_id}")
     return dest
 
 

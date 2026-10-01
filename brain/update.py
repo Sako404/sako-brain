@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+from . import audit
 from . import frontmatter
 from . import indexer
 from . import visibility
@@ -49,11 +50,17 @@ def update_memory(config: Config, note_id: str, set_fields: dict | None = None,
     note = frontmatter.parse_file(path)
     set_fields = set_fields or {}
 
-    if _SHARING_FIELDS & set_fields.keys():
+    is_sharing_change = bool(_SHARING_FIELDS & set_fields.keys())
+    if is_sharing_change:
         if principal_id is None:
             principal_id = config.acting_principal
         current_owner, _ = visibility.owner_and_audience(note.meta)
         if principal_id != current_owner:
+            audit.log_event(
+                config, event="note.sharing_change.denied", principal_id=principal_id,
+                client_id=config.caller_client, transport=config.caller_transport,
+                detail=f"id={note_id} owner={current_owner}",
+            )
             raise UpdateError(
                 f"only '{current_owner}' (this record's current owner) may change its "
                 f"owner_principal/audience — '{principal_id}' is not permitted"
@@ -72,4 +79,10 @@ def update_memory(config: Config, note_id: str, set_fields: dict | None = None,
 
     path.write_text(frontmatter.render(note), encoding="utf-8")
     indexer.index_note(config, path)
+
+    event = "note.sharing_change" if is_sharing_change else "note.write"
+    audit.log_event(
+        config, event=event, principal_id=principal_id or config.acting_principal,
+        client_id=config.caller_client, transport=config.caller_transport, detail=f"id={note_id}",
+    )
     return path

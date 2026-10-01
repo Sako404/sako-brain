@@ -24,6 +24,7 @@ from pathlib import Path
 
 import yaml
 
+from . import audit
 from . import frontmatter
 from . import indexer
 from . import visibility
@@ -178,6 +179,9 @@ def create_project(config: Config, id: str, name: str, path: str, status: str = 
         "aliases": aliases or [],
     })
     indexer.index_note(config, dest)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id={id}")
     return dest
 
 
@@ -227,6 +231,9 @@ def set_project_status(config: Config, project_id: str, new_status: str) -> Stat
         registry_updated = False  # no registry entry for this id — reported, not fatal
 
     indexer.index_note(config, new_path)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id={project_id} status={old_status}->{new_status}")
     return StatusChangeResult(
         id=project_id, old_status=old_status, new_status=new_status,
         old_path=old_path, new_path=new_path, moved=moved,
@@ -334,4 +341,7 @@ def update_section(config: Config, project_id: str, section: str, mode: str, con
     note.meta["updated"] = dt.date.today().isoformat()
     path.write_text(frontmatter.render(note), encoding="utf-8")
     indexer.index_note(config, path)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id={project_id} section={section}")
     return path
