@@ -24,7 +24,7 @@ from .indexer import connect
 from . import search as search_mod
 from . import timeline as timeline_mod
 from .paths import Config
-from .registry import load_registry
+from .registry import load_visible_registry
 
 # Handoffs prepend "## Session <date>" (newest first); `brain update
 # --append-text` appends "## Update (<date>)" (newest last) — opposite
@@ -168,7 +168,7 @@ def get_context(config: Config, query: str, limit: int = 10,
 
     if include_projects:
         terms = [t for t in query.lower().split() if t]
-        for e in load_registry(config):
+        for e in load_visible_registry(config, config.acting_principal):
             haystack = " ".join([e.id or "", e.name or "", " ".join(e.aliases or [])]).lower()
             if terms and any(t in haystack for t in terms):
                 result.projects.append({"id": e.id, "name": e.name, "status": e.status, "path": e.path})

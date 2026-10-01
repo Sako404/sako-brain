@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import frontmatter
 from . import indexer
+from . import visibility
 from .capture import slugify
 from .paths import Config
 
@@ -23,7 +24,15 @@ class TimelineEntry:
     path: str
 
 
-def list_timeline(config: Config, reverse: bool = True) -> list[TimelineEntry]:
+def list_timeline(config: Config, reverse: bool = True,
+                   principal_id: str | None = None) -> list[TimelineEntry]:
+    """Stage 2: every caller of this — `get_context`, `search_timeline`,
+    `brain timeline`, the operational-state dashboard — is a genuine read
+    path, so filtering happens here directly rather than through a
+    separate load_visible_* variant (unlike registry.py, nothing needs
+    the unfiltered list for write/integrity correctness)."""
+    if principal_id is None:
+        principal_id = config.acting_principal
     base = config.timeline_dir
     entries = []
     if not base.exists():
@@ -32,6 +41,8 @@ def list_timeline(config: Config, reverse: bool = True) -> list[TimelineEntry]:
         try:
             note = frontmatter.parse_file(path)
         except frontmatter.FrontmatterError:
+            continue
+        if not visibility.can_view_note(config, principal_id, note):
             continue
         date = str(note.meta.get("valid_from") or note.meta.get("created") or "")
         entries.append(TimelineEntry(date=date, id=note.id or "", title=note.title, path=str(path.relative_to(config.brain_root))))

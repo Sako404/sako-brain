@@ -39,6 +39,12 @@ class TestStatusCommand(unittest.TestCase):
         )
         self.vault.write_note("60_KNOWLEDGE", "a.md", id="knowledge-a", type="knowledge")
         self.vault.write_note("10_PEOPLE", "p.md", id="person-p", type="person")
+        # Stage 2: a registry entry's visibility is decided by its backing
+        # note's own frontmatter (registry.py's _project_note_visible) — a
+        # registry row with no corresponding note fails closed, so this
+        # fixture needs one, matching what `brain project create` always
+        # produces together in real usage.
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-alpha.md", id="project-alpha", type="project")
         indexer.rebuild(self.config)
         (self.config.inbox_dir / "draft.md").write_text("draft\n")
 
@@ -48,9 +54,10 @@ class TestStatusCommand(unittest.TestCase):
     def test_status_reports_expected_counts(self):
         rc, out = run_cli(["status"], self.vault)
         self.assertEqual(rc, 0)
-        self.assertIn("Indexed notes: 2", out)
+        self.assertIn("Indexed notes: 3", out)
         self.assertIn("knowledge: 1", out)
         self.assertIn("person: 1", out)
+        self.assertIn("project: 1", out)
         self.assertIn("Inbox pending triage: 1", out)
         self.assertIn("Registered projects: 1", out)
         self.assertIn("active: 1", out)

@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, writepolicy
+from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, visibility, writepolicy
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -15,7 +15,7 @@ from .gateway_client import BrainGatewayError
 from .frontmatter import parse_file
 from . import paths as paths_mod
 from .paths import Config, default_config
-from .registry import find_project, load_registry
+from .registry import find_project, find_visible_project, load_registry, load_visible_registry
 from . import remote, integrations_cli
 from .remote_gateway import cli as remote_gateway_cli
 
@@ -89,16 +89,21 @@ def cmd_context(config: Config, args) -> int:
 
 
 def cmd_get(config: Config, args) -> int:
-    # Resolves by walking Markdown directly (update_mod.find_note_path),
-    # the same index-independent lookup mcp_server.py's read_memory tool
-    # already uses — never the SQLite index, which is a cache that can lag
-    # a write until the next `brain index`. A note written this second
-    # must be gettable this second, not only after a reindex.
-    path = update_mod.find_note_path(config, args.id)
-    if not path:
+    # Resolves by walking Markdown directly (visibility.read_visible_note_text,
+    # built on update_mod.find_note_path), the same index-independent lookup
+    # mcp_server.py's read_memory tool already uses — never the SQLite
+    # index, which is a cache that can lag a write until the next `brain
+    # index`. A note written this second must be gettable this second, not
+    # only after a reindex. Stage 2: authorizes against config.acting_principal
+    # before returning anything — a note that exists but isn't visible to
+    # the caller prints the identical "not found" message, never a
+    # different one that would leak its existence.
+    try:
+        text = visibility.read_visible_note_text(config, config.acting_principal, args.id)
+    except FileNotFoundError:
         print(f"No note with id '{args.id}' found under {config.brain_root}.", file=sys.stderr)
         return 1
-    print(path.read_text(encoding="utf-8"))
+    print(text)
     return 0
 
 
@@ -164,7 +169,7 @@ def cmd_update(config: Config, args) -> int:
 
 
 def cmd_projects(config: Config, args) -> int:
-    entries = load_registry(config)
+    entries = load_visible_registry(config, config.acting_principal)
     if not entries:
         print(f"No projects registered yet. See {config.registry_path.relative_to(config.brain_root)}, "
               "or run 'brain project discover'.")
@@ -176,7 +181,7 @@ def cmd_projects(config: Config, args) -> int:
 
 
 def cmd_project_show(config: Config, project_id: str, as_json: bool = False) -> int:
-    e = find_project(config, project_id)
+    e = find_visible_project(config, config.acting_principal, project_id)
     if not e:
         if as_json:
             print(json.dumps({"error": f"no registered project with id or alias '{project_id}'"}), file=sys.stderr)
@@ -220,7 +225,7 @@ def cmd_project_discover(config: Config, args) -> int:
 
 
 def cmd_project_sync(config: Config, project_id: str) -> int:
-    e = find_project(config, project_id)
+    e = find_visible_project(config, config.acting_principal, project_id)
     if not e:
         print(f"No registered project with id or alias '{project_id}'.", file=sys.stderr)
         return 1
@@ -588,7 +593,7 @@ def cmd_status(config: Config, args) -> int:
 
     print(f"\nInbox pending triage: {indexer.count_inbox_pending(config)}")
 
-    entries = load_registry(config)
+    entries = load_visible_registry(config, config.acting_principal)
     by_status: dict[str, int] = {}
     for e in entries:
         by_status[e.status or "unknown"] = by_status.get(e.status or "unknown", 0) + 1

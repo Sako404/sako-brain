@@ -46,11 +46,12 @@ from . import state as state_mod
 from . import timeline as timeline_mod
 from . import update as update_mod
 from . import validate as validate_mod
+from . import visibility
 from . import writepolicy
 from . import paths as paths_mod
 from . import __version__
 from .paths import Config, default_config
-from .registry import find_project, load_registry
+from .registry import find_visible_project, load_visible_registry
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = paths_mod.APP_DIRNAME
@@ -104,10 +105,7 @@ def _log_call(config: Config, tool: str, success: bool, result=None, error: str 
 
 
 def _read_note_text(config: Config, note_id: str) -> str:
-    path = update_mod.find_note_path(config, note_id)
-    if not path:
-        raise FileNotFoundError(f"no note with id '{note_id}'")
-    return path.read_text(encoding="utf-8")
+    return visibility.read_visible_note_text(config, config.acting_principal, note_id)
 
 
 _scan_for_secrets = writepolicy.scan_for_secrets
@@ -179,11 +177,11 @@ def tool_queue_memory(config: Config, candidate_fact: str, entities: list | None
 
 
 def tool_list_projects(config: Config) -> dict:
-    return {"projects": [e.__dict__ for e in load_registry(config)]}
+    return {"projects": [e.__dict__ for e in load_visible_registry(config, config.acting_principal)]}
 
 
 def tool_get_project(config: Config, id: str) -> dict:
-    e = find_project(config, id)
+    e = find_visible_project(config, config.acting_principal, id)
     if not e:
         raise KeyError(f"no registered project with id or alias '{id}'")
     return {"registry": e.__dict__, "path_exists": Path(e.path).exists()}
@@ -198,7 +196,7 @@ def tool_search_timeline(config: Config, query: str = "", limit: int = 50) -> di
 
 
 def tool_project_context(config: Config, id: str) -> dict:
-    e = find_project(config, id)
+    e = find_visible_project(config, config.acting_principal, id)
     if not e:
         raise KeyError(f"no registered project with id or alias '{id}'")
     facts = projectsync.gather(e.path)

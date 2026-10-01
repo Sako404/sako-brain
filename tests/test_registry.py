@@ -2,7 +2,10 @@ import dataclasses
 import json
 import unittest
 
-from brain.registry import ProjectEntry, find_duplicates, find_project, load_registry
+from brain.registry import (
+    ProjectEntry, find_duplicates, find_project, find_visible_project,
+    load_registry, load_visible_registry,
+)
 from tests.helpers import TempVault
 
 
@@ -129,6 +132,80 @@ class TestFindProject(unittest.TestCase):
         # case-insensitive match would make behavior depend on what else
         # is registered, not on what the caller actually typed.
         self.assertIsNone(find_project(self.config, "Sako-Brain"))
+
+
+class TestRegistryVisibility(unittest.TestCase):
+    """Stage 2 (multi-user visibility): a registry row's visibility comes
+    from its OWN backing project note's owner_principal/audience —
+    registry.yaml itself carries no such field. load_registry/find_project
+    stay unfiltered on purpose (brain/projectops.py duplicate-checking,
+    `brain doctor`'s integrity scan); only the load_visible_*/find_visible_*
+    counterparts enforce this."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.vault.config().registry_path.write_text(
+            "projects:\n"
+            "  - id: project-private\n"
+            "    name: Marcin's Private Project\n"
+            "    path: /tmp/does-not-need-to-exist\n"
+            "    status: active\n"
+            "  - id: project-shared\n"
+            "    name: Shared Project\n"
+            "    path: /tmp/does-not-need-to-exist\n"
+            "    status: active\n"
+        )
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-private.md",
+                               id="project-private", type="project", title="Marcin's Private Project",
+                               owner_principal="principal:marcin", audience=[])
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-shared.md",
+                               id="project-shared", type="project", title="Shared Project",
+                               owner_principal="principal:marcin", audience=["principal:ania"])
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _as(self, principal_id: str):
+        return dataclasses.replace(self.config, acting_principal=principal_id)
+
+    def test_load_registry_stays_unfiltered(self):
+        # The plain loader must keep seeing everything regardless of who's
+        # "asking" — it has no acting principal in the first place, used by
+        # write-path duplicate checks and brain doctor's integrity scan.
+        entries = load_registry(self.config)
+        self.assertEqual({e.id for e in entries}, {"project-private", "project-shared"})
+
+    def test_owner_sees_both_in_visible_registry(self):
+        entries = load_visible_registry(self._as("principal-marcin"))
+        self.assertEqual({e.id for e in entries}, {"project-private", "project-shared"})
+
+    def test_non_owner_only_sees_the_shared_one(self):
+        entries = load_visible_registry(self._as("principal-ania"))
+        self.assertEqual({e.id for e in entries}, {"project-shared"})
+
+    def test_unrelated_third_party_sees_neither(self):
+        entries = load_visible_registry(self._as("principal-marcel"))
+        self.assertEqual(entries, [])
+
+    def test_find_visible_project_denies_an_invisible_entry(self):
+        self.assertIsNone(find_visible_project(self.config, "principal-ania", "project-private"))
+
+    def test_find_visible_project_resolves_a_visible_entry(self):
+        e = find_visible_project(self.config, "principal-ania", "project-shared")
+        self.assertIsNotNone(e)
+        self.assertEqual(e.id, "project-shared")
+
+    def test_registry_entry_with_no_backing_note_fails_closed(self):
+        self.vault.config().registry_path.write_text(
+            "projects:\n"
+            "  - id: project-orphaned\n"
+            "    name: Orphaned Entry\n"
+            "    path: /tmp/does-not-need-to-exist\n"
+            "    status: active\n"
+        )
+        entries = load_visible_registry(self._as("principal-marcin"))
+        self.assertEqual(entries, [])
 
 
 if __name__ == "__main__":

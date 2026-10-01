@@ -126,3 +126,32 @@ def filter_visible(config: Config, principal_id: str,
     resolve to Notes (reading frontmatter live) before calling this, never
     pass index-derived metadata."""
     return [n for n in notes if can_view_note(config, principal_id, n)]
+
+
+def read_visible_note_text(config: Config, principal_id: str, note_id: str) -> str:
+    """The authorized counterpart to update.find_note_path (a pure,
+    unauthenticated id -> path primitive used internally by write
+    functions, which must keep resolving regardless of visibility — Stage
+    2 only gates reads). This is THE function every direct get/read path
+    (`brain get`, the MCP `read_memory` tool, `project_context`'s own
+    record text) must call instead of reading a resolved path directly —
+    "authorize BEFORE reading/materializing record content".
+
+    Raises FileNotFoundError identically whether the note doesn't exist at
+    all or merely isn't visible to `principal_id` — a caller must never be
+    able to tell the two apart from this alone; that distinction would
+    itself leak the note's existence."""
+    # Local import: avoids update.py <-> visibility.py becoming a real
+    # import cycle (update.py has no reason to import this module back).
+    from .update import find_note_path
+
+    path = find_note_path(config, note_id)
+    if path is None:
+        raise FileNotFoundError(f"no note with id '{note_id}'")
+    try:
+        note = frontmatter.parse_file(path)
+    except frontmatter.FrontmatterError:
+        raise FileNotFoundError(f"no note with id '{note_id}'")
+    if not can_view_note(config, principal_id, note):
+        raise FileNotFoundError(f"no note with id '{note_id}'")
+    return path.read_text(encoding="utf-8")

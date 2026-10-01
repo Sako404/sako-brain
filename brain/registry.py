@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+from . import frontmatter
+from . import visibility
 from .paths import Config
 
 @dataclass
@@ -47,6 +49,52 @@ def load_registry(config: Config) -> list[ProjectEntry]:
             aliases=p.get("aliases") or [],
         ))
     return entries
+
+
+def _project_note_visible(config: Config, principal_id: str, entry: ProjectEntry) -> bool:
+    """Stage 2: a registry entry's visibility is decided by its OWN backing
+    project note's owner_principal/audience — the registry.yaml row itself
+    carries no such field. An entry with no resolvable backing note (a
+    stale/orphaned registry row — `brain doctor` already flags these
+    separately) fails closed, the same "a broken record never becomes an
+    open one" rule applied everywhere else in this layer."""
+    from .update import find_note_path  # local import: avoids a cycle risk
+
+    if not entry.id:
+        return False
+    path = find_note_path(config, entry.id)
+    if path is None:
+        return False
+    try:
+        note = frontmatter.parse_file(path)
+    except frontmatter.FrontmatterError:
+        return False
+    return visibility.can_view_note(config, principal_id, note)
+
+
+def load_visible_registry(config: Config, principal_id: str | None = None) -> list[ProjectEntry]:
+    """THE function every genuine read path (project listing, project
+    context, get_context's own project matches) must call — never
+    `load_registry` directly, which stays unfiltered on purpose for
+    write-path duplicate-id/path checks (brain/projectops.py) and
+    `brain doctor`'s integrity scan, both of which need the complete
+    picture to do their job correctly regardless of who's asking."""
+    if principal_id is None:
+        principal_id = config.acting_principal
+    return [e for e in load_registry(config) if _project_note_visible(config, principal_id, e)]
+
+
+def find_visible_project(config: Config, principal_id: str, id_or_alias: str) -> ProjectEntry | None:
+    """The authorized counterpart to find_project, for read paths — resolves
+    by id OR alias, but only among entries `principal_id` may see."""
+    entries = load_visible_registry(config, principal_id)
+    for e in entries:
+        if e.id == id_or_alias:
+            return e
+    for e in entries:
+        if id_or_alias in (e.aliases or []):
+            return e
+    return None
 
 
 def find_project(config: Config, id_or_alias: str) -> ProjectEntry | None:
