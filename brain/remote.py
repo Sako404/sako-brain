@@ -215,6 +215,18 @@ def should_proxy(argv: list[str]) -> bool:
     return cfg is not None
 
 
+# Stage 2 (multi-user visibility, gateway delegation): set ONLY by the
+# remote gateway process (brain/remote_gateway/*), per MCP request, from
+# an already-validated OAuth token's own principal_id — never by an
+# ordinary desktop/TRON client, which has no reason to ever set this. The
+# server-side dispatcher independently re-validates this assertion (and
+# refuses it outright from any identity other than the two dedicated
+# gateway ones) — this env var only controls what THIS process asks for,
+# never what it's granted. See brain-dispatch.py's
+# resolve_effective_principal() for the actual trust boundary.
+GATEWAY_ACTING_PRINCIPAL_ENV = "BRAIN_GATEWAY_ACTING_PRINCIPAL"
+
+
 def proxy_to_remote(argv: list[str]) -> int:
     """Re-exec as `ssh` against the configured canonical server, replacing
     this process entirely (stdin/stdout/stderr inherited as-is — required
@@ -236,7 +248,10 @@ def proxy_to_remote(argv: list[str]) -> int:
 
     is_write = _is_write_subcommand(argv)
     alias = _host_alias(is_write)
-    remote_command = shlex.join(argv)
+
+    acting_principal = os.environ.get(GATEWAY_ACTING_PRINCIPAL_ENV)
+    full_argv = ["--acting-principal", acting_principal, "--", *argv] if acting_principal else argv
+    remote_command = shlex.join(full_argv)
 
     ssh_argv = ["ssh", "-F", str(cfg_path), alias, "--", remote_command]
     os.execvp("ssh", ssh_argv)  # noqa: S606 — replaces this process; never returns

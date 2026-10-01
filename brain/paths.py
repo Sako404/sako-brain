@@ -255,6 +255,17 @@ class Config:
     # vault owner's own full access — never a different, lower-privileged
     # principal's view by accident.
     acting_principal: str = DEFAULT_ACTING_PRINCIPAL
+    # Stage 2 provenance (gateway delegation): which SSH identity actually
+    # connected (BRAIN_CALLER_CLIENT, e.g. "remote-gateway-read" or
+    # "desktop-client") and whether acting_principal came from that
+    # identity's own fixed --principal ("ssh") or from a gateway's
+    # per-request --acting-principal assertion ("gateway") —
+    # BRAIN_CALLER_TRANSPORT, set by brain-dispatch.py alongside
+    # BRAIN_CALLER_PRINCIPAL. Not yet read anywhere except to be threaded
+    # into the Brain-core audit log extension; carried here now so that
+    # extension doesn't also need a dispatcher/threading change.
+    caller_client: str = ""
+    caller_transport: str = ""
 
     def __post_init__(self):
         # frozen dataclass — the documented way to fill a derived default.
@@ -392,6 +403,8 @@ def default_config(brain_root: Path | None = None) -> Config:
         areas=tuple(str(a).strip() for a in (data.get("areas") or []) if str(a).strip()),
         remote_project_paths=os.environ.get("BRAIN_REMOTE_PROJECT_PATHS") == "1",
         acting_principal=os.environ.get("BRAIN_CALLER_PRINCIPAL") or DEFAULT_ACTING_PRINCIPAL,
+        caller_client=os.environ.get("BRAIN_CALLER_CLIENT") or "",
+        caller_transport=os.environ.get("BRAIN_CALLER_TRANSPORT") or "",
     )
 
 
