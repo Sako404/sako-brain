@@ -95,7 +95,7 @@ class TestSdistInstallation(SdistTestCase):
     def test_cli_starts(self):
         result = self.run_brain("--version")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "brain 0.12.3")
+        self.assertEqual(result.stdout.strip(), "brain 0.13.0")
 
     def test_package_resources_are_present(self):
         result = subprocess.run(

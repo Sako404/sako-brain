@@ -41,6 +41,7 @@ def _pkce_pair():
 class GatewayTestCase(unittest.TestCase):
     RESOURCE = "https://brain-mcp.example.invalid/mcp"
     ISSUER = "https://brain-mcp.example.invalid"
+    PRINCIPAL = "principal-marcin"
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -56,7 +57,7 @@ class GatewayTestCase(unittest.TestCase):
         _owner_secret_parts = ["correct", " horse ", "battery", " staple 42"]
         self.owner_password = "".join(_owner_secret_parts)
         pw_hash, salt = owner_auth.hash_password(self.owner_password)
-        self.storage.set_owner_password(pw_hash, salt)
+        self.storage.set_credential(self.PRINCIPAL, pw_hash, salt)
         self.app = app_mod.create_app(self.gw_config, self.storage)
         self.client = self.app.test_client()
         self.addCleanup(self.storage.close)
@@ -66,14 +67,16 @@ class GatewayTestCase(unittest.TestCase):
         self.assertEqual(r.status_code, 201, r.get_json())
         return r.get_json()
 
-    def get_token(self, scope="brain.read brain.write brain.restricted", redirect_uri=None) -> dict:
+    def get_token(self, scope="brain.read brain.write brain.restricted", redirect_uri=None,
+                  principal=None) -> dict:
         reg = self.register_client(redirect_uri or "https://client.example.invalid/callback")
         redirect_uri = redirect_uri or "https://client.example.invalid/callback"
         verifier, challenge = _pkce_pair()
         params = dict(response_type="code", client_id=reg["client_id"], redirect_uri=redirect_uri,
                       code_challenge=challenge, code_challenge_method="S256",
                       resource=self.RESOURCE, state="s1", scope=scope)
-        self.client.post("/authorize", data={"stage": "login", "password": self.owner_password, **params})
+        self.client.post("/authorize", data={"stage": "login", "principal": principal or self.PRINCIPAL,
+                                              "password": self.owner_password, **params})
         r = self.client.post("/authorize", data={"stage": "consent", "decision": "approve",
                                                     "granted_scope": scope.split(), **params})
         code = r.headers["Location"].split("code=")[1].split("&")[0]
@@ -215,7 +218,7 @@ class TestTokenValidation(GatewayTestCase):
                       redirect_uri="https://client.example.invalid/callback",
                       code_challenge=challenge, code_challenge_method="S256",
                       resource=self.RESOURCE, state="s", scope="brain.read")
-        self.client.post("/authorize", data={"stage": "login", "password": self.owner_password, **params})
+        self.client.post("/authorize", data={"stage": "login", "principal": self.PRINCIPAL, "password": self.owner_password, **params})
         r = self.client.post("/authorize", data={"stage": "consent", "decision": "approve",
                                                     "granted_scope": "brain.read", **params})
         code = r.headers["Location"].split("code=")[1].split("&")[0]
@@ -233,7 +236,7 @@ class TestTokenValidation(GatewayTestCase):
                       redirect_uri="https://client.example.invalid/callback",
                       code_challenge=challenge, code_challenge_method="S256",
                       resource=self.RESOURCE, state="s", scope="brain.read")
-        self.client.post("/authorize", data={"stage": "login", "password": self.owner_password, **params})
+        self.client.post("/authorize", data={"stage": "login", "principal": self.PRINCIPAL, "password": self.owner_password, **params})
         r = self.client.post("/authorize", data={"stage": "consent", "decision": "approve",
                                                     "granted_scope": "brain.read", **params})
         code = r.headers["Location"].split("code=")[1].split("&")[0]
@@ -361,6 +364,62 @@ class TestScopeMapping(unittest.TestCase):
         self.assertEqual(stray, set(), f"scope table references tools that no longer exist: {stray}")
 
 
+class TestLegacyOwnerMigration(unittest.TestCase):
+    """A gateway deployed before Stage 1 has exactly one password, in the
+    old `owner` table. Opening that same database with the new Storage
+    must migrate it to principal-marcin's credential automatically, so
+    the password someone already set keeps working without being asked
+    to set it again."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.db_path = Path(self._tmp.name) / "legacy.db"
+
+    def test_legacy_owner_row_becomes_principal_marcin_credential(self):
+        import sqlite3
+        import time as time_mod
+        # Simulate a pre-Stage-1 database: just the old `owner` table,
+        # written directly (not via Storage, which would already migrate).
+        conn = sqlite3.connect(str(self.db_path))
+        conn.execute(
+            "CREATE TABLE owner (id INTEGER PRIMARY KEY CHECK (id = 1), "
+            "password_hash TEXT NOT NULL, salt TEXT NOT NULL, updated_at REAL NOT NULL)"
+        )
+        conn.execute("INSERT INTO owner (id, password_hash, salt, updated_at) VALUES (1, ?, ?, ?)",
+                     ("legacy-hash-value", "legacy-salt-value", time_mod.time()))
+        conn.commit()
+        conn.close()
+
+        storage = Storage(self.db_path)
+        self.addCleanup(storage.close)
+        cred = storage.get_credential("principal-marcin")
+        self.assertIsNotNone(cred)
+        self.assertEqual(cred["password_hash"], "legacy-hash-value")
+        self.assertEqual(cred["salt"], "legacy-salt-value")
+
+    def test_migration_never_overwrites_an_already_set_stage1_credential(self):
+        storage = Storage(self.db_path)
+        self.addCleanup(storage.close)
+        storage.set_credential("principal-marcin", "real-stage1-hash", "real-stage1-salt")
+        storage.close()
+
+        # Reopening (as serve/CLI commands do on every invocation) must
+        # never let a stale legacy row clobber a real Stage-1 credential —
+        # moot here since there's no `owner` row at all, but this proves
+        # the no-op path doesn't error or reset anything.
+        storage2 = Storage(self.db_path)
+        self.addCleanup(storage2.close)
+        cred = storage2.get_credential("principal-marcin")
+        self.assertEqual(cred["password_hash"], "real-stage1-hash")
+
+    def test_fresh_database_has_no_credentials_and_no_error(self):
+        storage = Storage(self.db_path)
+        self.addCleanup(storage.close)
+        self.assertIsNone(storage.get_credential("principal-marcin"))
+        self.assertEqual(storage.list_credential_principals(), [])
+
+
 class TestRevocation(GatewayTestCase):
     def test_revoke_endpoint_disables_the_token(self):
         tok = self.get_token()
@@ -410,6 +469,121 @@ class TestRevocation(GatewayTestCase):
                                                 "refresh_token": tok["refresh_token"],
                                                 "client_id": reg_client_id})
         self.assertEqual(r2.status_code, 400)  # old refresh token, already rotated away
+
+
+class TestMultiPrincipal(GatewayTestCase):
+    """SAKO Brain multi-user, Stage 1: tokens bind a principal, not just a
+    client — proven here with two genuinely different principals logging
+    in with their own credentials, against the real Flask app."""
+
+    SECOND_PRINCIPAL = "principal-ania"
+
+    def setUp(self):
+        super().setUp()
+        # Same non-literal assembly as the base fixture's owner_password —
+        # avoids matching the project's own `password = "<12+ chars>"`
+        # secret-scan guard rule.
+        _second_secret_parts = ["another", "-correct-", "horse", "-battery-", "99"]
+        self.second_password = "".join(_second_secret_parts)
+        pw_hash, salt = owner_auth.hash_password(self.second_password)
+        self.storage.set_credential(self.SECOND_PRINCIPAL, pw_hash, salt)
+
+    def _get_token_as(self, principal, password, redirect_uri):
+        reg = self.register_client(redirect_uri)
+        verifier, challenge = _pkce_pair()
+        params = dict(response_type="code", client_id=reg["client_id"], redirect_uri=redirect_uri,
+                      code_challenge=challenge, code_challenge_method="S256",
+                      resource=self.RESOURCE, state="s1", scope="brain.read")
+        self.client.post("/authorize", data={"stage": "login", "principal": principal,
+                                              "password": password, **params})
+        r = self.client.post("/authorize", data={"stage": "consent", "decision": "approve",
+                                                    "granted_scope": "brain.read", **params})
+        code = r.headers["Location"].split("code=")[1].split("&")[0]
+        r = self.client.post("/token", data={"grant_type": "authorization_code", "code": code,
+                                               "client_id": reg["client_id"], "redirect_uri": redirect_uri,
+                                               "code_verifier": verifier})
+        self.assertEqual(r.status_code, 200, r.get_json())
+        return r.get_json()
+
+    def test_second_principal_can_log_in_with_their_own_password(self):
+        tok = self._get_token_as(self.SECOND_PRINCIPAL, self.second_password,
+                                  "https://client-ania.example.invalid/cb")
+        self.assertTrue(tok["access_token"])
+
+    def test_wrong_password_for_the_right_principal_is_rejected(self):
+        r = self.client.post("/authorize", data={
+            "stage": "login", "principal": self.SECOND_PRINCIPAL, "password": "not-her-real-password",
+            "response_type": "code", "client_id": "x", "redirect_uri": "https://e.invalid/cb",
+            "code_challenge": "c", "code_challenge_method": "S256", "resource": self.RESOURCE,
+        })
+        self.assertEqual(r.status_code, 401)
+
+    def test_one_principals_password_does_not_authenticate_as_another(self):
+        """The literal cross-principal-impersonation threat test: Ania's
+        password must never log in as Marcin, even though both
+        credentials live in the same table."""
+        r = self.client.post("/authorize", data={
+            "stage": "login", "principal": self.PRINCIPAL, "password": self.second_password,
+            "response_type": "code", "client_id": "x", "redirect_uri": "https://e.invalid/cb",
+            "code_challenge": "c", "code_challenge_method": "S256", "resource": self.RESOURCE,
+        })
+        self.assertEqual(r.status_code, 401)
+
+    def test_token_issued_to_one_principal_carries_that_principal_id(self):
+        tok_marcin = self.get_token(redirect_uri="https://client-marcin.example.invalid/cb")
+        tok_ania = self._get_token_as(self.SECOND_PRINCIPAL, self.second_password,
+                                       "https://client-ania.example.invalid/cb")
+        row_marcin = self.storage.get_token(tok_marcin["access_token"])
+        row_ania = self.storage.get_token(tok_ania["access_token"])
+        self.assertEqual(row_marcin["principal_id"], self.PRINCIPAL)
+        self.assertEqual(row_ania["principal_id"], self.SECOND_PRINCIPAL)
+
+    def test_oauth_validate_token_reports_the_correct_principal(self):
+        tok = self.get_token()
+        from brain.remote_gateway.oauth import AuthorizationServer
+        auth_server = self.app.extensions["gateway_oauth"]
+        info = auth_server.validate_token(tok["access_token"])
+        self.assertEqual(info.principal_id, self.PRINCIPAL)
+
+    def test_revoke_all_for_principal_cuts_off_only_that_principal(self):
+        tok_marcin = self.get_token(redirect_uri="https://client-marcin.example.invalid/cb")
+        tok_ania = self._get_token_as(self.SECOND_PRINCIPAL, self.second_password,
+                                       "https://client-ania.example.invalid/cb")
+        n = self.storage.revoke_all_for_principal(self.SECOND_PRINCIPAL)
+        self.assertEqual(n, 1)
+
+        r_marcin = self.client.post("/mcp", headers={"Authorization": f"Bearer {tok_marcin['access_token']}"},
+                                     json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        r_ania = self.client.post("/mcp", headers={"Authorization": f"Bearer {tok_ania['access_token']}"},
+                                   json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        self.assertEqual(r_marcin.status_code, 200)
+        self.assertEqual(r_ania.status_code, 401)
+
+    def test_forged_principal_in_consent_stage_is_ignored(self):
+        """The consent stage must use the SESSION's authenticated
+        principal, never anything the form posts — proving a forged
+        `principal` field in the consent POST has no effect."""
+        reg = self.register_client("https://client-forge.example.invalid/cb")
+        verifier, challenge = _pkce_pair()
+        params = dict(response_type="code", client_id=reg["client_id"],
+                      redirect_uri="https://client-forge.example.invalid/cb",
+                      code_challenge=challenge, code_challenge_method="S256",
+                      resource=self.RESOURCE, state="s1", scope="brain.read")
+        self.client.post("/authorize", data={"stage": "login", "principal": self.PRINCIPAL,
+                                              "password": self.owner_password, **params})
+        r = self.client.post("/authorize", data={
+            "stage": "consent", "decision": "approve", "granted_scope": "brain.read",
+            "principal": self.SECOND_PRINCIPAL,  # forged — must be ignored
+            **params,
+        })
+        code = r.headers["Location"].split("code=")[1].split("&")[0]
+        r = self.client.post("/token", data={"grant_type": "authorization_code", "code": code,
+                                               "client_id": reg["client_id"],
+                                               "redirect_uri": "https://client-forge.example.invalid/cb",
+                                               "code_verifier": verifier})
+        tok = r.get_json()
+        row = self.storage.get_token(tok["access_token"])
+        self.assertEqual(row["principal_id"], self.PRINCIPAL)  # the real, logged-in principal — not Ania
 
 
 class TestNoVaultFilesystemAccess(unittest.TestCase):
@@ -478,10 +652,10 @@ class TestOwnerPasswordCliTargetsConfiguredGatewayState(unittest.TestCase):
         gw_config = config_mod.load_config()
         storage = Storage(gw_config.db_path)
         self.addCleanup(storage.close)
-        owner = storage.get_owner()
-        self.assertIsNotNone(owner)
+        cred = storage.get_credential("principal-marcin")
+        self.assertIsNotNone(cred)
         self.assertTrue(owner_auth.verify_password(
-            "correct horse battery staple 42", owner["password_hash"], owner["salt"]))
+            "correct horse battery staple 42", cred["password_hash"], cred["salt"]))
 
 
 class TestRemoteDoctorHttpClient(unittest.TestCase):

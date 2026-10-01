@@ -11,6 +11,7 @@ import sys
 
 from . import config as config_mod
 from . import owner_auth
+from . import storage as storage_mod
 from .storage import Storage
 
 
@@ -49,7 +50,8 @@ def cmd_set_owner_password(args) -> int:
     except config_mod.GatewayConfigError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
-    password = args.password or getpass.getpass("New owner password: ")
+    principal_id = getattr(args, "principal", None) or storage_mod.LEGACY_OWNER_PRINCIPAL_ID
+    password = args.password or getpass.getpass(f"New password for {principal_id}: ")
     if not password or len(password) < 12:
         print("Error: password must be at least 12 characters", file=sys.stderr)
         return 2
@@ -59,8 +61,8 @@ def cmd_set_owner_password(args) -> int:
             print("Error: passwords did not match", file=sys.stderr)
             return 2
     password_hash, salt = owner_auth.hash_password(password)
-    storage.set_owner_password(password_hash, salt)
-    print("Owner password set.")
+    storage.set_credential(principal_id, password_hash, salt)
+    print(f"Password set for {principal_id}.")
     return 0
 
 
@@ -91,6 +93,18 @@ def cmd_revoke_client(args) -> int:
     deleted = storage.delete_client(args.client_id) if getattr(args, "forget", False) else False
     print(f"Revoked {n} token(s) for client {args.client_id}."
           + (" Client registration removed." if deleted else ""))
+    return 0
+
+
+def cmd_revoke_principal(args) -> int:
+    try:
+        storage = _storage_for_configured_gateway()
+    except config_mod.GatewayConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    n = storage.revoke_all_for_principal(args.principal)
+    print(f"Revoked {n} outstanding token(s) for {args.principal}, across every client they used. "
+          "Other principals are unaffected.")
     return 0
 
 

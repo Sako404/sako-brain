@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, indexer, integrity, memoryops, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, writepolicy
+from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, writepolicy
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -378,6 +378,125 @@ def cmd_decision_create(config: Config, args) -> int:
     print(f"Created {dest.relative_to(config.brain_root)}")
     if args.supersedes:
         print(f"Marked {args.supersedes} as superseded, linked forward.")
+    return 0
+
+
+# ---- principal/group administration (SAKO Brain multi-user, Stage 1) -----
+#
+# Deliberately NOT reachable via a server's SSH forced-command dispatcher
+# under any mode — no SSH identity, including the ones Claude Code/Codex/
+# the remote gateway use, can invoke these remotely. They only run where
+# `brain` has direct, local filesystem access to the canonical vault,
+# which for a server deployment means a local shell on the machine that
+# holds it. That is this phase's whole admin-only boundary (hardening
+# requirement 1) — not a flag or a role check in this code, a structural
+# fact about what can reach it at all.
+
+def cmd_principal_create(config: Config, args) -> int:
+    writepolicy.scan_for_secrets(args.display_name)
+    try:
+        p = identity.create_principal(config, display_name=args.display_name,
+                                       kind=args.kind, role=args.role or "")
+    except identity.IdentityError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(dataclasses.asdict(p), indent=2, ensure_ascii=False))
+        return 0
+    print(f"Created {p.id}  (kind={p.kind}  role={p.role or '(none)'}  status={p.status})")
+    return 0
+
+
+def cmd_principal_list(config: Config, args) -> int:
+    principals = identity.list_principals(config)
+    if getattr(args, "json", False):
+        print(json.dumps([dataclasses.asdict(p) for p in principals], indent=2, ensure_ascii=False))
+        return 0
+    if not principals:
+        print("No principals registered yet.")
+        return 0
+    for p in principals:
+        print(f"{p.id}  [{p.status}]  kind={p.kind}  role={p.role or '(none)'}  {p.display_name}")
+    return 0
+
+
+def cmd_principal_set_status(config: Config, args) -> int:
+    try:
+        p = identity.set_principal_status(config, args.id, args.status)
+    except identity.IdentityError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"{p.id} status -> {p.status}")
+    return 0
+
+
+def cmd_principal_set_role(config: Config, args) -> int:
+    writepolicy.scan_for_secrets(args.role)
+    try:
+        p = identity.set_principal_role(config, args.id, args.role)
+    except identity.IdentityError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"{p.id} role -> {p.role}")
+    return 0
+
+
+def cmd_principal_break_glass(config: Config, args) -> int:
+    if not args.confirm_break_glass:
+        print("Error: --confirm-break-glass is required — this unconditionally restores one "
+              "principal to status=active with the given role, bypassing every other check. "
+              "Use only to recover from being locked out by a bad role/status change.",
+              file=sys.stderr)
+        return 2
+    p = identity.break_glass_restore_admin(config, args.id, args.role)
+    print(f"BREAK GLASS: {p.id} forced to status=active, role={p.role}. This was audited.")
+    return 0
+
+
+def cmd_group_create(config: Config, args) -> int:
+    writepolicy.scan_for_secrets(args.display_name)
+    try:
+        g = identity.create_group(config, display_name=args.display_name)
+    except identity.IdentityError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(dataclasses.asdict(g), indent=2, ensure_ascii=False))
+        return 0
+    print(f"Created {g.id}")
+    return 0
+
+
+def cmd_group_list(config: Config, args) -> int:
+    groups = identity.list_groups(config)
+    if getattr(args, "json", False):
+        print(json.dumps([dataclasses.asdict(g) for g in groups], indent=2, ensure_ascii=False))
+        return 0
+    if not groups:
+        print("No groups registered yet.")
+        return 0
+    for g in groups:
+        print(f"{g.id}  members={g.members}  {g.display_name}")
+    return 0
+
+
+def cmd_group_add_member(config: Config, args) -> int:
+    try:
+        g = identity.add_group_member(config, args.id, args.principal)
+    except identity.IdentityError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"{g.id} members: {g.members}")
+    return 0
+
+
+def cmd_group_remove_member(config: Config, args) -> int:
+    try:
+        g = identity.remove_group_member(config, args.id, args.principal)
+    except identity.IdentityError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"{g.id} members: {g.members}")
     return 0
 
 
@@ -1287,6 +1406,56 @@ def build_parser() -> argparse.ArgumentParser:
                                         "'superseded' and links forward, never edits its content")
     p_decision_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
+    p_principal = sub.add_parser(
+        "principal", help="Administer principals (identity/authorization — local only, "
+                           "never reachable over the SSH dispatcher or a remote client)")
+    principal_sub = p_principal.add_subparsers(dest="principal_command", required=True)
+
+    p_principal_create = principal_sub.add_parser("create", help="Register a new principal")
+    p_principal_create.add_argument("--display-name", required=True, dest="display_name")
+    p_principal_create.add_argument("--kind", default="human", choices=list(identity.VALID_KINDS))
+    p_principal_create.add_argument("--role", default="", help="A deployment-defined role id "
+                                     "(e.g. 'admin', 'adult') — the engine does not enumerate these")
+    p_principal_create.add_argument("--json", action="store_true")
+
+    p_principal_list = principal_sub.add_parser("list", help="List every principal")
+    p_principal_list.add_argument("--json", action="store_true")
+
+    p_principal_status = principal_sub.add_parser("set-status", help="Enable/disable a principal")
+    p_principal_status.add_argument("id")
+    p_principal_status.add_argument("--status", required=True, choices=list(identity.VALID_STATUSES))
+
+    p_principal_role = principal_sub.add_parser("set-role", help="Change a principal's role")
+    p_principal_role.add_argument("id")
+    p_principal_role.add_argument("--role", required=True)
+
+    p_principal_bg = principal_sub.add_parser(
+        "break-glass-restore-admin",
+        help="Recovery only: unconditionally force one principal to status=active with the "
+             "given role. Local-only by construction (see module docstring); heavily audited.")
+    p_principal_bg.add_argument("id")
+    p_principal_bg.add_argument("--role", required=True)
+    p_principal_bg.add_argument("--confirm-break-glass", action="store_true", dest="confirm_break_glass")
+
+    p_group = sub.add_parser(
+        "group", help="Administer groups (sharing audience only — local only, same as `principal`)")
+    group_sub = p_group.add_subparsers(dest="group_command", required=True)
+
+    p_group_create = group_sub.add_parser("create", help="Register a new group")
+    p_group_create.add_argument("--display-name", required=True, dest="display_name")
+    p_group_create.add_argument("--json", action="store_true")
+
+    p_group_list = group_sub.add_parser("list", help="List every group")
+    p_group_list.add_argument("--json", action="store_true")
+
+    p_group_add = group_sub.add_parser("add-member", help="Add a principal to a group")
+    p_group_add.add_argument("id")
+    p_group_add.add_argument("--principal", required=True)
+
+    p_group_remove = group_sub.add_parser("remove-member", help="Remove a principal from a group")
+    p_group_remove.add_argument("id")
+    p_group_remove.add_argument("--principal", required=True)
+
     p_timeline = sub.add_parser("timeline", help="List timeline entries, newest first (or 'add' one)")
     p_timeline.add_argument("--limit", type=int, default=50)
     p_timeline.add_argument("--query", default=None,
@@ -1494,7 +1663,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_gw_serve.add_argument("--host", default=None, help="Override the configured host")
     p_gw_serve.add_argument("--port", type=int, default=None, help="Override the configured port")
 
-    p_gw_owner = gw_sub.add_parser("set-owner-password", help="Set/change the consent-screen owner password")
+    p_gw_owner = gw_sub.add_parser(
+        "set-owner-password", help="Set/change a principal's gateway login password")
+    p_gw_owner.add_argument("--principal", default=None,
+                             help="Defaults to principal-marcin (every pre-Stage-1 gateway's one principal)")
     p_gw_owner.add_argument("--password", default=None, help="Omit to be prompted (recommended — avoids shell history)")
 
     p_gw_list = gw_sub.add_parser("list-clients", help="List registered OAuth clients")
@@ -1503,6 +1675,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_gw_revoke_client = gw_sub.add_parser("revoke-client", help="Revoke all tokens for one client")
     p_gw_revoke_client.add_argument("client_id")
     p_gw_revoke_client.add_argument("--forget", action="store_true", help="Also delete the client registration")
+
+    p_gw_revoke_principal = gw_sub.add_parser(
+        "revoke-principal", help="Revoke every token for one principal, across every client they used")
+    p_gw_revoke_principal.add_argument("principal")
 
     gw_sub.add_parser("revoke-all", help="Revoke every outstanding token — cuts off all remote web AI access")
 
@@ -1609,6 +1785,8 @@ def _dispatch_remote_gateway(args) -> int:
         return remote_gateway_cli.cmd_list_clients(args)
     if cmd == "revoke-client":
         return remote_gateway_cli.cmd_revoke_client(args)
+    if cmd == "revoke-principal":
+        return remote_gateway_cli.cmd_revoke_principal(args)
     if cmd == "revoke-all":
         return remote_gateway_cli.cmd_revoke_all(args)
     print(f"Error: unknown remote-gateway command {cmd!r}", file=sys.stderr)
@@ -1648,6 +1826,26 @@ def _dispatch(config: Config, args, parser) -> int:
     if args.command == "decision":
         if args.decision_command == "create":
             return cmd_decision_create(config, args)
+    if args.command == "principal":
+        if args.principal_command == "create":
+            return cmd_principal_create(config, args)
+        if args.principal_command == "list":
+            return cmd_principal_list(config, args)
+        if args.principal_command == "set-status":
+            return cmd_principal_set_status(config, args)
+        if args.principal_command == "set-role":
+            return cmd_principal_set_role(config, args)
+        if args.principal_command == "break-glass-restore-admin":
+            return cmd_principal_break_glass(config, args)
+    if args.command == "group":
+        if args.group_command == "create":
+            return cmd_group_create(config, args)
+        if args.group_command == "list":
+            return cmd_group_list(config, args)
+        if args.group_command == "add-member":
+            return cmd_group_add_member(config, args)
+        if args.group_command == "remove-member":
+            return cmd_group_remove_member(config, args)
     if args.command == "timeline":
         if getattr(args, "timeline_command", None) == "add":
             return cmd_timeline_add(config, args)

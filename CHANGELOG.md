@@ -5,6 +5,74 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.13.0 — 2026-10-01 — Identity + Authorization Foundation (Stage 1, multi-user)
+
+First step of SAKO Brain multi-user support — identity/credential
+plumbing only. **No family access is activated by this release**; every
+existing identity becomes `principal-marcin` automatically, and nothing
+in Brain's own content gains or loses visibility (that's Stage 2).
+
+### Added
+
+- **`brain principal`** / **`brain group`** — new CLI commands
+  (`create`/`list`/`set-status`/`set-role`, and groups'
+  `create`/`list`/`add-member`/`remove-member`) managing principal and
+  group records. These are deliberately **not reachable via the SSH
+  forced-command dispatcher under any mode** — no remote identity,
+  including the ones Claude Code/Codex/the remote gateway use, can
+  invoke them. Principal/group records live under `90_SYSTEM/identity/`,
+  structurally outside every content directory `search`/`get`/`context`
+  ever walk, so they can never surface through ordinary read paths —
+  not a permission check, a fact about where the files are.
+- **`brain principal break-glass-restore-admin`** — the one documented
+  recovery path for a bad status/role change locking an admin out:
+  unconditionally forces one principal back to `status=active` with a
+  given role. Local-only by the same construction as every other
+  principal command (never dispatcher-reachable); requires
+  `--confirm-break-glass`; every call audited with a distinct,
+  impossible-to-miss event name.
+- **Remote MCP gateway, principal-aware**: OAuth tokens and
+  authorization codes now bind `principal_id` alongside `client_id` —
+  login is "sign in as a principal" (a principal field alongside the
+  password), not a single shared owner password. `brain remote-gateway
+  set-owner-password` gained `--principal` (defaults to
+  `principal-marcin`, so nothing already configured needs resetting).
+  New `brain remote-gateway revoke-principal` kills every token for one
+  person across every client they've used, complementing the existing
+  `revoke-client` (kill one compromised client without logging everyone
+  else out) and `revoke-all` (kill switch). A gateway database from
+  before this release migrates its single owner password to
+  `principal-marcin`'s credential automatically, in place, the first
+  time it's opened.
+- **SSH dispatcher, principal-aware**: every forced command now also
+  carries `--principal`/`--client` (fixed in `authorized_keys` at
+  install time, exactly like the existing `--mode` — never anything the
+  connecting client can send). Before executing anything, the dispatcher
+  checks the named principal is `status: active` by reading the
+  canonical vault's own principal record directly, in-process, every
+  single connection — never cached — so disabling a principal takes
+  effect on its very next connection regardless of whether its SSH key
+  still exists or an OAuth token hasn't expired yet. `--principal`
+  defaults to `principal-marcin`, so every pre-existing `authorized_keys`
+  line keeps working unchanged.
+- **Brain-core audit log** (`brain/audit.py`) — append-only,
+  redaction-safe (principal/client/transport/event only, never a record
+  body or a secret), logging principal/group lifecycle events. The
+  gateway gained its own separate `audit_log` table for
+  login/consent/token/revoke events — two logs because only each
+  process can honestly write the one it's closest to, not two
+  re-implementations of the same thing.
+
+### Fixed
+
+- `brain-mcp.marcinsakowski.com`, the pre-`mcp.sako.systems` rollback
+  endpoint, decommissioned (Stage 0B) after re-confirming
+  `mcp.sako.systems` was healthy and the ChatGPT/Claude.ai integration
+  still valid. Only its TrueNAS app, Cloudflare Tunnel ingress rule, and
+  DNS record were removed — its ZFS datasets (including the old OAuth
+  database) were left on disk, not deleted. `marcinsakowski.com`'s other
+  seven hostnames are unaffected, verified live.
+
 ## 0.12.3 — 2026-10-01 — write-to-index consistency (Stage 0A, multi-user groundwork)
 
 ### Fixed
