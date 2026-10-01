@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, visibility, writepolicy
+from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, migrate_stage2, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, visibility, writepolicy
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -466,6 +466,33 @@ def cmd_principal_break_glass(config: Config, args) -> int:
     p = identity.break_glass_restore_admin(config, args.id, args.role)
     print(f"BREAK GLASS: {p.id} forced to status=active, role={p.role}. This was audited.")
     return 0
+
+
+def cmd_migrate_stage2_owner_principal(config: Config, args) -> int:
+    report = migrate_stage2.migrate_owner_principal(config, dry_run=not args.apply)
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "dry_run": not args.apply,
+            "total_notes": report.total_notes,
+            "already_migrated": report.already_migrated,
+            "migrated": report.migrated,
+            "migrated_paths": [str(p.relative_to(config.brain_root)) for p in report.migrated_paths],
+            "parse_errors": [{"path": str(p.relative_to(config.brain_root)), "error": e}
+                              for p, e in report.parse_errors],
+        }, indent=2, ensure_ascii=False))
+        return 1 if report.parse_errors else 0
+
+    verb = "Would migrate" if not args.apply else "Migrated"
+    print(f"{verb} {report.migrated} of {report.total_notes} notes "
+          f"({report.already_migrated} already had owner_principal).")
+    if report.parse_errors:
+        print(f"\n{len(report.parse_errors)} note(s) could not be parsed (skipped, not migrated):")
+        for p, e in report.parse_errors:
+            print(f"  - {p.relative_to(config.brain_root)}: {e}")
+    if not args.apply and report.migrated:
+        print("\nThis was a dry run — no files were changed. Pass --apply to actually write.")
+    return 1 if report.parse_errors else 0
 
 
 def cmd_group_create(config: Config, args) -> int:
@@ -1421,6 +1448,16 @@ def build_parser() -> argparse.ArgumentParser:
                                         "'superseded' and links forward, never edits its content")
     p_decision_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
+    p_migrate_stage2 = sub.add_parser(
+        "migrate-stage2-owner-principal",
+        help="Backfill owner_principal/audience on every existing note (local only, "
+             "never reachable over the SSH dispatcher or a remote client). Dry-run "
+             "by default — pass --apply to actually write.")
+    p_migrate_stage2.add_argument("--apply", action="store_true",
+                                   help="Actually write the migrated frontmatter. Without this, "
+                                        "reports what WOULD change and changes nothing.")
+    p_migrate_stage2.add_argument("--json", action="store_true")
+
     p_principal = sub.add_parser(
         "principal", help="Administer principals (identity/authorization — local only, "
                            "never reachable over the SSH dispatcher or a remote client)")
@@ -1845,6 +1882,8 @@ def _dispatch(config: Config, args, parser) -> int:
     if args.command == "decision":
         if args.decision_command == "create":
             return cmd_decision_create(config, args)
+    if args.command == "migrate-stage2-owner-principal":
+        return cmd_migrate_stage2_owner_principal(config, args)
     if args.command == "principal":
         if args.principal_command == "create":
             return cmd_principal_create(config, args)
