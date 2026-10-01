@@ -151,6 +151,8 @@ def cmd_update(config: Config, args) -> int:
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
+    if getattr(args, "audience", None) is not None:
+        set_fields["audience"] = args.audience
     if set_fields.get("sensitivity") == "restricted":
         writepolicy.require_restricted_confirmation("restricted", getattr(args, "confirm_restricted", False))
     writepolicy.scan_for_secrets(args.append_text or "", *(str(v) for v in set_fields.values()))
@@ -159,6 +161,9 @@ def cmd_update(config: Config, args) -> int:
             config, args.id, set_fields=set_fields or None, append_text=args.append_text,
         )
     except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except update_mod.UpdateError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     if getattr(args, "json", False):
@@ -306,7 +311,7 @@ def cmd_project_update(config: Config, args) -> int:
             path = update_mod.update_memory(
                 config, args.id, set_fields=set_fields or None, append_text=args.append_text,
             )
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, update_mod.UpdateError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
         updated_path = str(path.relative_to(config.brain_root))
@@ -1368,6 +1373,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
                           help="Required when --set sensitivity=restricted. Never set this on a "
                                "caller's behalf.")
+    p_update.add_argument("--audience", nargs="*", default=None,
+                          help="Change sharing (Stage 2), e.g. 'group:household' or 'principal:ania' "
+                               "— pass with no values for private. Only the record's current owner "
+                               "may change this. Use this, never --set audience=..., which would "
+                               "write a literal string instead of a list.")
     p_update.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     sub.add_parser("projects", help="List registered projects")

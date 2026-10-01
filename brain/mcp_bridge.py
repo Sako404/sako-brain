@@ -338,7 +338,15 @@ def _set_flags(a: dict, key: str = "set_fields") -> list[str]:
 
 def _t_update_memory(a: dict):
     argv = ["update", a["id"], "--json"]
-    argv += _set_flags(a)
+    # audience must never go through the generic --set key=value (which
+    # would write Python's str(list) as a literal string, not a real YAML
+    # list) — routed through the dedicated --audience flag instead, same
+    # as every creation tool already does.
+    set_fields = dict(a.get("set_fields") or {})
+    audience = set_fields.pop("audience", None)
+    argv += _set_flags({"set_fields": set_fields})
+    if audience is not None:
+        argv += ["--audience", *audience]
     if a.get("append_text"):
         argv += ["--append-text", a["append_text"]]
     argv += _confirm_restricted_flag(a)
