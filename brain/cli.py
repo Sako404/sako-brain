@@ -441,6 +441,16 @@ def cmd_principal_set_role(config: Config, args) -> int:
     return 0
 
 
+def cmd_principal_delete(config: Config, args) -> int:
+    try:
+        identity.delete_principal(config, args.id)
+    except identity.IdentityError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Deleted {args.id}.")
+    return 0
+
+
 def cmd_principal_break_glass(config: Config, args) -> int:
     if not args.confirm_break_glass:
         print("Error: --confirm-break-glass is required — this unconditionally restores one "
@@ -1425,6 +1435,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_principal_status.add_argument("id")
     p_principal_status.add_argument("--status", required=True, choices=list(identity.VALID_STATUSES))
 
+    p_principal_delete = principal_sub.add_parser(
+        "delete", help="Permanently remove a principal record (refuses if still a group member)")
+    p_principal_delete.add_argument("id")
+
     p_principal_role = principal_sub.add_parser("set-role", help="Change a principal's role")
     p_principal_role.add_argument("id")
     p_principal_role.add_argument("--role", required=True)
@@ -1835,6 +1849,8 @@ def _dispatch(config: Config, args, parser) -> int:
             return cmd_principal_set_status(config, args)
         if args.principal_command == "set-role":
             return cmd_principal_set_role(config, args)
+        if args.principal_command == "delete":
+            return cmd_principal_delete(config, args)
         if args.principal_command == "break-glass-restore-admin":
             return cmd_principal_break_glass(config, args)
     if args.command == "group":

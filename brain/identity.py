@@ -176,6 +176,27 @@ def set_principal_role(config: Config, principal_id: str, role: str) -> Principa
     return _principal_from_note(note)
 
 
+def delete_principal(config: Config, principal_id: str) -> None:
+    """Permanently removes a principal record — unlike every other
+    identity mutation, which prefers a status change over deletion
+    (`set_principal_status`), this is a genuine delete, for cleaning up
+    throwaway/mistaken records (e.g. a test principal) that were never
+    referenced by any real credential, audience, or group membership.
+    Refuses to delete a principal that is still a member of any group,
+    so cleanup never silently orphans a dangling audience reference —
+    remove it from the group first."""
+    path = _principal_path(config, principal_id)
+    if not path.exists():
+        raise IdentityError(f"no principal '{principal_id}'")
+    referencing = [g.id for g in list_groups(config) if principal_id in g.members]
+    if referencing:
+        raise IdentityError(
+            f"'{principal_id}' is still a member of {referencing} — remove from each group first"
+        )
+    path.unlink()
+    audit.log_event(config, event="principal.delete", principal_id=principal_id)
+
+
 def break_glass_restore_admin(config: Config, principal_id: str, role: str) -> Principal:
     """The one documented recovery path for a bad ACL/group/role change
     locking the admin out (hardening requirement 6). Unconditionally
