@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from . import indexer
 from .paths import Config
 from .registry import find_project, load_registry
 
@@ -129,6 +130,7 @@ def write(config: Config, project_id: str, sections: HandoffSections,
         new_text = _frontmatter(entry.id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section
 
     path.write_text(new_text, encoding="utf-8")
+    indexer.index_note(config, path)
     return path
 
 

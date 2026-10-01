@@ -25,6 +25,7 @@ from pathlib import Path
 import yaml
 
 from . import frontmatter
+from . import indexer
 from .paths import Config
 from .registry import find_project, load_registry
 from .update import find_note_path
@@ -173,6 +174,7 @@ def create_project(config: Config, id: str, name: str, path: str, status: str = 
         "category": category or "", "created": today, "updated": today,
         "aliases": aliases or [],
     })
+    indexer.index_note(config, dest)
     return dest
 
 
@@ -221,6 +223,7 @@ def set_project_status(config: Config, project_id: str, new_status: str) -> Stat
     except ProjectWriteError:
         registry_updated = False  # no registry entry for this id — reported, not fatal
 
+    indexer.index_note(config, new_path)
     return StatusChangeResult(
         id=project_id, old_status=old_status, new_status=new_status,
         old_path=old_path, new_path=new_path, moved=moved,
@@ -327,4 +330,5 @@ def update_section(config: Config, project_id: str, section: str, mode: str, con
     note.body = "".join(lines[:start]) + new_block + "".join(lines[end:])
     note.meta["updated"] = dt.date.today().isoformat()
     path.write_text(frontmatter.render(note), encoding="utf-8")
+    indexer.index_note(config, path)
     return path

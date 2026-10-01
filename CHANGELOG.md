@@ -5,6 +5,34 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.12.3 — 2026-10-01 — write-to-index consistency (Stage 0A, multi-user groundwork)
+
+### Fixed
+
+- Every write primitive (`remember`, `update`, `project create/update/
+  close/section-update`, `decision create` — including its superseded-
+  record side-write, `timeline add`, `note create`, `memory accept`,
+  `handoff write`) left the SQLite FTS5 search index untouched after
+  writing, so a note existed on disk immediately but `search`/`context`/
+  MCP `search_memory` wouldn't see it until a later, separate `brain
+  index` ran. Found live during a staleness-test acceptance pass — a
+  client read a record moments after writing it and got "not found".
+  Fixed by having every write primitive incrementally index exactly the
+  note(s) it touched (`indexer.index_note()`, factored out of
+  `rebuild()`'s per-note logic so there is one implementation, not two)
+  immediately after writing — never a full reindex per write.
+- `brain get <id>` depended on the SQLite index to resolve id -> path
+  (and refused with "Try `brain index` first" when it lagged), while
+  `read_memory`'s in-process equivalent already resolved ids by walking
+  Markdown directly. Unified: `brain get` now uses the same
+  index-independent resolution, so direct reads by id never depend on
+  indexing timing at all, structurally rather than by being fast enough.
+
+The index remains exactly what it always was — a rebuildable cache,
+never the authoritative copy of anything; this only shrinks the window
+during which it can lag the Markdown that actually matters, and removes
+one read path's dependency on it entirely.
+
 ## 0.12.2 — 2026-10-01 — owner-password CLI mistargeting + RFC 9728 path-aware metadata
 
 ### Fixed

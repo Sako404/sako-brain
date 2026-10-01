@@ -21,6 +21,7 @@ import datetime as dt
 from pathlib import Path
 
 from . import frontmatter
+from . import indexer
 from .capture import slugify
 from .paths import Config
 
@@ -111,4 +112,5 @@ def create_memory(config: Config, type_: str, title: str, text: str = "",
     note = frontmatter.Note(path=dest, meta=meta, body=_body_for(type_, title, text))
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(frontmatter.render(note), encoding="utf-8")
+    indexer.index_note(config, dest)
     return dest
