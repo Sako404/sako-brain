@@ -190,5 +190,58 @@ class TestHandoffVisibility(unittest.TestCase):
         self.assertEqual(handoff.list_projects_with_handoffs(self._as("principal-ania")), [])
 
 
+class TestWriteSetsOwnership(unittest.TestCase):
+    """Stage 2 (multi-user visibility): same default-ownership-on-write
+    rule as capture.capture — see tests/test_capture.py. Only applies to a
+    FRESH handoff (first write for a project) — an ongoing handoff's
+    existing frontmatter, including its owner_principal, must never be
+    touched by a later session's write()."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-example\n"
+            "    name: Example Project\n"
+            "    path: /tmp/does-not-need-to-exist-for-this-test\n"
+            "    status: active\n"
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _as(self, principal_id: str):
+        import dataclasses
+        return dataclasses.replace(self.config, acting_principal=principal_id)
+
+    def test_fresh_handoff_owner_principal_is_the_acting_principal(self):
+        sections = handoff.HandoffSections(attempted="x")
+        path = handoff.write(self._as("principal-ania"), "project-example", sections)
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.meta["owner_principal"], "principal:ania")
+
+    def test_fresh_handoff_audience_defaults_to_private(self):
+        sections = handoff.HandoffSections(attempted="x")
+        path = handoff.write(self.config, "project-example", sections)
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.meta["audience"], [])
+
+    def test_fresh_handoff_explicit_audience_is_honored(self):
+        sections = handoff.HandoffSections(attempted="x")
+        path = handoff.write(self.config, "project-example", sections, audience=["group:household"])
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.meta["audience"], ["group:household"])
+
+    def test_second_write_never_changes_the_original_owner(self):
+        first = handoff.write(self._as("principal-ania"), "project-example",
+                               handoff.HandoffSections(attempted="first"))
+        self.assertEqual(frontmatter.parse_file(first).meta["owner_principal"], "principal:ania")
+
+        second = handoff.write(self._as("principal-marcin"), "project-example",
+                                handoff.HandoffSections(attempted="second"))
+        self.assertEqual(frontmatter.parse_file(second).meta["owner_principal"], "principal:ania")
+
+
 if __name__ == "__main__":
     unittest.main()

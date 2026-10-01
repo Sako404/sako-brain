@@ -3,6 +3,7 @@ document/fact, the half of /remember and /import that isn't raw inbox
 capture. Never accepts a client-supplied path."""
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 from brain import frontmatter, memoryops
@@ -105,6 +106,35 @@ class TestCreateMemoryUnsupportedTypes(unittest.TestCase):
             memoryops.create_memory(self.config, "project", "X")
         with self.assertRaises(memoryops.MemoryWriteError):
             memoryops.create_memory(self.config, "decision", "X")
+
+
+class TestCreateMemorySetsOwnership(unittest.TestCase):
+    """Stage 2 (multi-user visibility): same default-ownership-on-write
+    rule as capture.capture — see tests/test_capture.py."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_owner_principal_is_the_acting_principal(self):
+        config = dataclasses.replace(self.config, acting_principal="principal-ania")
+        path = memoryops.create_memory(config, "person", "Jane Doe", text="A colleague.")
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.meta["owner_principal"], "principal:ania")
+
+    def test_audience_defaults_to_private(self):
+        path = memoryops.create_memory(self.config, "person", "Jane Doe", text="A colleague.")
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.meta["audience"], [])
+
+    def test_explicit_audience_is_honored(self):
+        path = memoryops.create_memory(self.config, "person", "Jane Doe", text="A colleague.",
+                                        audience=["group:household"])
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.meta["audience"], ["group:household"])
 
 
 if __name__ == "__main__":

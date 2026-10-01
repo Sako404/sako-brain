@@ -34,7 +34,6 @@ design settled on, not a simplification of it.
 from __future__ import annotations
 
 from . import frontmatter
-from . import identity
 from .paths import DEFAULT_ACTING_PRINCIPAL, Config
 
 
@@ -107,6 +106,12 @@ def can_view(config: Config, principal_id: str, meta: dict) -> bool:
 
     group_refs = {a for a in audience_ids if a.startswith("group-")}
     if group_refs:
+        # Local import: identity.py itself imports capture.slugify, so a
+        # module-level `from . import identity` here would make
+        # capture.py (which needs visibility.id_to_ref) <-> identity.py <->
+        # visibility.py a real circular import. Deferred to call time,
+        # same reasoning as find_note_path's own local import below.
+        from . import identity
         caller_groups = set(identity.groups_for_principal(config, principal_id))
         if caller_groups & group_refs:
             return True

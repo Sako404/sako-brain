@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 from . import indexer
+from . import visibility
 from .paths import DEFAULT_NOTE_TYPES, Config
 
 # Kept as the *shipped default* only, for callers that need a vocabulary before
@@ -30,7 +31,7 @@ def slugify(text: str) -> str:
 def capture(config: Config, type_: str, title: str, text: str = "", tags: list[str] | None = None,
             people: list[str] | None = None, projects: list[str] | None = None,
             sensitivity: str = "normal", confidence: str = "fact", source: str = "",
-            source_date: str = "") -> Path:
+            source_date: str = "", audience: list[str] | None = None) -> Path:
     allowed = config.vocabulary.note_types
     if type_ not in allowed:
         raise ValueError(f"unknown type '{type_}', must be one of {sorted(allowed)}")
@@ -62,6 +63,8 @@ def capture(config: Config, type_: str, title: str, text: str = "", tags: list[s
         f"source_date: {source_date}",
         f"confidence: {confidence}",
         "aliases: []",
+        f"owner_principal: {visibility.id_to_ref(config.acting_principal)}",
+        f"audience: {audience or []}",
         "---",
         "",
         f"# {title}",

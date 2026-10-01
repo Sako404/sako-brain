@@ -2,6 +2,7 @@
 the /decision skill does today via direct Write/Edit."""
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 from brain import decision, frontmatter
@@ -87,6 +88,35 @@ class TestCreateDecision(unittest.TestCase):
             )
         dest = self.config.dir_for("decisions") / "decision-2026-09-26-new-approach.md"
         self.assertFalse(dest.exists())
+
+
+class TestDecisionSetsOwnership(unittest.TestCase):
+    """Stage 2 (multi-user visibility): same default-ownership-on-write
+    rule as capture.capture — see tests/test_capture.py."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_owner_principal_is_the_acting_principal(self):
+        config = dataclasses.replace(self.config, acting_principal="principal-ania")
+        dest = decision.create_decision(config, title="A decision")
+        note = frontmatter.parse_file(dest)
+        self.assertEqual(note.meta["owner_principal"], "principal:ania")
+
+    def test_audience_defaults_to_private(self):
+        dest = decision.create_decision(self.config, title="A decision")
+        note = frontmatter.parse_file(dest)
+        self.assertEqual(note.meta["audience"], [])
+
+    def test_explicit_audience_is_honored(self):
+        dest = decision.create_decision(self.config, title="A decision",
+                                         audience=["group:household"])
+        note = frontmatter.parse_file(dest)
+        self.assertEqual(note.meta["audience"], ["group:household"])
 
 
 if __name__ == "__main__":

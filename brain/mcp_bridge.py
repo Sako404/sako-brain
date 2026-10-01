@@ -261,6 +261,7 @@ def _t_remember(a: dict):
     # write_handoff below — never left to silently say nothing about who
     # asked for this. An explicit `source` argument always wins.
     argv += ["--source", a.get("source") or f"mcp-bridge:{_CURRENT_CLIENT}"]
+    argv += _list_flags(a, "audience")
     return argv, None
 
 
@@ -281,6 +282,7 @@ def _t_create_memory_note(a: dict):
     argv += ["--source", a.get("source") or f"mcp-bridge:{_CURRENT_CLIENT}"]
     if a.get("source_date"):
         argv += ["--source-date", a["source_date"]]
+    argv += _list_flags(a, "audience")
     return argv, None
 
 
@@ -298,6 +300,7 @@ def _t_write_handoff(a: dict):
         # real connected client, not a hardcoded value (the exact gap
         # fix/handoff-provenance-source closed on the `brain` side).
         "source": a.get("source") or _CURRENT_CLIENT,
+        "audience": a.get("audience"),
     }
     return ["handoff", "write", "--project", a["project_id"]], json.dumps(payload)
 
@@ -354,6 +357,7 @@ def _t_create_decision(a: dict):
             argv += [flag, a[key]]
     argv += _confirm_restricted_flag(a)
     argv += _list_flags(a, "people") + _list_flags(a, "projects") + _list_flags(a, "tags")
+    argv += _list_flags(a, "audience")
     return argv, None
 
 
@@ -364,6 +368,7 @@ def _t_create_project(a: dict):
     if a.get("category"):
         argv += ["--category", a["category"]]
     argv += _list_flags(a, "aliases")
+    argv += _list_flags(a, "audience")
     return argv, None
 
 
@@ -394,6 +399,7 @@ def _t_create_timeline_event(a: dict):
     if a.get("source"):
         argv += ["--source", a["source"]]
     argv += _list_flags(a, "people") + _list_flags(a, "projects") + _list_flags(a, "tags")
+    argv += _list_flags(a, "audience")
     return argv, None
 
 

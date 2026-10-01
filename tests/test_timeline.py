@@ -90,5 +90,34 @@ class TestTimelineVisibility(unittest.TestCase):
         self.assertEqual({e.id for e in entries}, {"event-shared"})
 
 
+class TestCreateEventSetsOwnership(unittest.TestCase):
+    """Stage 2 (multi-user visibility): same default-ownership-on-write
+    rule as capture.capture — see tests/test_capture.py."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_owner_principal_is_the_acting_principal(self):
+        config = dataclasses.replace(self.config, acting_principal="principal-ania")
+        dest = timeline.create_event(config, title="An event", valid_from="2026-05-01")
+        note = frontmatter.parse_file(dest)
+        self.assertEqual(note.meta["owner_principal"], "principal:ania")
+
+    def test_audience_defaults_to_private(self):
+        dest = timeline.create_event(self.config, title="An event", valid_from="2026-05-01")
+        note = frontmatter.parse_file(dest)
+        self.assertEqual(note.meta["audience"], [])
+
+    def test_explicit_audience_is_honored(self):
+        dest = timeline.create_event(self.config, title="An event", valid_from="2026-05-01",
+                                      audience=["group:household"])
+        note = frontmatter.parse_file(dest)
+        self.assertEqual(note.meta["audience"], ["group:household"])
+
+
 if __name__ == "__main__":
     unittest.main()

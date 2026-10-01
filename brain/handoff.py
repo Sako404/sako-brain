@@ -72,7 +72,8 @@ def _render_session(sections: HandoffSections, session_date: str) -> str:
     )
 
 
-def _frontmatter(project_id: str, entry, today: str, source: str) -> str:
+def _frontmatter(config: Config, project_id: str, entry, today: str, source: str,
+                  audience: list[str] | None = None) -> str:
     return (
         "---\n"
         f"id: handoff-{project_id}\n"
@@ -88,6 +89,8 @@ def _frontmatter(project_id: str, entry, today: str, source: str) -> str:
         f"source_date: {today}\n"
         "confidence: fact\n"
         "aliases: []\n"
+        f"owner_principal: {visibility.id_to_ref(config.acting_principal)}\n"
+        f"audience: {audience or []}\n"
         "---\n"
     )
 
@@ -96,7 +99,8 @@ PROSE_FIELDS = ("attempted", "changed", "working_state", "unresolved", "next_act
 
 
 def write(config: Config, project_id: str, sections: HandoffSections,
-          session_date: str | None = None, source: str = "cli") -> Path:
+          session_date: str | None = None, source: str = "cli",
+          audience: list[str] | None = None) -> Path:
     # A handoff whose every prose field is blank renders as five "(not noted)"
     # headings — it looks like a written handoff and carries nothing, which is
     # worse than no handoff at all because the next session trusts it. Refuse
@@ -126,10 +130,10 @@ def write(config: Config, project_id: str, sections: HandoffSections,
             title_line, _, rest = body.lstrip("\n").partition("\n")
             new_text = fm + "\n" + title_line + "\n\n" + new_section + "\n" + rest.lstrip("\n")
         else:
-            new_text = _frontmatter(entry.id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section + "\n" + text
+            new_text = _frontmatter(config, entry.id, entry, today, source, audience) + f"\n# Handoff — {entry.name}\n\n" + new_section + "\n" + text
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        new_text = _frontmatter(entry.id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section
+        new_text = _frontmatter(config, entry.id, entry, today, source, audience) + f"\n# Handoff — {entry.name}\n\n" + new_section
 
     path.write_text(new_text, encoding="utf-8")
     indexer.index_note(config, path)

@@ -54,7 +54,8 @@ def create_event(config: Config, title: str, valid_from: str, what_happened: str
                   why_it_matters: str = "", people: list[str] | None = None,
                   projects: list[str] | None = None, tags: list[str] | None = None,
                   sensitivity: str = "normal", confidence: str = "fact",
-                  source: str = "", source_date: str = "") -> Path:
+                  source: str = "", source_date: str = "",
+                  audience: list[str] | None = None) -> Path:
     """Create `50_TIMELINE/event-<valid_from>-<slug>.md` from the event
     template — the fixed schema `/timeline`'s "Adding an event" step
     already specifies, extracted rather than left to a direct Write.
@@ -73,6 +74,8 @@ def create_event(config: Config, title: str, valid_from: str, what_happened: str
         "people": people or [], "projects": projects or [], "tags": tags or [],
         "sensitivity": sensitivity, "source": source, "source_date": source_date,
         "confidence": confidence, "valid_from": valid_from, "aliases": [],
+        "owner_principal": visibility.id_to_ref(config.acting_principal),
+        "audience": audience or [],
     }
     related = "\n".join(f"`{p}`" for p in (projects or []))
     body = (

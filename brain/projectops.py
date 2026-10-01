@@ -26,6 +26,7 @@ import yaml
 
 from . import frontmatter
 from . import indexer
+from . import visibility
 from .paths import Config
 from .registry import find_project, load_registry
 from .update import find_note_path
@@ -132,7 +133,7 @@ PROJECT_BODY_TEMPLATE = (
 
 def create_project(config: Config, id: str, name: str, path: str, status: str = "active",
                     category: str | None = None, aliases: list[str] | None = None,
-                    created: str | None = None) -> Path:
+                    created: str | None = None, audience: list[str] | None = None) -> Path:
     """Register a project and create its record. Never copies project source
     files into the vault — `path` is a reference only, exactly like the
     `/project-new` skill's own rule."""
@@ -161,6 +162,8 @@ def create_project(config: Config, id: str, name: str, path: str, status: str = 
         "source": "", "confidence": "fact", "category": category or "",
         "parent_project": "", "technologies": [], "last_activity": today,
         "has_git": False, "aliases": aliases or [], "path": str(path),
+        "owner_principal": visibility.id_to_ref(config.acting_principal),
+        "audience": audience or [],
     }
     note = frontmatter.Note(path=dest, meta=meta, body=PROJECT_BODY_TEMPLATE.format(name=name))
 

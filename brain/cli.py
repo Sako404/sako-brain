@@ -115,6 +115,7 @@ def cmd_remember(config: Config, args) -> int:
             config, type_=args.type, title=args.title, text=args.text or "",
             tags=args.tags, people=args.people, projects=args.projects,
             sensitivity=args.sensitivity, confidence=args.confidence, source=args.source or "",
+            audience=getattr(args, "audience", None),
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -240,6 +241,7 @@ def cmd_project_create(config: Config, args) -> int:
         dest = projectops.create_project(
             config, id=args.id, name=args.name, path=args.path, status=args.status,
             category=args.category, aliases=args.aliases,
+            audience=getattr(args, "audience", None),
         )
     except projectops.ProjectWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -372,6 +374,7 @@ def cmd_decision_create(config: Config, args) -> int:
             people=args.people, projects=args.projects, tags=args.tags,
             sensitivity=args.sensitivity, source=args.source or "",
             supersedes=args.supersedes or None,
+            audience=getattr(args, "audience", None),
         )
     except decision_mod.DecisionError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -570,6 +573,7 @@ def cmd_timeline_add(config: Config, args) -> int:
             what_happened=args.what_happened or "", why_it_matters=args.why_it_matters or "",
             people=args.people, projects=args.projects, tags=args.tags,
             sensitivity=args.sensitivity, source=args.source or "",
+            audience=getattr(args, "audience", None),
         )
     except timeline.TimelineWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -592,6 +596,7 @@ def cmd_note_create(config: Config, args) -> int:
             sensitivity=args.sensitivity, confidence=args.confidence,
             source=args.source or "", source_date=args.source_date or "",
             area=args.area, doc_path=args.doc_path or "",
+            audience=getattr(args, "audience", None),
         )
     except memoryops.MemoryWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -1117,7 +1122,8 @@ def cmd_handoff_write(config: Config, args) -> int:
                                   sections.unresolved, sections.next_action,
                                   *sections.files_changed, *sections.decisions)
     try:
-        path = handoff.write(config, args.project, sections, source=payload.get("source", "cli"))
+        path = handoff.write(config, args.project, sections, source=payload.get("source", "cli"),
+                              audience=payload.get("audience"))
     except handoff.HandoffError as exc:
         print(f"Could not write handoff: {exc}", file=sys.stderr)
         return 1
@@ -1349,6 +1355,9 @@ def build_parser() -> argparse.ArgumentParser:
                                  "unnoticed side effect. Never set this on a caller's behalf.")
     p_remember.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
     p_remember.add_argument("--source", default="")
+    p_remember.add_argument("--audience", nargs="*", default=None,
+                             help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                  "(Stage 2) — omit for private (default: owner only)")
     p_remember.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_update = sub.add_parser("update", help="Update fields and/or append text on an existing note by id")
@@ -1385,6 +1394,9 @@ def build_parser() -> argparse.ArgumentParser:
                                        f"{', '.join(paths_mod.DEFAULT_STATUS_BY_TYPE['project'])})")
     p_project_create.add_argument("--category", default=None)
     p_project_create.add_argument("--aliases", nargs="*", default=[])
+    p_project_create.add_argument("--audience", nargs="*", default=None,
+                                   help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                        "(Stage 2) — omit for private (default: owner only)")
     p_project_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_project_update = project_sub.add_parser(
@@ -1446,6 +1458,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_decision_create.add_argument("--supersedes", default=None,
                                    help="id of an older decision this replaces — marks it "
                                         "'superseded' and links forward, never edits its content")
+    p_decision_create.add_argument("--audience", nargs="*", default=None,
+                                    help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                         "(Stage 2) — omit for private (default: owner only)")
     p_decision_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_migrate_stage2 = sub.add_parser(
@@ -1533,6 +1548,9 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="Required when --sensitivity restricted. Never set this on a "
                                      "caller's behalf.")
     p_timeline_add.add_argument("--source", default="")
+    p_timeline_add.add_argument("--audience", nargs="*", default=None,
+                                 help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                      "(Stage 2) — omit for private (default: owner only)")
     p_timeline_add.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_note = sub.add_parser(
@@ -1558,6 +1576,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_note_create.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
     p_note_create.add_argument("--source", default="")
     p_note_create.add_argument("--source-date", default="", dest="source_date")
+    p_note_create.add_argument("--audience", nargs="*", default=None,
+                                help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                     "(Stage 2) — omit for private (default: owner only)")
     p_note_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     sub.add_parser("status", help="Vault overview: counts, inbox, projects")
