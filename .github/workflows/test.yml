@@ -61,7 +61,7 @@ jobs:
           set -o pipefail
           python -m unittest discover -s tests -t . --verbose > /tmp/test-output.log 2>&1 || EXIT=$?
           EXIT="${EXIT:-0}"
-          tail -40 /tmp/test-output.log
+          tail -250 /tmp/test-output.log
           exit "$EXIT"
 
       - name: Report skipped tests
