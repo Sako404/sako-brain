@@ -112,6 +112,17 @@ class TestOAuthDiscovery(GatewayTestCase):
         self.assertEqual(r.status_code, 400)
         self.assertEqual(r.get_json()["error"], "invalid_redirect_uri")
 
+    def test_protected_resource_metadata_also_served_at_the_rfc9728_path_aware_url(self):
+        # RFC 9728 section 3.1 constructs the metadata URL by inserting the
+        # well-known path *before* the resource's own path component — for
+        # a resource at "/mcp" that is ".../oauth-protected-resource/mcp",
+        # not just the bare root. A real connector was observed requesting
+        # exactly this path and getting a 404 before this route existed.
+        bare = self.client.get("/.well-known/oauth-protected-resource").get_json()
+        suffixed = self.client.get("/.well-known/oauth-protected-resource/mcp")
+        self.assertEqual(suffixed.status_code, 200)
+        self.assertEqual(suffixed.get_json(), bare)
+
 
 class TestHttpMcpTransport(GatewayTestCase):
     def test_missing_auth_header_is_401_with_resource_metadata(self):
@@ -416,6 +427,61 @@ class TestNoVaultFilesystemAccess(unittest.TestCase):
     def test_gateway_config_has_no_vault_root_concept(self):
         from brain.remote_gateway import config as config_mod
         self.assertNotIn("vault_root", config_mod.GatewayConfig.__dataclass_fields__)
+
+
+class TestOwnerPasswordCliTargetsConfiguredGatewayState(unittest.TestCase):
+    """Regression for a real production incident (v0.12.2): `set-owner-
+    password` (and the other state-mutating remote-gateway CLI commands)
+    used to call `Storage()` with no path, which resolves against whatever
+    XDG_STATE_HOME happens to be in the *current* process's environment —
+    silently writing to a decoy file when run from an operator's desktop
+    instead of the actual gateway host, while still printing "Owner
+    password set." The fix: route through `config_mod.load_config()`,
+    exactly like `cmd_serve`/`create_app` do, so the command can only ever
+    target the same database the running server reads, and fails loudly
+    instead of succeeding against the wrong state when unconfigured."""
+
+    def setUp(self):
+        import os
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self._env_patch = patch.dict(os.environ, {
+            "XDG_CONFIG_HOME": str(Path(self._tmp.name) / "config"),
+            "XDG_STATE_HOME": str(Path(self._tmp.name) / "state"),
+        })
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
+
+    def test_fails_loudly_with_no_configured_gateway_instead_of_silently_succeeding(self):
+        from brain.remote_gateway import cli as gw_cli
+        import io
+        import contextlib
+        args = type("Args", (), {"password": "correct horse battery staple 42"})()
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = gw_cli.cmd_set_owner_password(args)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("no canonical_uri configured", stderr.getvalue())
+
+    def test_targets_the_exact_db_path_serve_would_use(self):
+        from brain.remote_gateway import cli as gw_cli
+        from brain.remote_gateway import config as config_mod
+
+        config_mod.write_config("https://brain-mcp.example.invalid/mcp")
+        args = type("Args", (), {"password": "correct horse battery staple 42"})()
+        rc = gw_cli.cmd_set_owner_password(args)
+        self.assertEqual(rc, 0)
+
+        # The password must be readable through the SAME path resolution
+        # `create_app`/`cmd_serve` use — not a path this test constructed
+        # independently.
+        gw_config = config_mod.load_config()
+        storage = Storage(gw_config.db_path)
+        self.addCleanup(storage.close)
+        owner = storage.get_owner()
+        self.assertIsNotNone(owner)
+        self.assertTrue(owner_auth.verify_password(
+            "correct horse battery staple 42", owner["password_hash"], owner["salt"]))
 
 
 class TestRemoteDoctorHttpClient(unittest.TestCase):

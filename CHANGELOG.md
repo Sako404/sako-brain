@@ -5,6 +5,50 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.12.2 — 2026-10-01 — owner-password CLI mistargeting + RFC 9728 path-aware metadata
+
+### Fixed
+
+- `brain remote-gateway set-owner-password` (and `list-clients`,
+  `revoke-client`, `revoke-all`) called `Storage()` with no explicit
+  path, which resolves the database location from whatever
+  `XDG_STATE_HOME` happens to be in the *current* process's environment
+  — not from the gateway's own configured `canonical_uri`/`db_path`.
+  Run from an operator's desktop instead of the gateway host itself,
+  this silently wrote (or read) a decoy local database while printing
+  "Owner password set." — a false success against the wrong state while
+  the real production gateway kept serving its old owner credential.
+  Found via live production acceptance: a password set this way was
+  rejected by the real `/authorize` login page. Fixed by routing every
+  state-mutating command through `config_mod.load_config()`, exactly
+  like `cmd_serve`/`create_app` already do, so these commands now print
+  which gateway/database they are targeting and fail loudly
+  (`GatewayConfigError`) instead of silently succeeding elsewhere.
+- Added `GET /.well-known/oauth-protected-resource/mcp` alongside the
+  existing bare `/.well-known/oauth-protected-resource` route. RFC 9728
+  section 3.1 constructs the metadata URL by inserting the well-known
+  path *before* the resource's own path component — for a resource at
+  `/mcp` that is the suffixed form, not only the bare root. Observed
+  live: a real ChatGPT connector attempt requested exactly this
+  suffixed path and got a 404. Both routes now serve the identical
+  document.
+
+### Diagnosed, not code bugs
+
+- ChatGPT's connector handshake (discovery + Dynamic Client
+  Registration) was intermittently rejected by Cloudflare's zone-wide
+  **AI Bots** blocking and **Bot Fight Mode** (both confirmed live via
+  Cloudflare's own request analytics: `POST /register` and `POST /mcp`
+  from OpenAI's infrastructure returning 403 before reaching the
+  gateway at all, interleaved with other requests on the same path that
+  succeeded). Both products are zone-wide on marcinsakowski.com's Free
+  plan and, per Cloudflare's own documentation, cannot be scoped to a
+  single hostname via a WAF custom rule on this plan — only disabling
+  them zone-wide, or upgrading to a plan with Super Bot Fight Mode
+  (which does support a narrow per-host *Skip* rule), resolves it. This
+  is a deliberate security-posture / cost decision, not something this
+  release changes unilaterally.
+
 ## 0.12.1 — 2026-09-30 — doctor HTTP client fix (Cloudflare Bot Fight Mode)
 
 ### Fixed

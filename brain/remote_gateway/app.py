@@ -87,6 +87,17 @@ def create_app(gw_config: config_mod.GatewayConfig | None = None,
         from .oauth import protected_resource_metadata as prm
         return jsonify(prm(gw_config.canonical_uri, gw_config.issuer))
 
+    # RFC 9728 section 3.1's own construction rule inserts the well-known
+    # path *before* the resource's path component — for a resource at
+    # "/mcp" that is this same document again at ".../oauth-protected-
+    # resource/mcp". Some MCP clients request this form directly (observed
+    # live from a real connector attempt) instead of the bare root form
+    # above; both must return the identical document since they describe
+    # the same single resource.
+    @app.get("/.well-known/oauth-protected-resource/mcp")
+    def protected_resource_metadata_mcp_suffixed():
+        return protected_resource_metadata()
+
     @app.get("/.well-known/oauth-authorization-server")
     def authorization_server_metadata():
         from .oauth import authorization_server_metadata as asm
