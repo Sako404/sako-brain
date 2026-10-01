@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.13.2 — 2026-10-01 — admin capability to remove a principal record
+
+### Added
+
+- `brain principal delete <id>` — permanently removes a principal record,
+  for cleaning up a throwaway or mistaken one (e.g. a disposable test
+  principal created during live verification). Unlike `set-status`, which
+  every other lifecycle operation prefers, this is a genuine delete.
+  Refuses to run if the principal is still a member of any group, so
+  cleanup can never silently orphan a dangling audience reference.
+
+938 tests passing (was 934).
+
 ## 0.13.1 — 2026-10-01 — fix gateway crash on an existing (pre-Stage-1) database
 
 ### Fixed
