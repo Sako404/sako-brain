@@ -59,10 +59,10 @@ jobs:
         # status check had not actually been gating merges on test results.
         run: |
           set -o pipefail
-          python -m unittest discover -s tests -t . --verbose > /tmp/test-output.log 2>&1
-          EXIT=$?
+          python -m unittest discover -s tests -t . --verbose > /tmp/test-output.log 2>&1 || EXIT=$?
+          EXIT="${EXIT:-0}"
           tail -40 /tmp/test-output.log
-          exit $EXIT
+          exit "$EXIT"
 
       - name: Report skipped tests
         # Skips are expected — optional external tools are absent on a runner —
