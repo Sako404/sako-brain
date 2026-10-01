@@ -89,12 +89,16 @@ def cmd_context(config: Config, args) -> int:
 
 
 def cmd_get(config: Config, args) -> int:
-    row = search.get_note_row(config, args.id)
-    if not row:
-        print(f"No note with id '{args.id}' in index. Try 'brain index' first.", file=sys.stderr)
+    # Resolves by walking Markdown directly (update_mod.find_note_path),
+    # the same index-independent lookup mcp_server.py's read_memory tool
+    # already uses — never the SQLite index, which is a cache that can lag
+    # a write until the next `brain index`. A note written this second
+    # must be gettable this second, not only after a reindex.
+    path = update_mod.find_note_path(config, args.id)
+    if not path:
+        print(f"No note with id '{args.id}' found under {config.brain_root}.", file=sys.stderr)
         return 1
-    full_path = config.brain_root / row["path"]
-    print(full_path.read_text(encoding="utf-8"))
+    print(path.read_text(encoding="utf-8"))
     return 0
 
 
@@ -114,7 +118,7 @@ def cmd_remember(config: Config, args) -> int:
         print(json.dumps({"created_path": str(dest.relative_to(config.brain_root))}, indent=2, ensure_ascii=False))
         return 0
     print(f"Captured to {dest.relative_to(config.brain_root)}")
-    print("Run 'brain index' to make it searchable, and review 00_INBOX for triage.")
+    print("Review 00_INBOX for triage.")
     return 0
 
 
@@ -156,7 +160,6 @@ def cmd_update(config: Config, args) -> int:
                           indent=2, ensure_ascii=False))
         return 0
     print(f"Updated {path.relative_to(config.brain_root)}")
-    print("Run 'brain index' to refresh the search index.")
     return 0
 
 
@@ -242,7 +245,6 @@ def cmd_project_create(config: Config, args) -> int:
         return 0
     print(f"Registry entry added: {args.id}")
     print(f"Created {dest.relative_to(config.brain_root)}")
-    print("Run 'brain index' to make it searchable.")
     return 0
 
 
@@ -312,7 +314,6 @@ def cmd_project_update(config: Config, args) -> int:
         }, indent=2, ensure_ascii=False))
         return 0
     print("\n".join(lines))
-    print("Run 'brain index' to refresh the search index.")
     return 0
 
 
@@ -334,7 +335,6 @@ def cmd_project_close(config: Config, args) -> int:
     if r.moved:
         print(f"Moved to {r.new_path.relative_to(config.brain_root)}")
     print(f"Registry updated: {r.registry_updated}")
-    print("Run 'brain index' to make it searchable.")
     return 0
 
 
@@ -352,7 +352,6 @@ def cmd_project_section_update(config: Config, args) -> int:
                           indent=2, ensure_ascii=False))
         return 0
     print(f"Updated section '{args.section}' in {path.relative_to(config.brain_root)}")
-    print("Run 'brain index' to make it searchable.")
     return 0
 
 
@@ -379,7 +378,6 @@ def cmd_decision_create(config: Config, args) -> int:
     print(f"Created {dest.relative_to(config.brain_root)}")
     if args.supersedes:
         print(f"Marked {args.supersedes} as superseded, linked forward.")
-    print("Run 'brain index' to make it searchable.")
     return 0
 
 
@@ -420,7 +418,6 @@ def cmd_timeline_add(config: Config, args) -> int:
                           indent=2, ensure_ascii=False))
         return 0
     print(f"Created {path.relative_to(config.brain_root)}")
-    print("Run 'brain index' to make it searchable.")
     return 0
 
 
@@ -442,7 +439,6 @@ def cmd_note_create(config: Config, args) -> int:
         print(json.dumps({"created_path": str(path.relative_to(config.brain_root))}, indent=2, ensure_ascii=False))
         return 0
     print(f"Created {path.relative_to(config.brain_root)}")
-    print("Run 'brain index' to make it searchable.")
     return 0
 
 
@@ -932,7 +928,6 @@ def cmd_memory_accept(config: Config, args) -> int:
         print(f"Could not accept: {exc}", file=sys.stderr)
         return 1
     print(f"Accepted {entry.id} -> wrote {entry.written_to}")
-    print("Run 'brain index' to make it searchable.")
     return 0
 
 

@@ -12,6 +12,7 @@ import datetime as dt
 from pathlib import Path
 
 from . import frontmatter
+from . import indexer
 from .capture import slugify
 from .paths import Config
 from .update import find_note_path
@@ -71,7 +72,9 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
 
     if old_path is not None:
         _mark_superseded(old_path, note_id)
+        indexer.index_note(config, old_path)
 
+    indexer.index_note(config, dest)
     return dest
 
 

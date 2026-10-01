@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import frontmatter
+from . import indexer
 from .capture import slugify
 from .paths import Config
 
@@ -72,4 +73,5 @@ def create_event(config: Config, title: str, valid_from: str, what_happened: str
     note = frontmatter.Note(path=dest, meta=meta, body=body)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(frontmatter.render(note), encoding="utf-8")
+    indexer.index_note(config, dest)
     return dest

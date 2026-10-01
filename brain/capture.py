@@ -12,6 +12,7 @@ import datetime as dt
 import re
 from pathlib import Path
 
+from . import indexer
 from .paths import DEFAULT_NOTE_TYPES, Config
 
 # Kept as the *shipped default* only, for callers that need a vocabulary before
@@ -69,4 +70,5 @@ def capture(config: Config, type_: str, title: str, text: str = "", tags: list[s
         "",
     ]
     dest.write_text("\n".join(meta_lines), encoding="utf-8")
+    indexer.index_note(config, dest)
     return dest

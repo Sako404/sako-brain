@@ -9,6 +9,7 @@ import datetime as dt
 from pathlib import Path
 
 from . import frontmatter
+from . import indexer
 from .paths import Config
 
 
@@ -43,4 +44,5 @@ def update_memory(config: Config, note_id: str, set_fields: dict | None = None,
         note.body = note.body.rstrip("\n") + f"\n\n## Update ({stamp})\n\n{append_text}\n"
 
     path.write_text(frontmatter.render(note), encoding="utf-8")
+    indexer.index_note(config, path)
     return path
