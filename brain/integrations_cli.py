@@ -640,7 +640,60 @@ class _CaseInsensitiveHeaders(dict):
         return super().__contains__(key.lower())
 
 
+def _curl_available() -> bool:
+    return shutil.which("curl") is not None
+
+
+def _curl_request(method: str, url: str, headers: dict | None = None, body: bytes | None = None,
+                   timeout: float = 10.0):
+    """Shells out to curl rather than using urllib directly: some Cloudflare
+    zones' bot-fight/WAF rules (error 1010) key off TLS-handshake
+    fingerprinting and flag Python's own TLS stack specifically — a real
+    production gateway behind such a zone reachable fine via curl (and,
+    in practice, via the real HTTP clients ChatGPT/Claude.ai's backends
+    use) was still erroneously blocked when this check used urllib
+    directly. curl is the same tool `brain setup`'s own wheel download
+    already assumes is present (see docs/REMOTE_ACCESS.md), so this adds
+    no new assumption."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".headers") as header_file:
+        # No custom User-Agent: curl's own default is what proved reachable
+        # against a real Cloudflare-fronted deployment during development —
+        # some zones' Bot Fight Mode blocks an unrecognized custom UA string
+        # (error 1010) while leaving curl's own identifiable default alone.
+        argv = ["curl", "-s", "-S", "-m", str(timeout), "-D", header_file.name,
+                "-X", method, "-o", "-"]
+        for k, v in (headers or {}).items():
+            argv += ["-H", f"{k}: {v}"]
+        if body is not None:
+            argv += ["--data-binary", "@-"]
+        argv.append(url)
+        try:
+            proc = subprocess.run(argv, input=body, capture_output=True, timeout=timeout + 5)
+        except subprocess.TimeoutExpired as exc:
+            return None, _CaseInsensitiveHeaders(None), str(exc).encode()
+        if proc.returncode != 0:
+            return None, _CaseInsensitiveHeaders(None), (proc.stderr or b"curl failed")
+        header_text = Path(header_file.name).read_text(errors="replace")
+    status = 0
+    resp_headers: dict[str, str] = {}
+    for line in header_text.splitlines():
+        if line.startswith("HTTP/"):
+            parts = line.split(None, 2)
+            if len(parts) >= 2 and parts[1].isdigit():
+                status = int(parts[1])
+            resp_headers = {}  # a redirect leaves multiple status blocks — keep only the last
+        elif ":" in line:
+            k, _, v = line.partition(":")
+            resp_headers[k.strip()] = v.strip()
+    return status, _CaseInsensitiveHeaders(resp_headers), proc.stdout
+
+
 def _http_get(url: str, headers: dict | None = None, timeout: float = 10.0):
+    if _curl_available():
+        return _curl_request("GET", url, headers, timeout=timeout)
+
     import urllib.error
     import urllib.request
 
@@ -655,11 +708,15 @@ def _http_get(url: str, headers: dict | None = None, timeout: float = 10.0):
 
 
 def _http_post_json(url: str, payload: dict, headers: dict | None = None, timeout: float = 10.0):
+    body = json.dumps(payload).encode("utf-8")
+    req_headers = {"Content-Type": "application/json", **(headers or {})}
+
+    if _curl_available():
+        return _curl_request("POST", url, req_headers, body=body, timeout=timeout)
+
     import urllib.error
     import urllib.request
 
-    body = json.dumps(payload).encode("utf-8")
-    req_headers = {"Content-Type": "application/json", **(headers or {})}
     req = urllib.request.Request(url, data=body, headers=req_headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:

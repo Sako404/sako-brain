@@ -418,6 +418,73 @@ class TestNoVaultFilesystemAccess(unittest.TestCase):
         self.assertNotIn("vault_root", config_mod.GatewayConfig.__dataclass_fields__)
 
 
+class TestRemoteDoctorHttpClient(unittest.TestCase):
+    """Regression (v0.12.0 production acceptance against the real
+    deployed gateway): the first fix attempt set a custom `sako-brain-
+    doctor/<version>` User-Agent, assuming bare/default requests were
+    what Cloudflare's Bot Fight Mode (error 1010) was blocking. That was
+    wrong — a *custom, unrecognized* UA is exactly what tripped it;
+    plain curl (no `-A` override) and plain urllib were both fine. The
+    actual, verified-live fix is: prefer shelling out to curl (whose own
+    default UA already passes), and never add a synthetic User-Agent on
+    either path."""
+
+    def test_curl_path_adds_no_user_agent_override(self):
+        from unittest.mock import patch
+        from brain import integrations_cli as ic
+
+        if not ic._curl_available():
+            self.skipTest("curl not installed in this environment")
+
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            import subprocess
+            class FakeCompleted:
+                returncode = 0
+                stdout = b"ok"
+                stderr = b""
+            # curl writes headers to the -D file; write a minimal valid one.
+            d_index = argv.index("-D")
+            from pathlib import Path
+            Path(argv[d_index + 1]).write_text("HTTP/1.1 200 OK\r\n\r\n")
+            return FakeCompleted()
+
+        with patch("subprocess.run", side_effect=fake_run):
+            status, _headers, body = ic._http_get("https://example.invalid/x")
+        self.assertEqual(status, 200)
+        self.assertNotIn("-A", captured["argv"])
+
+    def test_falls_back_to_urllib_with_no_custom_user_agent_when_curl_missing(self):
+        from unittest.mock import patch
+        from brain import integrations_cli as ic
+
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def getcode(self):
+                return 200
+            headers = []
+            def read(self):
+                return b"ok"
+
+        def fake_urlopen(req, timeout=None):
+            captured["user_agent"] = req.get_header("User-agent")
+            return FakeResponse()
+
+        with patch.object(ic, "_curl_available", return_value=False), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            ic._http_get("https://example.invalid/x")
+        # The fallback path is intentionally bare too, for the same reason:
+        # a distinctive custom UA is the thing that got blocked live.
+        self.assertIsNone(captured["user_agent"])
+
+
 class TestRemoteDoctor(unittest.TestCase):
     """`brain integration doctor remote` — pure stdlib urllib client side,
     no Flask/waitress needed even when checking a deployed gateway."""

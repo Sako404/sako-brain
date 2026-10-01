@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.12.1 — 2026-09-30 — doctor HTTP client fix (Cloudflare Bot Fight Mode)
+
+### Fixed
+
+- `brain integration doctor remote` was rejected outright (Cloudflare
+  error 1010, Bot Fight Mode) against the real production gateway
+  deployed behind Cloudflare. Root cause, found by isolating each
+  variable live: it was not the *absence* of a `User-Agent` — Python's
+  own `urllib` default UA and plain `curl`'s default UA were both fine —
+  it was setting a *distinctive, unrecognized custom* UA string
+  (`sako-brain-doctor/<version>`) that got the request flagged as an
+  unknown bot. Fixed by preferring to shell out to `curl` (whose own
+  default UA already passes cleanly) and never adding a synthetic
+  User-Agent override on either the curl or urllib fallback path.
+  Verified live against the real deployed gateway after the fix: all
+  checks pass through the production Cloudflare Tunnel.
+
 ## 0.12.0 — 2026-09-30 — REMOTE / WEB AI ACCESS
 
 A single, vendor-neutral remote MCP gateway so ChatGPT web and Claude.ai
