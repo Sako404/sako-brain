@@ -114,10 +114,10 @@ def create_app(gw_config: config_mod.GatewayConfig | None = None,
             return jsonify({"error": exc.error, "error_description": exc.description}), exc.status
         return jsonify(result), 201
 
-    # ---- Authorization endpoint: owner login + consent ---------------------
+    # ---- Authorization endpoint: principal login + consent -----------------
 
-    def _owner_logged_in() -> bool:
-        return session.get("owner_authenticated") is True
+    def _authenticated_principal() -> str | None:
+        return session.get("authenticated_principal")
 
     @app.get("/authorize")
     def authorize_get():
@@ -127,11 +127,11 @@ def create_app(gw_config: config_mod.GatewayConfig | None = None,
         except OAuthError as exc:
             return jsonify({"error": exc.error, "error_description": exc.description}), exc.status
 
-        if storage.get_owner() is None:
-            return ("This gateway has no owner account configured yet. Run "
+        if not storage.list_credential_principals():
+            return ("This gateway has no principal credentials configured yet. Run "
                     "`brain remote-gateway set-owner-password` first."), 503
 
-        if not _owner_logged_in():
+        if not _authenticated_principal():
             return _render_login(params)
         return _render_consent(ctx, params)
 
@@ -141,14 +141,17 @@ def create_app(gw_config: config_mod.GatewayConfig | None = None,
         stage = form.get("stage")
 
         if stage == "login":
+            principal_id = form.get("principal", "").strip()
             password = form.get("password", "")
-            owner = storage.get_owner()
-            if owner is None or not owner_auth.verify_password(
-                password, owner["password_hash"], owner["salt"]
+            cred = storage.get_credential(principal_id) if principal_id else None
+            if cred is None or not owner_auth.verify_password(
+                password, cred["password_hash"], cred["salt"]
             ):
+                storage.log_event(event="login.failure", principal_id=principal_id)
                 params = {k: v for k, v in form.items() if k not in ("stage", "password")}
-                return _render_login(params, error="Incorrect password."), 401
-            session["owner_authenticated"] = True
+                return _render_login(params, error="Incorrect principal or password."), 401
+            storage.log_event(event="login.success", principal_id=principal_id)
+            session["authenticated_principal"] = principal_id
             session.permanent = False
             params = {k: v for k, v in form.items() if k not in ("stage", "password")}
             try:
@@ -164,11 +167,14 @@ def create_app(gw_config: config_mod.GatewayConfig | None = None,
             except OAuthError as exc:
                 return jsonify({"error": exc.error, "error_description": exc.description}), exc.status
 
-            if not _owner_logged_in():
+            principal_id = _authenticated_principal()
+            if not principal_id:
                 return _render_login(params)
 
             redirect_uri = ctx["redirect_uri"]
             if form.get("decision") != "approve":
+                storage.log_event(event="consent.deny", principal_id=principal_id,
+                                   client_id=ctx["client_id"])
                 return redirect(oauth.build_redirect(
                     redirect_uri, error="access_denied",
                     error_description="Owner denied the request.", state=ctx["state"],
@@ -181,10 +187,12 @@ def create_app(gw_config: config_mod.GatewayConfig | None = None,
                     error_description="no scope granted", state=ctx["state"],
                 ))
             code = oauth.issue_code(
-                client_id=ctx["client_id"], redirect_uri=redirect_uri,
+                client_id=ctx["client_id"], principal_id=principal_id, redirect_uri=redirect_uri,
                 code_challenge=ctx["code_challenge"], code_challenge_method=ctx["code_challenge_method"],
                 granted_scope=granted, resource=ctx["resource"],
             )
+            storage.log_event(event="consent.approve", principal_id=principal_id,
+                               client_id=ctx["client_id"], detail=" ".join(granted))
             return redirect(oauth.build_redirect(redirect_uri, code=code, state=ctx["state"]))
 
         return jsonify({"error": "invalid_request", "error_description": "missing stage"}), 400
@@ -199,13 +207,15 @@ def create_app(gw_config: config_mod.GatewayConfig | None = None,
 <meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body style="font-family:sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem">
 <h1>SAKO Brain</h1>
-<p>Sign in as the Brain owner to review this connection request.</p>
+<p>Sign in to review this connection request.</p>
 {error_html}
 <form method="post" action="/authorize">
 <input type="hidden" name="stage" value="login">
 {hidden}
-<input type="password" name="password" placeholder="Owner password" autofocus required
-       style="width:100%;padding:0.5rem;margin:0.5rem 0">
+<input type="text" name="principal" placeholder="Principal (e.g. principal-marcin)" autofocus required
+       style="width:100%;padding:0.5rem;margin:0.5rem 0" autocomplete="username">
+<input type="password" name="password" placeholder="Password" required
+       style="width:100%;padding:0.5rem;margin:0.5rem 0" autocomplete="current-password">
 <button type="submit" style="padding:0.5rem 1rem">Sign in</button>
 </form>
 </body></html>"""
@@ -213,6 +223,7 @@ def create_app(gw_config: config_mod.GatewayConfig | None = None,
 
     def _render_consent(ctx: dict, params: dict) -> Response:
         client_name = html.escape(ctx["client"]["client_name"])
+        principal_id = html.escape(_authenticated_principal() or "")
         scope_labels = {
             "brain.read": "Read your projects, decisions, handoffs, timeline, and notes",
             "brain.write": "Create/update ordinary (non-restricted) records",
@@ -232,8 +243,8 @@ def create_app(gw_config: config_mod.GatewayConfig | None = None,
 <meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body style="font-family:sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem">
 <h1>Authorize {client_name}</h1>
-<p>This will let <strong>{client_name}</strong> access your canonical SAKO Brain
-with the scopes below, until you revoke it.</p>
+<p>Signed in as <strong>{principal_id}</strong>. This will let <strong>{client_name}</strong>
+access canonical SAKO Brain, as this principal, with the scopes below, until revoked.</p>
 <form method="post" action="/authorize">
 <input type="hidden" name="stage" value="consent">
 {hidden}
@@ -273,6 +284,7 @@ with the scopes below, until you revoke it.</p>
                 return jsonify({"error": "unsupported_grant_type"}), 400
         except OAuthError as exc:
             return jsonify({"error": exc.error, "error_description": exc.description}), exc.status
+        storage.log_event(event=f"token.{grant_type}", client_id=client_id)
         resp = jsonify(result)
         resp.headers["Cache-Control"] = "no-store"
         resp.headers["Pragma"] = "no-cache"
@@ -285,6 +297,7 @@ with the scopes below, until you revoke it.</p>
         token_value = request.form.get("token", "")
         if token_value:
             oauth.revoke(token_value)
+            storage.log_event(event="token.revoke")
         return "", 200  # always 200, whether or not the token existed (RFC 7009 2.2)
 
     # ---- MCP endpoint (Streamable HTTP) --------------------------------------

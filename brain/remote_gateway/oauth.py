@@ -51,6 +51,7 @@ class OAuthError(Exception):
 @dataclass
 class TokenInfo:
     client_id: str
+    principal_id: str
     scope: frozenset[str]
     resource: str
 
@@ -137,11 +138,11 @@ class AuthorizationServer:
 
     # ---- Owner consent -> authorization code -----------------------------
 
-    def issue_code(self, client_id: str, redirect_uri: str, code_challenge: str,
+    def issue_code(self, client_id: str, principal_id: str, redirect_uri: str, code_challenge: str,
                    code_challenge_method: str, granted_scope: list[str], resource: str) -> str:
         code = secrets.token_urlsafe(32)
         self.storage.save_code(
-            code=code, client_id=client_id, redirect_uri=redirect_uri,
+            code=code, client_id=client_id, principal_id=principal_id, redirect_uri=redirect_uri,
             code_challenge=code_challenge, code_challenge_method=code_challenge_method,
             scope=" ".join(granted_scope), resource=resource, ttl_seconds=AUTH_CODE_TTL_SECONDS,
         )
@@ -174,7 +175,7 @@ class AuthorizationServer:
             raise OAuthError("invalid_grant", "redirect_uri does not match the authorization request")
         if not _verify_pkce(code_verifier, row["code_challenge"], row["code_challenge_method"]):
             raise OAuthError("invalid_grant", "PKCE verification failed")
-        return self._issue_tokens(client_id, row["scope"].split(), row["resource"])
+        return self._issue_tokens(client_id, row["principal_id"], row["scope"].split(), row["resource"])
 
     def refresh(self, refresh_token: str, client_id: str, requested_scope: list[str] | None) -> dict:
         row = self.storage.get_by_refresh_token(refresh_token)
@@ -194,14 +195,14 @@ class AuthorizationServer:
         # replacement is issued, whether or not the caller ever uses the
         # new one — an OAuth 2.1 MUST for public clients.
         self.storage.revoke_token(refresh_token)
-        return self._issue_tokens(client_id, granted, row["resource"])
+        return self._issue_tokens(client_id, row["principal_id"], granted, row["resource"])
 
-    def _issue_tokens(self, client_id: str, scope: list[str], resource: str) -> dict:
+    def _issue_tokens(self, client_id: str, principal_id: str, scope: list[str], resource: str) -> dict:
         access_token = secrets.token_urlsafe(32)
         refresh_token = secrets.token_urlsafe(32)
         self.storage.save_token(
             access_token=access_token, refresh_token=refresh_token, client_id=client_id,
-            scope=" ".join(scope), resource=resource,
+            principal_id=principal_id, scope=" ".join(scope), resource=resource,
             access_ttl_seconds=ACCESS_TOKEN_TTL_SECONDS,
             refresh_ttl_seconds=REFRESH_TOKEN_TTL_SECONDS,
         )
@@ -228,9 +229,19 @@ class AuthorizationServer:
             # Restriction") — a token issued for a different resource must
             # never be accepted here, even if otherwise well-formed.
             raise OAuthError("invalid_token", "token audience does not match this resource", status=401)
+        # Deliberately NOT a live principal.status check here — this
+        # process has no vault access to do one honestly. The SSH
+        # dispatcher is the authoritative enforcement point (hardening
+        # requirement 3): it reads live canonical state and sits on every
+        # real tool call this token could ever be used to make, so a
+        # disabled principal's very next tool call is refused there
+        # regardless of this token's own validity. Duplicating a
+        # same-process "is active" flag here would only be a cache this
+        # gateway cannot keep honestly fresh — see storage.py's SCHEMA
+        # comment on the same point.
         self.storage.touch_token(access_token)
-        return TokenInfo(client_id=row["client_id"], scope=frozenset(row["scope"].split()),
-                          resource=row["resource"])
+        return TokenInfo(client_id=row["client_id"], principal_id=row["principal_id"],
+                          scope=frozenset(row["scope"].split()), resource=row["resource"])
 
     def revoke(self, token_value: str) -> None:
         self.storage.revoke_token(token_value)
