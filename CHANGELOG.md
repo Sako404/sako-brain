@@ -5,6 +5,87 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.14.0 — 2026-10-02 — Private + Shared Logical Spaces (Stage 2, multi-user)
+
+Visibility enforcement for Stage 1's identity foundation. Logical spaces
+— private and shared — are a query-time projection over ONE canonical
+Brain, never per-user vaults/indexes/installations. **No family access is
+activated by this release**; existing records migrate to
+`owner_principal: principal:marcin`, `audience: []` with no automatic
+sharing and no content-based inference.
+
+### Added
+
+- **`brain/visibility.py`** — the one shared authorization chokepoint
+  every read path calls: candidate ids/ranking → live authoritative
+  visibility check (never the SQLite index, which stays discovery/
+  ranking-only) → allowed candidates only → materialize title/snippet/
+  content. `owner_principal`/`audience` frontmatter fields, in a
+  type-prefixed reference form (`principal:<name>`, `group:<name>`)
+  distinct from this project's internal record ids.
+- **Every read path wired**: search (overfetches raw candidates so
+  filtering still fills the requested limit), direct get/read (`brain
+  get`, the MCP `read_memory` tool — raises an identical "not found"
+  whether a note doesn't exist or merely isn't visible), project
+  registry/project context, timeline, handoffs. `brain doctor` and `brain
+  state` are admin-only (both mix vault-wide integrity/operational data
+  with content that had no filtering of its own — confirmed live as a
+  real leak during this stage's own audit); a vault with no principal
+  records at all still gets full output, so this is a new gate, not a
+  new restriction on existing single-user usage.
+- **New records default to private ownership of the authenticated
+  principal**, with an optional explicit `audience` — every creation
+  path (`remember`, `note create`, `project create`, `decision create`,
+  `timeline add`, `handoff write`), `--audience` wired through the CLI
+  and the corresponding MCP tool for all six. Only a record's current
+  owner may change its own `owner_principal`/`audience` afterward
+  (`brain update --audience`) — write access to a record's other fields
+  never implied authority to reshare it.
+- **`brain migrate-stage2-owner-principal`** (`--apply`/`--json`, dry-run
+  by default) — backfills existing records. Local-only (never added to
+  the SSH dispatcher's allowlists). Tested per the mandatory migration-
+  safety protocol the v0.13.0 incident established: fresh vault, a
+  realistic pre-existing one (mixed note types, some already migrated,
+  one genuinely unparseable), idempotency, a mixed/partially-migrated
+  starting state, dry-run writing nothing, and a full index rebuild
+  afterward.
+- **Remote MCP gateway delegation**: the gateway's two SSH identities are
+  shared across every OAuth principal, so visibility needed a way for a
+  specific request to assert who it's acting for. Dispatcher-level
+  delegation (`--acting-principal <id> --` prefix, honored only from the
+  two gateway identities, independently re-validated against the live
+  principal registry, fails closed with no fallback to the vault owner)
+  — enforcement stays server-side and authoritative; the gateway only
+  asserts, never decides. `contextvars`-based per-request isolation on
+  the gateway side (a plain module global would leak between concurrent
+  OAuth principals under waitress's threaded serving). Proven end-to-end
+  through the real HTTP/OAuth stack, not just unit-level.
+- **Brain-core audit extended** to ordinary writes (`note.write`) and
+  sharing changes (`note.sharing_change`, and `note.sharing_change.denied`
+  for a non-owner's attempt) — Stage 1 only audited principal/group
+  lifecycle.
+- **25-item security acceptance suite** (`tests/test_security_acceptance_stage2.py`)
+  mapping directly to every required proof: exact-id/search/context/
+  registry/project-context/timeline leakage denied, MCP/CLI cannot
+  bypass ACL, forged-principal/cross-principal-impersonation denied,
+  revocation works, disabled-principal-denied-live (performed against
+  production this stage, with a disposable principal — see canonical
+  Brain), shared→private immediately blocks future reads, a stale index
+  cannot broaden visibility, index rebuild and migration never broaden
+  it, authz records stay protected from ordinary write/read, break-glass
+  stays local-only (re-verified end-to-end after this stage's own
+  authorization changes landed), audit attribution is correct and
+  redaction-safe.
+
+### Not yet covered by this release
+
+- The memory/inbox queue's own direct commands (`brain memory ...`) have
+  no `owner_principal` field yet — not an urgent live gap (not reachable
+  via the SSH dispatcher or MCP under any mode today, same structural
+  isolation as `brain principal`/`group`), but real remaining scope.
+- Aggregate note-type/inbox counts in `brain status` are not
+  visibility-filtered (low severity: counts only, no ids/content).
+
 ## 0.13.2 — 2026-10-01 — admin capability to remove a principal record
 
 ### Added
