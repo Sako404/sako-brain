@@ -22,8 +22,33 @@ def cmd_init(args) -> int:
     return 0
 
 
+def _storage_for_configured_gateway() -> Storage:
+    """Every command that reads/writes gateway STATE (as opposed to
+    `init`, which only writes the config file) must target the exact same
+    database `serve`/`create_app` would use — resolved via
+    `config_mod.load_config()`, never a bare `Storage()` default path.
+
+    A bare `Storage()` resolves its path from whatever XDG_STATE_HOME
+    happens to be in the *current* process's environment, which silently
+    diverges from the configured gateway the moment this command runs
+    somewhere other than the exact environment `serve` runs in (e.g. an
+    operator's desktop instead of the gateway host/container) — a
+    previously-shipped bug that let `set-owner-password` report success
+    while writing a password hash to an unrelated local file the running
+    server never reads. Routing through `load_config()` means a
+    mistargeted run now fails loudly (`GatewayConfigError`) instead of
+    silently succeeding against the wrong state."""
+    gw_config = config_mod.load_config()
+    print(f"Target gateway: {gw_config.canonical_uri}  (state: {gw_config.db_path})")
+    return Storage(gw_config.db_path)
+
+
 def cmd_set_owner_password(args) -> int:
-    storage = Storage()
+    try:
+        storage = _storage_for_configured_gateway()
+    except config_mod.GatewayConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     password = args.password or getpass.getpass("New owner password: ")
     if not password or len(password) < 12:
         print("Error: password must be at least 12 characters", file=sys.stderr)
@@ -40,7 +65,11 @@ def cmd_set_owner_password(args) -> int:
 
 
 def cmd_list_clients(args) -> int:
-    storage = Storage()
+    try:
+        storage = _storage_for_configured_gateway()
+    except config_mod.GatewayConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     clients = storage.list_clients()
     if getattr(args, "json", False):
         print(json.dumps(clients, indent=2))
@@ -53,7 +82,11 @@ def cmd_list_clients(args) -> int:
 
 
 def cmd_revoke_client(args) -> int:
-    storage = Storage()
+    try:
+        storage = _storage_for_configured_gateway()
+    except config_mod.GatewayConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     n = storage.revoke_all_for_client(args.client_id)
     deleted = storage.delete_client(args.client_id) if getattr(args, "forget", False) else False
     print(f"Revoked {n} token(s) for client {args.client_id}."
@@ -62,7 +95,11 @@ def cmd_revoke_client(args) -> int:
 
 
 def cmd_revoke_all(args) -> int:
-    storage = Storage()
+    try:
+        storage = _storage_for_configured_gateway()
+    except config_mod.GatewayConfigError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     n = storage.revoke_all()
     print(f"Revoked {n} outstanding token(s). All remote (ChatGPT/Claude.ai/etc.) access is now cut off. "
           "Local Claude Code, Codex, and any other client using brain setup's SSH proxy are unaffected.")
