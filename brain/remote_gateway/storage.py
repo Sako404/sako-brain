@@ -107,8 +107,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_tokens_client ON tokens(client_id);
 CREATE INDEX IF NOT EXISTS idx_codes_client ON authorization_codes(client_id);
-CREATE INDEX IF NOT EXISTS idx_tokens_principal ON tokens(principal_id);
 """
+# idx_tokens_principal is deliberately NOT in SCHEMA above: on a database
+# that predates Stage 1, `tokens` already exists without a `principal_id`
+# column at the point executescript(SCHEMA) runs (CREATE TABLE IF NOT
+# EXISTS is a no-op for an existing table — it never adds a column), so
+# an unconditional CREATE INDEX on that column here would fail outright
+# against any real pre-Stage-1 database. Created instead in __init__,
+# after _ensure_column has guaranteed the column exists either way.
+# Caught by reproducing a real legacy-shaped database locally — the
+# hermetic gateway tests all build fresh v0.13.0-shaped databases from
+# scratch, so this ordering bug had no way to surface there.
+_PRINCIPAL_INDEX_DDL = "CREATE INDEX IF NOT EXISTS idx_tokens_principal ON tokens(principal_id)"
 
 # The one principal every pre-Stage-1 identity has always implicitly
 # been — matches brain-dispatch.py's own DEFAULT_PRINCIPAL and the
@@ -145,6 +155,7 @@ class Storage:
         self._conn.executescript(SCHEMA)
         _ensure_column(self._conn, "tokens", "principal_id", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(self._conn, "authorization_codes", "principal_id", "TEXT NOT NULL DEFAULT ''")
+        self._conn.execute(_PRINCIPAL_INDEX_DDL)
         self._migrate_legacy_owner()
         self._conn.commit()
         paths_mod.ensure_private_file(self.db_path)
