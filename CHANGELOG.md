@@ -5,6 +5,54 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.14.1 — 2026-10-02 — Pre-onboarding hardening: owner-only writes, status leak, dispatcher drift, role policy
+
+Hardening requested before any real family principal (`principal-ania`,
+`principal-wiktor`, `principal-marcel`) is created. **No family access is
+activated by this release.**
+
+### Added
+
+- **Owner-only write semantics, locked**: `visibility.is_owner()` is now
+  checked on every path that modifies an *existing* record (`update_memory`
+  generalized from sharing-fields-only to any field/append change; project
+  status/section updates; a decision's own supersede-marking; a handoff's
+  next-session append) — audience membership grants read, never edit/
+  update/delete. No editors/collaboration subsystem added.
+- **`brain status` aggregate counts are now visibility-filtered** per
+  acting principal (`count_by_type`, `count_inbox_pending`) — a non-owner
+  can no longer infer hidden record volume from raw counts.
+- **`brain/rolepolicy.py`** — minimal, generic role-policy enforcement.
+  Two capabilities only: `can_write_restricted` and `audience_allowlist`
+  (which audience targets a role may name when sharing its own records).
+  Stored as role-policy records under `90_SYSTEM/identity/`, same
+  local-CLI-only isolation as principals/groups. The engine has zero
+  hardcoded role names — a role policy is deployment configuration, keyed
+  purely by whatever string is in a principal's own `role` field. A role
+  with no explicit policy gets the fully-permissive default (pure
+  addition; nothing already working changes unless an admin narrows it).
+  New `brain role-policy set/show/list/delete` command tree.
+- **Dispatcher deployment-drift visibility**: `brain doctor` surfaces a
+  deployed SSH dispatcher script's hash + timestamp (written by the
+  server's own init script at container start) for comparison against
+  source — closes the exact gap behind a real 2026-10-02 incident where
+  the dispatcher script silently lagged a tested, merged change.
+- **`memoryqueue.py`'s no-multi-user-exposure invariant** recorded
+  explicitly and verified already true (stdio-only local MCP server,
+  never reachable via the SSH dispatcher).
+
+### Confirmed, no code change needed
+
+- `role=="admin"` carries no routine content read/write bypass anywhere —
+  consulted in exactly one place (`validate.is_admin_principal`, gating
+  `brain doctor`/`brain state` only). Regression tests added.
+- The MCP bridge (`mcp_bridge.py`) already has full `TRANSLATORS` coverage
+  for every advertised tool except the one documented, deliberate
+  exclusion (`queue_memory`) — audited directly against
+  `mcp_server.TOOLS` with a new permanent contract test, since the
+  existing one only checked internal self-consistency against a synthetic
+  fixture.
+
 ## 0.14.0 — 2026-10-02 — Private + Shared Logical Spaces (Stage 2, multi-user)
 
 Visibility enforcement for Stage 1's identity foundation. Logical spaces
