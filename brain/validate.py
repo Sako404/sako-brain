@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import backup, frontmatter
+from . import identity
 from . import paths as paths_mod
 from .paths import Config
 from .registry import find_duplicates, load_registry
@@ -350,7 +351,42 @@ def check_password_file_not_backed_up(config: Config) -> list[Problem]:
     return problems
 
 
-def run_all(config: Config) -> list[Problem]:
+def is_admin_principal(config: Config, principal_id: str) -> bool:
+    p = identity.get_principal(config, principal_id)
+    if p is None:
+        # No record for this id. Two different situations look identical
+        # here: (a) this vault has no principal records at all yet (every
+        # pre-Stage-1 identity's established "full access" default — see
+        # Config.acting_principal — must not quietly become a new
+        # restriction the day this check landed), vs (b) principal_id
+        # names someone who was never created or was deleted, which must
+        # NOT get admin output just by naming the default id. Distinguish
+        # by whether ANY principal record exists in this vault at all.
+        return not identity.list_principals(config)
+    return p.is_active and p.role == "admin"
+
+
+def run_all(config: Config, principal_id: str | None = None) -> list[Problem]:
+    """Stage 2 (multi-user visibility): every check here walks the WHOLE
+    vault (`load_all_notes`, `load_registry`, backup/state/secrets
+    config) regardless of who's asking — integrity checks like
+    `check_duplicate_ids` need the complete picture to be correct, the
+    same reason registry.py's load_registry() stays unfiltered for
+    write-path and integrity use. But the detailed OUTPUT (ids, paths,
+    titles, and operational details like backup configuration) is
+    admin-only — reachable over the SSH dispatcher's read mode like any
+    other `brain doctor` call, so a non-admin caller gets told diagnostics
+    exist but not their content, never the vault-wide detail a privacy
+    policy this strict can't let a non-admin principal see just by asking."""
+    if principal_id is None:
+        principal_id = config.acting_principal
+    if not is_admin_principal(config, principal_id):
+        return [Problem(
+            "admin_required",
+            "brain doctor's detailed diagnostics require an admin principal — "
+            "contact the vault admin if you believe there's a real problem.",
+        )]
+
     notes, parse_errors = load_all_notes(config)
     problems: list[Problem] = list(parse_errors)
     problems += check_duplicate_ids(notes)

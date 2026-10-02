@@ -46,7 +46,7 @@ from .paths import Config
 from .registry import ProjectEntry, load_registry
 from .systemdstatus import TIMER_UNITS, TimerStatus, timer_status
 from .timeline import TimelineEntry, list_timeline
-from .validate import Problem
+from .validate import Problem, is_admin_principal
 
 SCHEMA_VERSION = 1
 
@@ -261,16 +261,46 @@ def _collect_integrity_ref(config: Config) -> IntegrityRefSection:
 
 
 def get_operational_state(config: Config, *, include_restricted: bool = False,
-                           timeline_window_days: int = 14) -> OperationalState:
+                           timeline_window_days: int = 14,
+                           principal_id: str | None = None) -> OperationalState:
     """Deterministic snapshot of Brain's own current state. Composition only
     — see the module docstring for the hard rules this function must hold to.
     Never raises: a failing section degrades to its default value and is
     recorded in `sources`, so one bad collector cannot take down the rest.
+
+    Stage 2 (multi-user visibility): admin-only, same gate and same
+    rationale as `brain doctor` (validate.run_all, reused directly rather
+    than duplicated) — this dashboard mixes operational/infra state
+    (systemd timers, the integrity manifest, doctor's own findings) with
+    content that currently has no visibility filtering at all once pulled
+    in here (open decisions via a raw SQL query, the pending memory queue,
+    which has no owner_principal field yet to filter by at all). Reachable
+    over the SSH dispatcher's read mode like `brain doctor`, so a
+    non-admin caller must not get any of this just by asking `brain
+    state`. A non-admin caller gets an otherwise-empty envelope with
+    `sources["state"]` explaining why.
     """
+    if principal_id is None:
+        principal_id = config.acting_principal
     sources: dict[str, SourceStatus] = {}
     sensitivity_omitted: dict[str, int | None] = {
         "decisions": None, "memory_queue": None, "timeline_recent": None,
     }
+
+    if not is_admin_principal(config, principal_id):
+        sources["state"] = SourceStatus(
+            ok=False, error="brain state requires an admin principal — "
+                            "contact the vault admin if you believe there's a real problem.")
+        return OperationalState(
+            schema_version=SCHEMA_VERSION,
+            generated_at=datetime.now().isoformat(timespec="seconds"),
+            brain_version=__version__, vault_root=str(config.brain_root), sources=sources,
+            projects=ProjectsSection(), decisions=DecisionsSection(),
+            memory_queue=MemoryQueueSection(), handoffs=HandoffsSection(),
+            doctor=DoctorSection(), timeline_recent=TimelineSection(window_days=timeline_window_days),
+            systemd=SystemdSection(), integrity_ref=IntegrityRefSection(),
+            sensitivity_omitted=sensitivity_omitted,
+        )
 
     try:
         projects = _collect_projects(config)

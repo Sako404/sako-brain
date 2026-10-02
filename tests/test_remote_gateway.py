@@ -901,5 +901,66 @@ def _fake_capabilities_json() -> str:
     return json_mod.dumps({"interfaces": {"mcp": {"tools": tools}}})
 
 
+class TestGatewayDelegatesActingPrincipal(GatewayTestCase):
+    """Stage 2 (multi-user visibility, gateway delegation) — end-to-end
+    through the real HTTP/OAuth stack: a tools/call request must reach the
+    underlying `brain` subprocess with BRAIN_GATEWAY_ACTING_PRINCIPAL set
+    to the TOKEN's own principal_id, never a hardcoded or cross-request-
+    leaked value. The server-side dispatcher independently re-validates
+    this assertion (tested in sako-brain-tooling's own suite) — this only
+    proves the gateway actually SENDS it correctly."""
+
+    SECOND_PRINCIPAL = "principal-ania"
+
+    def setUp(self):
+        super().setUp()
+        # get_token() always submits self.owner_password regardless of
+        # which principal is passed, so the second principal's credential
+        # must use that same password, not an independent one.
+        pw_hash, salt = owner_auth.hash_password(self.owner_password)
+        self.storage.set_credential(self.SECOND_PRINCIPAL, pw_hash, salt)
+
+    def _call_search_memory_capturing_env(self, *, principal: str) -> dict:
+        from brain import remote as remote_mod
+
+        tok = self.get_token(scope="brain.read", principal=principal)
+        captured_env = {}
+
+        def fake_run(argv, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+
+            class FakeCompleted:
+                returncode = 0
+                stdout = "[]"
+                stderr = ""
+            return FakeCompleted()
+
+        with patch("subprocess.run", side_effect=fake_run):
+            self.client.post("/mcp", headers={"Authorization": f"Bearer {tok['access_token']}"},
+                              json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                    "params": {"name": "search_memory", "arguments": {"query": "x"}}})
+        return captured_env
+
+    def test_tool_call_env_carries_the_tokens_own_principal(self):
+        from brain import remote as remote_mod
+        env = self._call_search_memory_capturing_env(principal=self.PRINCIPAL)
+        self.assertEqual(env.get(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV), self.PRINCIPAL)
+
+    def test_a_different_principals_token_carries_that_principal_not_the_default(self):
+        from brain import remote as remote_mod
+        env = self._call_search_memory_capturing_env(principal=self.SECOND_PRINCIPAL)
+        self.assertEqual(env.get(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV), self.SECOND_PRINCIPAL)
+
+    def test_acting_principal_does_not_leak_across_sequential_requests(self):
+        # Not a true concurrency test (the Flask test client is
+        # synchronous), but proves acting_as() actually resets rather than
+        # leaving a stale value for the next request to inherit.
+        from brain import remote as remote_mod
+        first = self._call_search_memory_capturing_env(principal=self.SECOND_PRINCIPAL)
+        second = self._call_search_memory_capturing_env(principal=self.PRINCIPAL)
+        self.assertEqual(first.get(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV), self.SECOND_PRINCIPAL)
+        self.assertEqual(second.get(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV), self.PRINCIPAL)
+
+
 if __name__ == "__main__":
     unittest.main()

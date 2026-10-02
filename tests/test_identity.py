@@ -180,6 +180,20 @@ class TestBreakGlass(IdentityTestCase):
         self.assertTrue(ania.is_active)
         self.assertEqual(identity.get_group(self.config, "group-household").members, ["principal-ania"])
 
+    def test_restores_full_admin_gated_access_stage2(self):
+        """Re-verified after Stage 2's authorization changes landed (per
+        Marcin's own instruction): break-glass must not just flip
+        status/role back — the restored principal must actually regain
+        everything Stage 2 gates on role=admin (brain doctor, brain
+        state), not just pass is_active()."""
+        from brain import validate
+        identity.create_principal(self.config, display_name="Marcin", role="admin")
+        identity.set_principal_status(self.config, "principal-marcin", "disabled")
+        self.assertFalse(validate.is_admin_principal(self.config, "principal-marcin"))
+
+        identity.break_glass_restore_admin(self.config, "principal-marcin", "admin")
+        self.assertTrue(validate.is_admin_principal(self.config, "principal-marcin"))
+
 
 class TestIdentityRecordsAreStructurallyIsolated(IdentityTestCase):
     """Hardening requirements 1 and 5: ordinary write/search/context paths

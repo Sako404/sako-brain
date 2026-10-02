@@ -82,6 +82,37 @@ A remote web client can never:
 | Request size | Capped (256 KB) — this is a JSON-RPC tool-call API, not a file upload endpoint |
 | Logging | Structured, secret-free: tool names and outcomes, never token values, passwords, or full note content |
 
+### Multi-user visibility (Stage 2) and the gateway's SSH credential
+
+Every OAuth-authenticated principal's requests reach canonical Brain
+through the SAME two SSH identities (`remote-gateway-read` /
+`remote-gateway-write`) — one shared identity per mode, not one per
+principal. Stage 2's visibility enforcement (which principal sees which
+records) depends on the gateway correctly asserting, per request, which
+principal it's acting for — a `--acting-principal <id>` prefix the
+server-side dispatcher independently re-validates against the canonical
+principal registry before honoring (see `brain-dispatch.py`'s
+`resolve_effective_principal`). Only these two identities may make that
+assertion; every other SSH identity (desktop, TRON, capture) is refused
+outright if it tries.
+
+**This means possession of either gateway SSH private key is equivalent to
+being able to assert ANY active principal's identity to the vault** — not
+merely "read the gateway's own data" the way compromising a single
+family member's OAuth credential would be. Treat compromise or suspected
+compromise of either key as a full identity-spoofing incident, not an
+ordinary credential leak:
+
+1. Regenerate the SSH keypair(s) for the affected identity immediately.
+2. Replace the corresponding `authorized_keys` line(s) on the canonical
+   server — do not just add a new key alongside the old one.
+3. Restart/redeploy the gateway app so it starts using the new key.
+4. Review the Brain-core audit log for every delegated request
+   (`transport=gateway`) since the suspected compromise window, alongside
+   the gateway's own OAuth audit log (login/consent/token events).
+5. Record the incident in canonical Brain (a decision or timeline event)
+   the same way any other security incident in this project is recorded.
+
 ## OAuth scopes
 
 | Scope | Covers |

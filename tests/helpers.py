@@ -29,7 +29,7 @@ sensitivity: normal
 source: test
 confidence: fact
 aliases: []
----
+{extra}---
 
 # {title}
 
@@ -71,13 +71,24 @@ class TempVault:
 
     def write_note(self, rel_dir: str, filename: str, *, id: str, type: str,
                    status: str = "", created: str = "2026-01-01", updated: str = "2026-01-01",
-                   people=None, projects=None, tags=None, title: str = "Title", body: str = ""):
+                   people=None, projects=None, tags=None, title: str = "Title", body: str = "",
+                   owner_principal: str | None = None, audience: list | None = None):
         path = self.root / rel_dir / filename
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Stage 2 (multi-user visibility): omitted by default, exactly like
+        # a real pre-migration note — a test that doesn't pass these gets
+        # the same "defaults to principal-marcin" behaviour visibility.py
+        # itself defines, not a test-only shortcut.
+        extra_lines = []
+        if owner_principal is not None:
+            extra_lines.append(f"owner_principal: {owner_principal}")
+        if audience is not None:
+            extra_lines.append(f"audience: {audience}")
+        extra = ("".join(line + "\n" for line in extra_lines))
         path.write_text(NOTE_TEMPLATE.format(
             id=id, type=type, status=status, created=created, updated=updated,
             people=people or [], projects=projects or [], tags=tags or [],
-            title=title, body=body,
+            title=title, body=body, extra=extra,
         ))
         return path
 

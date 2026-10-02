@@ -38,6 +38,10 @@ class TestProjectShowDiscoverSyncStillWork(unittest.TestCase):
             "    path: /tmp/does-not-need-to-exist\n"
             "    status: active\n"
         )
+        # Stage 2: a registry entry's visibility is decided by its backing
+        # note's own frontmatter — a row with no corresponding note fails
+        # closed, so this fixture needs one.
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-example.md", id="project-example", type="project")
 
     def tearDown(self):
         self.vault.cleanup()

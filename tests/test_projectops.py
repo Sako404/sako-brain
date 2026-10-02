@@ -4,6 +4,7 @@ physical status folder, and the registry's status field must never drift
 apart after any of these calls."""
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 from brain import frontmatter, projectops
@@ -244,6 +245,38 @@ class TestUpdateSection(unittest.TestCase):
         projectops.update_section(self.config, "project-widget", "Current state", "replace", "x")
         note = frontmatter.parse_file(self.path)
         self.assertEqual(note.meta["updated"], dt.date.today().isoformat())
+
+
+class TestCreateProjectSetsOwnership(unittest.TestCase):
+    """Stage 2 (multi-user visibility): same default-ownership-on-write
+    rule as capture.capture — see tests/test_capture.py."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_owner_principal_is_the_acting_principal(self):
+        config = dataclasses.replace(self.config, acting_principal="principal-ania")
+        path = projectops.create_project(
+            config, id="project-widget", name="Widget", path="/tmp/example-widget")
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.meta["owner_principal"], "principal:ania")
+
+    def test_audience_defaults_to_private(self):
+        path = projectops.create_project(
+            self.config, id="project-widget", name="Widget", path="/tmp/example-widget")
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.meta["audience"], [])
+
+    def test_explicit_audience_is_honored(self):
+        path = projectops.create_project(
+            self.config, id="project-widget", name="Widget", path="/tmp/example-widget",
+            audience=["group:household"])
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.meta["audience"], ["group:household"])
 
 
 if __name__ == "__main__":

@@ -11,8 +11,10 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+from . import audit
 from . import frontmatter
 from . import indexer
+from . import visibility
 from .capture import slugify
 from .paths import Config
 from .update import find_note_path
@@ -30,7 +32,7 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
                      projects: list[str] | None = None, tags: list[str] | None = None,
                      sensitivity: str = "normal", source: str = "", source_date: str = "",
                      confidence: str = "fact", supersedes: str | None = None,
-                     date: str | None = None) -> Path:
+                     date: str | None = None, audience: list[str] | None = None) -> Path:
     allowed = config.vocabulary.statuses_for("decision")
     if allowed and status not in allowed:
         raise DecisionError(f"status must be one of {allowed}")
@@ -54,6 +56,8 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
         "people": people or [], "projects": projects or [], "tags": tags or [],
         "sensitivity": sensitivity, "source": source, "source_date": source_date,
         "confidence": confidence, "supersedes": supersedes or "", "aliases": [],
+        "owner_principal": visibility.id_to_ref(config.acting_principal),
+        "audience": audience or [],
     }
     body = (
         f"# Decision: {title}\n\n"
@@ -75,6 +79,9 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
         indexer.index_note(config, old_path)
 
     indexer.index_note(config, dest)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id={note_id}")
     return dest
 
 

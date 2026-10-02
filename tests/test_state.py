@@ -13,7 +13,7 @@ import json
 import unittest
 from datetime import date, timedelta
 
-from brain import indexer, memoryqueue, state
+from brain import identity, indexer, memoryqueue, state
 from brain.handoff import HandoffSections, write as write_handoff
 from tests.helpers import TempVault
 
@@ -344,6 +344,56 @@ class TestOperationalStateScopeGuards(unittest.TestCase):
         )
         for token in forbidden:
             self.assertNotIn(token, source, f"brain/state.py must not reference {token!r}")
+
+
+class TestOperationalStateAdminGate(unittest.TestCase):
+    """Stage 2 (multi-user visibility): `brain state` mixes operational/
+    infra data (systemd, integrity manifest, doctor findings) with content
+    that has no visibility filtering of its own once pulled in here (open
+    decisions via raw SQL, the pending memory queue — no owner_principal
+    field to filter by at all yet) — admin-only, same gate as `brain
+    doctor`, reached the same way over the SSH dispatcher's read mode."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _as(self, principal_id: str):
+        return dataclasses.replace(self.config, acting_principal=principal_id)
+
+    def test_no_principal_records_at_all_gets_full_state(self):
+        result = state.get_operational_state(self.config)
+        self.assertNotIn("state", result.sources)
+
+    def test_admin_principal_gets_full_state(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        result = state.get_operational_state(self._as("principal-marcin"))
+        self.assertNotIn("state", result.sources)
+
+    def test_non_admin_principal_gets_empty_envelope(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        identity.create_principal(self.config, display_name="Ania", role="adult",
+                                   principal_id="principal-ania")
+        memoryqueue.add(self.config, candidate_fact="a private fact about ania")
+        result = state.get_operational_state(self._as("principal-ania"))
+        self.assertIn("state", result.sources)
+        self.assertFalse(result.sources["state"].ok)
+        self.assertEqual(result.memory_queue.entries, [])
+        self.assertEqual(result.decisions.open, [])
+        self.assertEqual(result.doctor.problems, [])
+
+    def test_explicit_principal_id_argument_overrides_config(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        identity.create_principal(self.config, display_name="Ania", role="adult",
+                                   principal_id="principal-ania")
+        result = state.get_operational_state(self.config, principal_id="principal-ania")
+        self.assertIn("state", result.sources)
 
 
 if __name__ == "__main__":

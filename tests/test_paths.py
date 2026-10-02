@@ -63,6 +63,60 @@ class TestDefaultConfig(unittest.TestCase):
                 config = default_config(brain_root=fake_root)
             self.assertTrue(config.remote_project_paths)
 
+    def test_acting_principal_defaults_to_marcin(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_root = Path(tmp) / "v"
+            fake_root.mkdir(parents=True)
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("BRAIN_CALLER_PRINCIPAL", None)
+                config = default_config(brain_root=fake_root)
+            self.assertEqual(config.acting_principal, "principal-marcin")
+
+    def test_acting_principal_from_env_when_set(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_root = Path(tmp) / "v"
+            fake_root.mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"BRAIN_CALLER_PRINCIPAL": "principal-ania"}):
+                config = default_config(brain_root=fake_root)
+            self.assertEqual(config.acting_principal, "principal-ania")
+
+    def test_caller_client_and_transport_default_to_empty(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_root = Path(tmp) / "v"
+            fake_root.mkdir(parents=True)
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("BRAIN_CALLER_CLIENT", None)
+                os.environ.pop("BRAIN_CALLER_TRANSPORT", None)
+                config = default_config(brain_root=fake_root)
+            self.assertEqual(config.caller_client, "")
+            self.assertEqual(config.caller_transport, "")
+
+    def test_caller_client_and_transport_from_env_when_set(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_root = Path(tmp) / "v"
+            fake_root.mkdir(parents=True)
+            with mock.patch.dict(os.environ, {"BRAIN_CALLER_CLIENT": "remote-gateway-read",
+                                               "BRAIN_CALLER_TRANSPORT": "gateway"}):
+                config = default_config(brain_root=fake_root)
+            self.assertEqual(config.caller_client, "remote-gateway-read")
+            self.assertEqual(config.caller_transport, "gateway")
+
 
 class TestEnsurePrivateFile(unittest.TestCase):
     """Phase 5B finding: log files created via plain `open(path, 'a')`

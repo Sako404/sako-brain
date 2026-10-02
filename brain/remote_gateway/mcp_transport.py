@@ -39,6 +39,16 @@ from .. import mcp_bridge
 from . import scopes as scopes_mod
 from .instructions import SERVER_INSTRUCTIONS
 
+# Stage 2 (multi-user visibility, gateway delegation): every request this
+# transport handles is scoped, for its entire duration, to the OAuth
+# token's own principal_id — see mcp_bridge.acting_as() for why a context
+# manager rather than a parameter threaded through every call this module
+# and mcp_bridge.handle_request make. Wrapped at handle_mcp_body (the one
+# entry point app.py calls), not selectively around just tools/call: a
+# method that never touches vault content (initialize, tools/list) simply
+# never reads the scoped value, so wrapping everything is strictly safer
+# than guessing which methods might.
+
 
 class ScopeError(Exception):
     def __init__(self, missing: frozenset[str]):
@@ -90,7 +100,8 @@ def handle_mcp_request(req: dict, granted_scopes: frozenset[str]) -> dict | None
     return response
 
 
-def handle_mcp_body(body: bytes, granted_scopes: frozenset[str]) -> tuple[dict | None, int, str | None]:
+def handle_mcp_body(body: bytes, granted_scopes: frozenset[str],
+                     principal_id: str) -> tuple[dict | None, int, str | None]:
     """Parses one Streamable-HTTP MCP POST body (a single JSON-RPC object;
     batching is not implemented — no current target client requires it)
     and returns (response_dict_or_None, http_status, missing_scope_str).
@@ -99,14 +110,21 @@ def handle_mcp_body(body: bytes, granted_scopes: frozenset[str]) -> tuple[dict |
     authorization spec, "Runtime Insufficient Scope Errors" — the client
     needs this to know what to re-request). A None response with status
     202 is the correct Streamable-HTTP shape for a notification, which
-    has no JSON-RPC response at all."""
+    has no JSON-RPC response at all.
+
+    `principal_id` must be the validated OAuth token's own principal_id
+    (app.py's `info.principal_id`, never anything else) — scopes every
+    tool call this request makes to that principal via
+    mcp_bridge.acting_as(), which the server-side dispatcher independently
+    re-validates before honoring."""
     try:
         req = json_mod.loads(body)
     except json_mod.JSONDecodeError:
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}, 400, None
 
     try:
-        result = handle_mcp_request(req, granted_scopes)
+        with mcp_bridge.acting_as(principal_id):
+            result = handle_mcp_request(req, granted_scopes)
     except ScopeError as exc:
         missing_str = " ".join(sorted(exc.missing))
         return {

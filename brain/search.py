@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from . import frontmatter
+from . import visibility
 from .indexer import connect
 from .paths import Config
 
@@ -89,6 +91,18 @@ def _run_match(conn, match_expr: str, limit: int):
     ).fetchall()
 
 
+# Stage 2 (multi-user visibility): the index is discovery/ranking only, never
+# authoritative for a security decision — see brain/visibility.py. Candidate
+# ids come from the FTS query exactly as before; this module then fetches
+# MORE of them than `limit` asks for, so that filtering out ones the caller
+# may not see (a live, per-record check — never the index's own "sensitivity"
+# field or any other cached projection) still leaves `limit` usable results
+# where the vault actually has that many. Title/snippet are only ever
+# attached to the final SearchResult list AFTER that check — never materialize
+# inaccessible content before authorization.
+_OVERFETCH = 4
+
+
 def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
     """Tiered query relaxation, strictest first:
 
@@ -104,12 +118,16 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
     3. Full OR across all terms — last resort, guarantees *something*
        rather than nothing once tiers 1-2 are exhausted.
 
-    Each tier only runs enough to top up to `limit`; already-seen ids are
-    never duplicated, and stricter tiers always rank above looser ones.
+    Each tier only runs enough to top up to an internal, overfetched
+    candidate limit; already-seen ids are never duplicated, and stricter
+    tiers always rank above looser ones. Results are then filtered down to
+    what `config.acting_principal` may see, and only THEN cut to `limit`.
     """
     terms = _clean_terms(query)
     if not terms:
         return []
+
+    fetch_limit = limit * _OVERFETCH
 
     conn = connect(config)
     try:
@@ -123,26 +141,36 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
                     rows.append(r)
 
         if len(terms) > 1:
-            _add(_run_match(conn, _and_expr(terms), limit))
+            _add(_run_match(conn, _and_expr(terms), fetch_limit))
 
-        if len(rows) < limit and len(terms) > 2:
+        if len(rows) < fetch_limit and len(terms) > 2:
             for i in range(len(terms)):
-                if len(rows) >= limit:
+                if len(rows) >= fetch_limit:
                     break
                 relaxed = terms[:i] + terms[i + 1:]
-                _add(_run_match(conn, _and_expr(relaxed), limit - len(rows)))
+                _add(_run_match(conn, _and_expr(relaxed), fetch_limit - len(rows)))
 
-        if len(rows) < limit:
-            _add(_run_match(conn, _or_expr(terms), limit - len(rows)))
+        if len(rows) < fetch_limit:
+            _add(_run_match(conn, _or_expr(terms), fetch_limit - len(rows)))
 
-        rows = rows[:limit]
+        rows = rows[:fetch_limit]
     finally:
         conn.close()
 
-    return [
-        SearchResult(r["id"], r["type"], r["status"], r["title"], r["path"], r["snip"])
-        for r in rows
-    ]
+    results = []
+    for r in rows:
+        if len(results) >= limit:
+            break
+        note_path = config.brain_root / r["path"]
+        try:
+            note = frontmatter.parse_file(note_path)
+        except (frontmatter.FrontmatterError, OSError):
+            continue
+        if not visibility.can_view_note(config, config.acting_principal, note):
+            continue
+        results.append(SearchResult(r["id"], r["type"], r["status"], r["title"], r["path"], r["snip"]))
+
+    return results
 
 
 def get_note_row(config: Config, note_id: str):

@@ -48,8 +48,32 @@ jobs:
       - name: Install runtime dependency
         run: python -m pip install --quiet PyYAML
 
+      - name: Configure a throwaway git identity for the test runner
+        # gitops.py's own tests (test_gitops.py, test_integrity.py,
+        # test_cli_phase5a.py's resume test) call `git commit` against
+        # temp vaults — a bare CI runner has no git identity configured at
+        # all, which fails with "Author identity unknown" the same way an
+        # un-configured developer machine would. Global but runner-local —
+        # this identity is never used for anything real.
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "CI Runner"
+
       - name: Run the test suite
-        run: python -m unittest discover -s tests -t . --verbose 2>&1 | tail -40
+        # Captured to a file and exit-code-checked explicitly, never piped
+        # straight to `tail` — a pipeline's exit status is its LAST command's
+        # by default, so `| tail -40` on its own silently reports "success"
+        # regardless of whether unittest actually failed. Found live: this
+        # exact step reported success on a run that printed "FAIL:" for 4
+        # tests (tests/test_oss4_*.py's hardcoded version-baseline strings,
+        # stale after a version bump), which meant the "tests" required
+        # status check had not actually been gating merges on test results.
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -t . --verbose > /tmp/test-output.log 2>&1 || EXIT=$?
+          EXIT="${EXIT:-0}"
+          tail -40 /tmp/test-output.log
+          exit "$EXIT"
 
       - name: Report skipped tests
         # Skips are expected — optional external tools are absent on a runner —

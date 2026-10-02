@@ -17,7 +17,10 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from . import audit
+from . import frontmatter
 from . import indexer
+from . import visibility
 from .paths import Config
 from .registry import find_project, load_registry
 
@@ -70,7 +73,8 @@ def _render_session(sections: HandoffSections, session_date: str) -> str:
     )
 
 
-def _frontmatter(project_id: str, entry, today: str, source: str) -> str:
+def _frontmatter(config: Config, project_id: str, entry, today: str, source: str,
+                  audience: list[str] | None = None) -> str:
     return (
         "---\n"
         f"id: handoff-{project_id}\n"
@@ -86,6 +90,8 @@ def _frontmatter(project_id: str, entry, today: str, source: str) -> str:
         f"source_date: {today}\n"
         "confidence: fact\n"
         "aliases: []\n"
+        f"owner_principal: {visibility.id_to_ref(config.acting_principal)}\n"
+        f"audience: {audience or []}\n"
         "---\n"
     )
 
@@ -94,7 +100,8 @@ PROSE_FIELDS = ("attempted", "changed", "working_state", "unresolved", "next_act
 
 
 def write(config: Config, project_id: str, sections: HandoffSections,
-          session_date: str | None = None, source: str = "cli") -> Path:
+          session_date: str | None = None, source: str = "cli",
+          audience: list[str] | None = None) -> Path:
     # A handoff whose every prose field is blank renders as five "(not noted)"
     # headings — it looks like a written handoff and carries nothing, which is
     # worse than no handoff at all because the next session trusts it. Refuse
@@ -124,13 +131,16 @@ def write(config: Config, project_id: str, sections: HandoffSections,
             title_line, _, rest = body.lstrip("\n").partition("\n")
             new_text = fm + "\n" + title_line + "\n\n" + new_section + "\n" + rest.lstrip("\n")
         else:
-            new_text = _frontmatter(entry.id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section + "\n" + text
+            new_text = _frontmatter(config, entry.id, entry, today, source, audience) + f"\n# Handoff — {entry.name}\n\n" + new_section + "\n" + text
     else:
         path.parent.mkdir(parents=True, exist_ok=True)
-        new_text = _frontmatter(entry.id, entry, today, source) + f"\n# Handoff — {entry.name}\n\n" + new_section
+        new_text = _frontmatter(config, entry.id, entry, today, source, audience) + f"\n# Handoff — {entry.name}\n\n" + new_section
 
     path.write_text(new_text, encoding="utf-8")
     indexer.index_note(config, path)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id=handoff-{entry.id}")
     return path
 
 
@@ -145,10 +155,27 @@ def _touch_updated(frontmatter_block: str, today: str) -> str:
     return "\n".join(out) + "\n"
 
 
-def read_latest(config: Config, project_id: str) -> str | None:
-    """Just the most recent session's section text, for /resume."""
-    path = handoff_path(config, project_id)
+def _handoff_visible(config: Config, principal_id: str, path: Path) -> bool:
+    """Stage 2: a handoff's visibility comes from its OWN frontmatter,
+    read live — not inherited from its parent project. Pre-migration (or
+    any handoff missing the field) falls back to the same default as
+    every other record, via visibility.can_view's own missing-owner
+    handling."""
     if not path.exists():
+        return False
+    try:
+        note = frontmatter.parse_file(path)
+    except frontmatter.FrontmatterError:
+        return False
+    return visibility.can_view_note(config, principal_id, note)
+
+
+def read_latest(config: Config, project_id: str, principal_id: str | None = None) -> str | None:
+    """Just the most recent session's section text, for /resume."""
+    if principal_id is None:
+        principal_id = config.acting_principal
+    path = handoff_path(config, project_id)
+    if not _handoff_visible(config, principal_id, path):
         return None
     text = path.read_text(encoding="utf-8")
     _, _, body = text.partition("\n---\n")
@@ -164,9 +191,14 @@ def read_latest(config: Config, project_id: str) -> str | None:
     return rest if next_marker == -1 else rest[:next_marker]
 
 
-def has_handoff(config: Config, project_id: str) -> bool:
-    return handoff_path(config, project_id).exists()
+def has_handoff(config: Config, project_id: str, principal_id: str | None = None) -> bool:
+    if principal_id is None:
+        principal_id = config.acting_principal
+    return _handoff_visible(config, principal_id, handoff_path(config, project_id))
 
 
-def list_projects_with_handoffs(config: Config) -> list[str]:
-    return [e.id for e in load_registry(config) if handoff_path(config, e.id).exists()]
+def list_projects_with_handoffs(config: Config, principal_id: str | None = None) -> list[str]:
+    if principal_id is None:
+        principal_id = config.acting_principal
+    return [e.id for e in load_registry(config)
+            if _handoff_visible(config, principal_id, handoff_path(config, e.id))]

@@ -1,3 +1,4 @@
+import dataclasses
 import unittest
 
 from brain import capture
@@ -35,6 +36,36 @@ class TestCapture(unittest.TestCase):
     def test_slugify(self):
         self.assertEqual(capture.slugify("Hello, World!"), "hello-world")
         self.assertEqual(capture.slugify("  spaced out  "), "spaced-out")
+
+
+class TestCaptureSetsOwnership(unittest.TestCase):
+    """Stage 2 (multi-user visibility): a new record defaults to private
+    ownership of the authenticated principal unless a permitted explicit
+    audience is supplied — never inferred, never left unset."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_owner_principal_is_the_acting_principal(self):
+        config = dataclasses.replace(self.config, acting_principal="principal-ania")
+        dest = capture.capture(config, type_="fact", title="A fact")
+        note = parse_file(dest)
+        self.assertEqual(note.meta["owner_principal"], "principal:ania")
+
+    def test_audience_defaults_to_private(self):
+        dest = capture.capture(self.config, type_="fact", title="A fact")
+        note = parse_file(dest)
+        self.assertEqual(note.meta["audience"], [])
+
+    def test_explicit_audience_is_honored(self):
+        dest = capture.capture(self.config, type_="fact", title="A fact",
+                                audience=["group:household"])
+        note = parse_file(dest)
+        self.assertEqual(note.meta["audience"], ["group:household"])
 
 
 if __name__ == "__main__":

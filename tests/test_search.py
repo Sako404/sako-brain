@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from brain import indexer, search
 from tests.helpers import TempVault
@@ -120,6 +121,72 @@ class TestNaturalLanguageQuestions(unittest.TestCase):
     def test_stopwords_alone_do_not_crash_or_hang(self):
         results = search.search(self.config, "what is the of", limit=5)
         self.assertIsInstance(results, list)
+
+
+class TestSearchVisibility(unittest.TestCase):
+    """Stage 2 (multi-user visibility): search must never surface the
+    existence, title, or snippet of a note the caller may not see —
+    candidate ids -> live authoritative visibility check -> allowed
+    candidates only -> materialize. Default acting_principal is
+    principal-marcin, matching every note's own default owner, so tests
+    that want a DIFFERENT caller override via dataclasses.replace."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.vault.write_note("60_KNOWLEDGE", "knowledge-private.md",
+                               id="knowledge-private", type="knowledge",
+                               title="Marcin's Private Widget Notes",
+                               body="Only marcin should ever see this widget content.",
+                               owner_principal="principal:marcin", audience=[])
+        self.vault.write_note("60_KNOWLEDGE", "knowledge-shared.md",
+                               id="knowledge-shared", type="knowledge",
+                               title="Shared Widget Notes",
+                               body="Marcin and ania can both see this widget content.",
+                               owner_principal="principal:marcin", audience=["principal:ania"])
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _as(self, principal_id: str):
+        import dataclasses
+        return dataclasses.replace(self.config, acting_principal=principal_id)
+
+    def test_owner_sees_their_own_private_note(self):
+        results = search.search(self._as("principal-marcin"), "widget")
+        ids = [r.id for r in results]
+        self.assertIn("knowledge-private", ids)
+        self.assertIn("knowledge-shared", ids)
+
+    def test_non_owner_never_sees_the_private_note_in_results(self):
+        results = search.search(self._as("principal-ania"), "widget")
+        ids = [r.id for r in results]
+        self.assertNotIn("knowledge-private", ids)
+
+    def test_explicit_audience_principal_sees_the_shared_note(self):
+        results = search.search(self._as("principal-ania"), "widget")
+        ids = [r.id for r in results]
+        self.assertIn("knowledge-shared", ids)
+
+    def test_unrelated_third_party_sees_neither_note(self):
+        results = search.search(self._as("principal-marcel"), "widget")
+        ids = [r.id for r in results]
+        self.assertNotIn("knowledge-private", ids)
+        self.assertNotIn("knowledge-shared", ids)
+
+    def test_candidate_fetch_overfetches_so_filtering_can_still_fill_limit(self):
+        # If search() only ever pulled exactly `limit` raw candidates before
+        # filtering, a caller whose visible notes rank below the top `limit`
+        # raw matches would silently get fewer than `limit` results even
+        # when enough visible ones exist. Proven directly against the SQL
+        # call rather than by engineering BM25 ranking in a fixture: the
+        # candidate fetch must ask for more than the requested limit.
+        with mock.patch("brain.search._run_match", wraps=search._run_match) as spy:
+            search.search(self._as("principal-marcin"), "widget", limit=5)
+        fetch_limits = [call.args[2] for call in spy.call_args_list]
+        self.assertTrue(fetch_limits)
+        self.assertTrue(all(fl > 5 for fl in fetch_limits))
 
 
 if __name__ == "__main__":

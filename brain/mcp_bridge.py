@@ -58,6 +58,8 @@ Never expose this over a network socket — stdio only, local use only.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
 import os
 import shutil
@@ -65,6 +67,7 @@ import sys
 from pathlib import Path
 
 from . import paths as paths_mod
+from . import remote as remote_mod
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = f"{paths_mod.APP_DIRNAME}-mcp-bridge"
@@ -83,6 +86,42 @@ BRIDGE_VERSION = "0.1.0"
 _LOCAL_OVERRIDE_ENV_VARS = ("BRAIN_ROOT", "BRAIN_LOCAL", "BRAIN_STATE_DIR", "BRAIN_VAULT")
 
 _SUBPROCESS_TIMEOUT_SECONDS = 30.0
+
+# Stage 2 (multi-user visibility, gateway delegation): the acting principal
+# for the request CURRENTLY being handled, set by the remote gateway (see
+# acting_as() below) from an already-validated OAuth token's own
+# principal_id — never set by any other caller of this bridge (the desktop/
+# Claude Code/Codex integrations never call acting_as() at all, so this
+# stays None for them, and _clean_env() below never adds the delegation env
+# var in that case).
+#
+# A plain module-level variable (like _CURRENT_CLIENT below) would NOT be
+# safe here: the remote gateway serves concurrent requests from DIFFERENT
+# OAuth principals on separate worker threads (waitress, not a single-
+# threaded dev server — see remote_gateway/cli.py), and this value decides
+# whose content a request's subprocess calls can see. contextvars.ContextVar
+# isolates it correctly per thread/task, the same primitive Python's own
+# stdlib (e.g. asyncio) uses for exactly this "implicit per-request state
+# without threading a parameter through every call" problem.
+_acting_principal_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "brain_mcp_bridge_acting_principal", default=None)
+
+
+@contextlib.contextmanager
+def acting_as(principal_id: str | None):
+    """Scopes every _run_brain() call made within this `with` block (however
+    deeply nested inside handle_request's tool dispatch) to assert
+    `principal_id` as the acting principal to the server-side dispatcher,
+    via BRAIN_GATEWAY_ACTING_PRINCIPAL. The dispatcher independently
+    re-validates this assertion and refuses it outright from any SSH
+    identity other than the two dedicated gateway ones — this only
+    controls what gets ASKED for, never what's granted. Restores the
+    previous value on exit (never leaks across requests even if nested)."""
+    token = _acting_principal_var.set(principal_id)
+    try:
+        yield
+    finally:
+        _acting_principal_var.reset(token)
 
 # Set once per process from the `initialize` request's clientInfo, mirroring
 # mcp_server.py's own _CURRENT_CLIENT — used for logging and as the default
@@ -115,6 +154,14 @@ def _clean_env() -> dict:
     env = dict(os.environ)
     for key in _LOCAL_OVERRIDE_ENV_VARS:
         env.pop(key, None)
+    acting_principal = _acting_principal_var.get()
+    if acting_principal:
+        env[remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV] = acting_principal
+    else:
+        # Never inherit a stray value from the parent process's own
+        # environment — only acting_as() (the remote gateway) may set this,
+        # and only for the one request it scopes.
+        env.pop(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV, None)
     return env
 
 
@@ -214,6 +261,7 @@ def _t_remember(a: dict):
     # write_handoff below — never left to silently say nothing about who
     # asked for this. An explicit `source` argument always wins.
     argv += ["--source", a.get("source") or f"mcp-bridge:{_CURRENT_CLIENT}"]
+    argv += _list_flags(a, "audience")
     return argv, None
 
 
@@ -234,6 +282,7 @@ def _t_create_memory_note(a: dict):
     argv += ["--source", a.get("source") or f"mcp-bridge:{_CURRENT_CLIENT}"]
     if a.get("source_date"):
         argv += ["--source-date", a["source_date"]]
+    argv += _list_flags(a, "audience")
     return argv, None
 
 
@@ -251,6 +300,7 @@ def _t_write_handoff(a: dict):
         # real connected client, not a hardcoded value (the exact gap
         # fix/handoff-provenance-source closed on the `brain` side).
         "source": a.get("source") or _CURRENT_CLIENT,
+        "audience": a.get("audience"),
     }
     return ["handoff", "write", "--project", a["project_id"]], json.dumps(payload)
 
@@ -288,7 +338,15 @@ def _set_flags(a: dict, key: str = "set_fields") -> list[str]:
 
 def _t_update_memory(a: dict):
     argv = ["update", a["id"], "--json"]
-    argv += _set_flags(a)
+    # audience must never go through the generic --set key=value (which
+    # would write Python's str(list) as a literal string, not a real YAML
+    # list) — routed through the dedicated --audience flag instead, same
+    # as every creation tool already does.
+    set_fields = dict(a.get("set_fields") or {})
+    audience = set_fields.pop("audience", None)
+    argv += _set_flags({"set_fields": set_fields})
+    if audience is not None:
+        argv += ["--audience", *audience]
     if a.get("append_text"):
         argv += ["--append-text", a["append_text"]]
     argv += _confirm_restricted_flag(a)
@@ -307,6 +365,7 @@ def _t_create_decision(a: dict):
             argv += [flag, a[key]]
     argv += _confirm_restricted_flag(a)
     argv += _list_flags(a, "people") + _list_flags(a, "projects") + _list_flags(a, "tags")
+    argv += _list_flags(a, "audience")
     return argv, None
 
 
@@ -317,6 +376,7 @@ def _t_create_project(a: dict):
     if a.get("category"):
         argv += ["--category", a["category"]]
     argv += _list_flags(a, "aliases")
+    argv += _list_flags(a, "audience")
     return argv, None
 
 
@@ -347,6 +407,7 @@ def _t_create_timeline_event(a: dict):
     if a.get("source"):
         argv += ["--source", a["source"]]
     argv += _list_flags(a, "people") + _list_flags(a, "projects") + _list_flags(a, "tags")
+    argv += _list_flags(a, "audience")
     return argv, None
 
 

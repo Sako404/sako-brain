@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, writepolicy
+from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, migrate_stage2, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, visibility, writepolicy
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -15,7 +15,7 @@ from .gateway_client import BrainGatewayError
 from .frontmatter import parse_file
 from . import paths as paths_mod
 from .paths import Config, default_config
-from .registry import find_project, load_registry
+from .registry import find_project, find_visible_project, load_registry, load_visible_registry
 from . import remote, integrations_cli
 from .remote_gateway import cli as remote_gateway_cli
 
@@ -89,16 +89,21 @@ def cmd_context(config: Config, args) -> int:
 
 
 def cmd_get(config: Config, args) -> int:
-    # Resolves by walking Markdown directly (update_mod.find_note_path),
-    # the same index-independent lookup mcp_server.py's read_memory tool
-    # already uses — never the SQLite index, which is a cache that can lag
-    # a write until the next `brain index`. A note written this second
-    # must be gettable this second, not only after a reindex.
-    path = update_mod.find_note_path(config, args.id)
-    if not path:
+    # Resolves by walking Markdown directly (visibility.read_visible_note_text,
+    # built on update_mod.find_note_path), the same index-independent lookup
+    # mcp_server.py's read_memory tool already uses — never the SQLite
+    # index, which is a cache that can lag a write until the next `brain
+    # index`. A note written this second must be gettable this second, not
+    # only after a reindex. Stage 2: authorizes against config.acting_principal
+    # before returning anything — a note that exists but isn't visible to
+    # the caller prints the identical "not found" message, never a
+    # different one that would leak its existence.
+    try:
+        text = visibility.read_visible_note_text(config, config.acting_principal, args.id)
+    except FileNotFoundError:
         print(f"No note with id '{args.id}' found under {config.brain_root}.", file=sys.stderr)
         return 1
-    print(path.read_text(encoding="utf-8"))
+    print(text)
     return 0
 
 
@@ -110,6 +115,7 @@ def cmd_remember(config: Config, args) -> int:
             config, type_=args.type, title=args.title, text=args.text or "",
             tags=args.tags, people=args.people, projects=args.projects,
             sensitivity=args.sensitivity, confidence=args.confidence, source=args.source or "",
+            audience=getattr(args, "audience", None),
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -145,6 +151,8 @@ def cmd_update(config: Config, args) -> int:
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
+    if getattr(args, "audience", None) is not None:
+        set_fields["audience"] = args.audience
     if set_fields.get("sensitivity") == "restricted":
         writepolicy.require_restricted_confirmation("restricted", getattr(args, "confirm_restricted", False))
     writepolicy.scan_for_secrets(args.append_text or "", *(str(v) for v in set_fields.values()))
@@ -153,6 +161,9 @@ def cmd_update(config: Config, args) -> int:
             config, args.id, set_fields=set_fields or None, append_text=args.append_text,
         )
     except FileNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except update_mod.UpdateError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     if getattr(args, "json", False):
@@ -164,7 +175,7 @@ def cmd_update(config: Config, args) -> int:
 
 
 def cmd_projects(config: Config, args) -> int:
-    entries = load_registry(config)
+    entries = load_visible_registry(config, config.acting_principal)
     if not entries:
         print(f"No projects registered yet. See {config.registry_path.relative_to(config.brain_root)}, "
               "or run 'brain project discover'.")
@@ -176,7 +187,7 @@ def cmd_projects(config: Config, args) -> int:
 
 
 def cmd_project_show(config: Config, project_id: str, as_json: bool = False) -> int:
-    e = find_project(config, project_id)
+    e = find_visible_project(config, config.acting_principal, project_id)
     if not e:
         if as_json:
             print(json.dumps({"error": f"no registered project with id or alias '{project_id}'"}), file=sys.stderr)
@@ -220,7 +231,7 @@ def cmd_project_discover(config: Config, args) -> int:
 
 
 def cmd_project_sync(config: Config, project_id: str) -> int:
-    e = find_project(config, project_id)
+    e = find_visible_project(config, config.acting_principal, project_id)
     if not e:
         print(f"No registered project with id or alias '{project_id}'.", file=sys.stderr)
         return 1
@@ -235,6 +246,7 @@ def cmd_project_create(config: Config, args) -> int:
         dest = projectops.create_project(
             config, id=args.id, name=args.name, path=args.path, status=args.status,
             category=args.category, aliases=args.aliases,
+            audience=getattr(args, "audience", None),
         )
     except projectops.ProjectWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -299,7 +311,7 @@ def cmd_project_update(config: Config, args) -> int:
             path = update_mod.update_memory(
                 config, args.id, set_fields=set_fields or None, append_text=args.append_text,
             )
-        except FileNotFoundError as exc:
+        except (FileNotFoundError, update_mod.UpdateError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
         updated_path = str(path.relative_to(config.brain_root))
@@ -367,6 +379,7 @@ def cmd_decision_create(config: Config, args) -> int:
             people=args.people, projects=args.projects, tags=args.tags,
             sensitivity=args.sensitivity, source=args.source or "",
             supersedes=args.supersedes or None,
+            audience=getattr(args, "audience", None),
         )
     except decision_mod.DecisionError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -463,6 +476,33 @@ def cmd_principal_break_glass(config: Config, args) -> int:
     return 0
 
 
+def cmd_migrate_stage2_owner_principal(config: Config, args) -> int:
+    report = migrate_stage2.migrate_owner_principal(config, dry_run=not args.apply)
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "dry_run": not args.apply,
+            "total_notes": report.total_notes,
+            "already_migrated": report.already_migrated,
+            "migrated": report.migrated,
+            "migrated_paths": [str(p.relative_to(config.brain_root)) for p in report.migrated_paths],
+            "parse_errors": [{"path": str(p.relative_to(config.brain_root)), "error": e}
+                              for p, e in report.parse_errors],
+        }, indent=2, ensure_ascii=False))
+        return 1 if report.parse_errors else 0
+
+    verb = "Would migrate" if not args.apply else "Migrated"
+    print(f"{verb} {report.migrated} of {report.total_notes} notes "
+          f"({report.already_migrated} already had owner_principal).")
+    if report.parse_errors:
+        print(f"\n{len(report.parse_errors)} note(s) could not be parsed (skipped, not migrated):")
+        for p, e in report.parse_errors:
+            print(f"  - {p.relative_to(config.brain_root)}: {e}")
+    if not args.apply and report.migrated:
+        print("\nThis was a dry run — no files were changed. Pass --apply to actually write.")
+    return 1 if report.parse_errors else 0
+
+
 def cmd_group_create(config: Config, args) -> int:
     writepolicy.scan_for_secrets(args.display_name)
     try:
@@ -538,6 +578,7 @@ def cmd_timeline_add(config: Config, args) -> int:
             what_happened=args.what_happened or "", why_it_matters=args.why_it_matters or "",
             people=args.people, projects=args.projects, tags=args.tags,
             sensitivity=args.sensitivity, source=args.source or "",
+            audience=getattr(args, "audience", None),
         )
     except timeline.TimelineWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -560,6 +601,7 @@ def cmd_note_create(config: Config, args) -> int:
             sensitivity=args.sensitivity, confidence=args.confidence,
             source=args.source or "", source_date=args.source_date or "",
             area=args.area, doc_path=args.doc_path or "",
+            audience=getattr(args, "audience", None),
         )
     except memoryops.MemoryWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -588,7 +630,7 @@ def cmd_status(config: Config, args) -> int:
 
     print(f"\nInbox pending triage: {indexer.count_inbox_pending(config)}")
 
-    entries = load_registry(config)
+    entries = load_visible_registry(config, config.acting_principal)
     by_status: dict[str, int] = {}
     for e in entries:
         by_status[e.status or "unknown"] = by_status.get(e.status or "unknown", 0) + 1
@@ -1085,7 +1127,8 @@ def cmd_handoff_write(config: Config, args) -> int:
                                   sections.unresolved, sections.next_action,
                                   *sections.files_changed, *sections.decisions)
     try:
-        path = handoff.write(config, args.project, sections, source=payload.get("source", "cli"))
+        path = handoff.write(config, args.project, sections, source=payload.get("source", "cli"),
+                              audience=payload.get("audience"))
     except handoff.HandoffError as exc:
         print(f"Could not write handoff: {exc}", file=sys.stderr)
         return 1
@@ -1317,6 +1360,9 @@ def build_parser() -> argparse.ArgumentParser:
                                  "unnoticed side effect. Never set this on a caller's behalf.")
     p_remember.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
     p_remember.add_argument("--source", default="")
+    p_remember.add_argument("--audience", nargs="*", default=None,
+                             help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                  "(Stage 2) — omit for private (default: owner only)")
     p_remember.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_update = sub.add_parser("update", help="Update fields and/or append text on an existing note by id")
@@ -1327,6 +1373,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
                           help="Required when --set sensitivity=restricted. Never set this on a "
                                "caller's behalf.")
+    p_update.add_argument("--audience", nargs="*", default=None,
+                          help="Change sharing (Stage 2), e.g. 'group:household' or 'principal:ania' "
+                               "— pass with no values for private. Only the record's current owner "
+                               "may change this. Use this, never --set audience=..., which would "
+                               "write a literal string instead of a list.")
     p_update.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     sub.add_parser("projects", help="List registered projects")
@@ -1353,6 +1404,9 @@ def build_parser() -> argparse.ArgumentParser:
                                        f"{', '.join(paths_mod.DEFAULT_STATUS_BY_TYPE['project'])})")
     p_project_create.add_argument("--category", default=None)
     p_project_create.add_argument("--aliases", nargs="*", default=[])
+    p_project_create.add_argument("--audience", nargs="*", default=None,
+                                   help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                        "(Stage 2) — omit for private (default: owner only)")
     p_project_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_project_update = project_sub.add_parser(
@@ -1414,7 +1468,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_decision_create.add_argument("--supersedes", default=None,
                                    help="id of an older decision this replaces — marks it "
                                         "'superseded' and links forward, never edits its content")
+    p_decision_create.add_argument("--audience", nargs="*", default=None,
+                                    help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                         "(Stage 2) — omit for private (default: owner only)")
     p_decision_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
+
+    p_migrate_stage2 = sub.add_parser(
+        "migrate-stage2-owner-principal",
+        help="Backfill owner_principal/audience on every existing note (local only, "
+             "never reachable over the SSH dispatcher or a remote client). Dry-run "
+             "by default — pass --apply to actually write.")
+    p_migrate_stage2.add_argument("--apply", action="store_true",
+                                   help="Actually write the migrated frontmatter. Without this, "
+                                        "reports what WOULD change and changes nothing.")
+    p_migrate_stage2.add_argument("--json", action="store_true")
 
     p_principal = sub.add_parser(
         "principal", help="Administer principals (identity/authorization — local only, "
@@ -1491,6 +1558,9 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="Required when --sensitivity restricted. Never set this on a "
                                      "caller's behalf.")
     p_timeline_add.add_argument("--source", default="")
+    p_timeline_add.add_argument("--audience", nargs="*", default=None,
+                                 help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                      "(Stage 2) — omit for private (default: owner only)")
     p_timeline_add.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_note = sub.add_parser(
@@ -1516,6 +1586,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_note_create.add_argument("--confidence", default="fact", choices=["fact", "assumption", "opinion"])
     p_note_create.add_argument("--source", default="")
     p_note_create.add_argument("--source-date", default="", dest="source_date")
+    p_note_create.add_argument("--audience", nargs="*", default=None,
+                                help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
+                                     "(Stage 2) — omit for private (default: owner only)")
     p_note_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     sub.add_parser("status", help="Vault overview: counts, inbox, projects")
@@ -1840,6 +1913,8 @@ def _dispatch(config: Config, args, parser) -> int:
     if args.command == "decision":
         if args.decision_command == "create":
             return cmd_decision_create(config, args)
+    if args.command == "migrate-stage2-owner-principal":
+        return cmd_migrate_stage2_owner_principal(config, args)
     if args.command == "principal":
         if args.principal_command == "create":
             return cmd_principal_create(config, args)

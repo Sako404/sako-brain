@@ -3,6 +3,7 @@ fixed-schema `50_TIMELINE/event-<date>-<slug>.md` primitive extracted from
 what `/timeline`'s "Adding an event" step already does via direct Write."""
 from __future__ import annotations
 
+import dataclasses
 import unittest
 
 from brain import frontmatter, timeline
@@ -46,6 +47,76 @@ class TestCreateEvent(unittest.TestCase):
         timeline.create_event(self.config, title="Dup", valid_from="2026-01-01")
         with self.assertRaises(timeline.TimelineWriteError):
             timeline.create_event(self.config, title="Dup", valid_from="2026-01-01")
+
+
+class TestTimelineVisibility(unittest.TestCase):
+    """Stage 2 (multi-user visibility): list_timeline filters directly
+    (unlike registry.py, nothing needs the unfiltered list for write/
+    integrity correctness — see timeline.py's own docstring on this)."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.vault.write_note("50_TIMELINE", "event-private.md",
+                               id="event-private", type="event", title="Marcin's private event",
+                               created="2026-01-01", owner_principal="principal:marcin", audience=[])
+        self.vault.write_note("50_TIMELINE", "event-shared.md",
+                               id="event-shared", type="event", title="Shared event",
+                               created="2026-01-02", owner_principal="principal:marcin",
+                               audience=["principal:ania"])
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _as(self, principal_id: str):
+        return dataclasses.replace(self.config, acting_principal=principal_id)
+
+    def test_owner_sees_both_events(self):
+        entries = timeline.list_timeline(self._as("principal-marcin"))
+        self.assertEqual({e.id for e in entries}, {"event-private", "event-shared"})
+
+    def test_audience_principal_sees_only_the_shared_event(self):
+        entries = timeline.list_timeline(self._as("principal-ania"))
+        self.assertEqual({e.id for e in entries}, {"event-shared"})
+
+    def test_unrelated_third_party_sees_nothing(self):
+        entries = timeline.list_timeline(self._as("principal-marcel"))
+        self.assertEqual(entries, [])
+
+    def test_explicit_principal_id_argument_overrides_config(self):
+        # Callers that already have a resolved principal_id (rather than
+        # relying on config.acting_principal) can pass it directly.
+        entries = timeline.list_timeline(self.config, principal_id="principal-ania")
+        self.assertEqual({e.id for e in entries}, {"event-shared"})
+
+
+class TestCreateEventSetsOwnership(unittest.TestCase):
+    """Stage 2 (multi-user visibility): same default-ownership-on-write
+    rule as capture.capture — see tests/test_capture.py."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_owner_principal_is_the_acting_principal(self):
+        config = dataclasses.replace(self.config, acting_principal="principal-ania")
+        dest = timeline.create_event(config, title="An event", valid_from="2026-05-01")
+        note = frontmatter.parse_file(dest)
+        self.assertEqual(note.meta["owner_principal"], "principal:ania")
+
+    def test_audience_defaults_to_private(self):
+        dest = timeline.create_event(self.config, title="An event", valid_from="2026-05-01")
+        note = frontmatter.parse_file(dest)
+        self.assertEqual(note.meta["audience"], [])
+
+    def test_explicit_audience_is_honored(self):
+        dest = timeline.create_event(self.config, title="An event", valid_from="2026-05-01",
+                                      audience=["group:household"])
+        note = frontmatter.parse_file(dest)
+        self.assertEqual(note.meta["audience"], ["group:household"])
 
 
 if __name__ == "__main__":

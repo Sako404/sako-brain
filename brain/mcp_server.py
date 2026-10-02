@@ -46,11 +46,12 @@ from . import state as state_mod
 from . import timeline as timeline_mod
 from . import update as update_mod
 from . import validate as validate_mod
+from . import visibility
 from . import writepolicy
 from . import paths as paths_mod
 from . import __version__
 from .paths import Config, default_config
-from .registry import find_project, load_registry
+from .registry import find_visible_project, load_visible_registry
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_NAME = paths_mod.APP_DIRNAME
@@ -104,10 +105,7 @@ def _log_call(config: Config, tool: str, success: bool, result=None, error: str 
 
 
 def _read_note_text(config: Config, note_id: str) -> str:
-    path = update_mod.find_note_path(config, note_id)
-    if not path:
-        raise FileNotFoundError(f"no note with id '{note_id}'")
-    return path.read_text(encoding="utf-8")
+    return visibility.read_visible_note_text(config, config.acting_principal, note_id)
 
 
 _scan_for_secrets = writepolicy.scan_for_secrets
@@ -142,13 +140,13 @@ def tool_remember(config: Config, type: str, title: str, text: str = "",
                    tags: list | None = None, people: list | None = None,
                    projects: list | None = None, sensitivity: str = "normal",
                    confidence: str = "fact", source: str = "", source_date: str = "",
-                   confirm_restricted: bool = False) -> dict:
+                   confirm_restricted: bool = False, audience: list | None = None) -> dict:
     _require_restricted_confirmation(sensitivity, confirm_restricted)
     _scan_for_secrets(title, text)
     path = capture.capture(
         config, type_=type, title=title, text=text, tags=tags, people=people,
         projects=projects, sensitivity=sensitivity, confidence=confidence, source=source,
-        source_date=source_date,
+        source_date=source_date, audience=audience,
     )
     return {"created_path": str(path.relative_to(config.brain_root))}
 
@@ -179,11 +177,11 @@ def tool_queue_memory(config: Config, candidate_fact: str, entities: list | None
 
 
 def tool_list_projects(config: Config) -> dict:
-    return {"projects": [e.__dict__ for e in load_registry(config)]}
+    return {"projects": [e.__dict__ for e in load_visible_registry(config, config.acting_principal)]}
 
 
 def tool_get_project(config: Config, id: str) -> dict:
-    e = find_project(config, id)
+    e = find_visible_project(config, config.acting_principal, id)
     if not e:
         raise KeyError(f"no registered project with id or alias '{id}'")
     return {"registry": e.__dict__, "path_exists": Path(e.path).exists()}
@@ -198,7 +196,7 @@ def tool_search_timeline(config: Config, query: str = "", limit: int = 50) -> di
 
 
 def tool_project_context(config: Config, id: str) -> dict:
-    e = find_project(config, id)
+    e = find_visible_project(config, config.acting_principal, id)
     if not e:
         raise KeyError(f"no registered project with id or alias '{id}'")
     facts = projectsync.gather(e.path)
@@ -213,7 +211,7 @@ def tool_project_context(config: Config, id: str) -> dict:
 def tool_write_handoff(config: Config, project_id: str, attempted: str = "", changed: str = "",
                         working_state: str = "", unresolved: str = "", next_action: str = "",
                         files_changed: list | None = None, decisions: list | None = None,
-                        source: str | None = None) -> dict:
+                        source: str | None = None, audience: list | None = None) -> dict:
     """Thin wrapper over handoff.write() — the exact function the CLI's
     `brain handoff write` already calls, including its existing refusal on
     an all-blank payload. No new logic. `source` defaults to the connected
@@ -228,7 +226,8 @@ def tool_write_handoff(config: Config, project_id: str, attempted: str = "", cha
         unresolved=unresolved, next_action=next_action,
         files_changed=files_changed or [], decisions=decisions or [],
     )
-    path = handoff_mod.write(config, project_id, sections, source=source or _CURRENT_CLIENT)
+    path = handoff_mod.write(config, project_id, sections, source=source or _CURRENT_CLIENT,
+                              audience=audience)
     return {"updated_path": str(path.relative_to(config.brain_root))}
 
 
@@ -237,7 +236,8 @@ def tool_create_decision(config: Config, title: str, context: str = "", options:
                           status: str = "proposed", people: list | None = None,
                           projects: list | None = None, tags: list | None = None,
                           sensitivity: str = "normal", source: str = "", source_date: str = "",
-                          supersedes: str | None = None, confirm_restricted: bool = False) -> dict:
+                          supersedes: str | None = None, confirm_restricted: bool = False,
+                          audience: list | None = None) -> dict:
     """Thin wrapper over decision.create_decision() — the exact function
     `brain decision create` already calls. No new logic."""
     _require_restricted_confirmation(sensitivity, confirm_restricted)
@@ -246,18 +246,20 @@ def tool_create_decision(config: Config, title: str, context: str = "", options:
         config, title=title, context=context, options=options, decision=decision,
         reasoning=reasoning, consequences=consequences, status=status, people=people,
         projects=projects, tags=tags, sensitivity=sensitivity, source=source,
-        source_date=source_date, supersedes=supersedes,
+        source_date=source_date, supersedes=supersedes, audience=audience,
     )
     return {"created_path": str(path.relative_to(config.brain_root))}
 
 
 def tool_create_project(config: Config, id: str, name: str, path: str, status: str = "active",
-                         category: str | None = None, aliases: list | None = None) -> dict:
+                         category: str | None = None, aliases: list | None = None,
+                         audience: list | None = None) -> dict:
     """Thin wrapper over projectops.create_project(). No new logic. Never
     copies project source files — `path` is a reference only."""
     _scan_for_secrets(name, category or "")
     dest = projectops.create_project(
         config, id=id, name=name, path=path, status=status, category=category, aliases=aliases,
+        audience=audience,
     )
     return {"created_path": str(dest.relative_to(config.brain_root))}
 
@@ -301,7 +303,7 @@ def tool_create_memory_note(config: Config, type: str, title: str, text: str = "
                              projects: list | None = None, sensitivity: str = "normal",
                              confidence: str = "fact", source: str = "", source_date: str = "",
                              area: str | None = None, doc_path: str = "",
-                             confirm_restricted: bool = False) -> dict:
+                             confirm_restricted: bool = False, audience: list | None = None) -> dict:
     """Thin wrapper over memoryops.create_memory() — the exact function
     `brain note create` already calls. No new logic. Never accepts a
     client-supplied path: the destination is derived from `type` (plus a
@@ -312,6 +314,7 @@ def tool_create_memory_note(config: Config, type: str, title: str, text: str = "
         config, type_=type, title=title, text=text, tags=tags, people=people,
         projects=projects, sensitivity=sensitivity, confidence=confidence,
         source=source, source_date=source_date, area=area, doc_path=doc_path,
+        audience=audience,
     )
     return {"created_path": str(path.relative_to(config.brain_root))}
 
@@ -321,7 +324,7 @@ def tool_create_timeline_event(config: Config, title: str, valid_from: str,
                                 people: list | None = None, projects: list | None = None,
                                 tags: list | None = None, sensitivity: str = "normal",
                                 confidence: str = "fact", source: str = "", source_date: str = "",
-                                confirm_restricted: bool = False) -> dict:
+                                confirm_restricted: bool = False, audience: list | None = None) -> dict:
     """Thin wrapper over timeline.create_event(). No new logic."""
     _require_restricted_confirmation(sensitivity, confirm_restricted)
     _scan_for_secrets(title, what_happened, why_it_matters)
@@ -329,6 +332,7 @@ def tool_create_timeline_event(config: Config, title: str, valid_from: str,
         config, title=title, valid_from=valid_from, what_happened=what_happened,
         why_it_matters=why_it_matters, people=people, projects=projects, tags=tags,
         sensitivity=sensitivity, confidence=confidence, source=source, source_date=source_date,
+        audience=audience,
     )
     return {"created_path": str(path.relative_to(config.brain_root))}
 
@@ -377,6 +381,8 @@ TOOLS = {
             "sensitivity": {"type": "string"}, "confidence": {"type": "string"}, "source": {"type": "string"},
             "source_date": {"type": "string"},
             "confirm_restricted": {"type": "boolean", "description": "Required (true) when sensitivity='restricted'"},
+            "audience": {"type": "array", "items": {"type": "string"},
+                         "description": "Explicit sharing (Stage 2), e.g. ['group:household'] or ['principal:ania'] -- omit for private (default: owner only)"},
         },
         "required": ["type", "title"],
     }),
@@ -421,6 +427,8 @@ TOOLS = {
             "files_changed": {"type": "array", "items": {"type": "string"}},
             "decisions": {"type": "array", "items": {"type": "string"}},
             "source": {"type": "string", "description": "Overrides the auto-detected connected-client name for provenance; usually left unset"},
+            "audience": {"type": "array", "items": {"type": "string"},
+                         "description": "Explicit sharing (Stage 2), e.g. ['group:household'] or ['principal:ania'] -- omit for private (default: owner only)"},
         },
         "required": ["project_id"],
     }),
@@ -436,6 +444,8 @@ TOOLS = {
             "sensitivity": {"type": "string"}, "source": {"type": "string"}, "source_date": {"type": "string"},
             "supersedes": {"type": "string", "description": "id of an older decision this replaces"},
             "confirm_restricted": {"type": "boolean", "description": "Required (true) when sensitivity='restricted'"},
+            "audience": {"type": "array", "items": {"type": "string"},
+                         "description": "Explicit sharing (Stage 2), e.g. ['group:household'] or ['principal:ania'] -- omit for private (default: owner only)"},
         },
         "required": ["title"],
     }),
@@ -446,6 +456,8 @@ TOOLS = {
             "path": {"type": "string", "description": "The project's real working directory — reference only, never copied"},
             "status": {"type": "string"}, "category": {"type": "string"},
             "aliases": {"type": "array", "items": {"type": "string"}},
+            "audience": {"type": "array", "items": {"type": "string"},
+                         "description": "Explicit sharing (Stage 2), e.g. ['group:household'] or ['principal:ania'] -- omit for private (default: owner only)"},
         },
         "required": ["id", "name", "path"],
     }),
@@ -485,6 +497,8 @@ TOOLS = {
             "area": {"type": "string", "description": "Required for type='fact': an existing 20_AREAS/ subdirectory name"},
             "doc_path": {"type": "string", "description": "type='document' only: filesystem location of the actual document"},
             "confirm_restricted": {"type": "boolean", "description": "Required (true) when sensitivity='restricted'"},
+            "audience": {"type": "array", "items": {"type": "string"},
+                         "description": "Explicit sharing (Stage 2), e.g. ['group:household'] or ['principal:ania'] -- omit for private (default: owner only)"},
         },
         "required": ["type", "title"],
     }),
@@ -500,6 +514,8 @@ TOOLS = {
             "sensitivity": {"type": "string"}, "confidence": {"type": "string"},
             "source": {"type": "string"}, "source_date": {"type": "string"},
             "confirm_restricted": {"type": "boolean", "description": "Required (true) when sensitivity='restricted'"},
+            "audience": {"type": "array", "items": {"type": "string"},
+                         "description": "Explicit sharing (Stage 2), e.g. ['group:household'] or ['principal:ania'] -- omit for private (default: owner only)"},
         },
         "required": ["title", "valid_from"],
     }),

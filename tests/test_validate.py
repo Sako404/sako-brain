@@ -1,6 +1,7 @@
+import dataclasses
 import unittest
 
-from brain import validate
+from brain import identity, validate
 from tests.helpers import TempVault
 
 
@@ -284,6 +285,68 @@ class TestValidate(unittest.TestCase):
 
         checks = {p.check for p in problems}
         self.assertIn("password_file_in_backup_scope", checks)
+
+
+class TestDoctorAdminGate(unittest.TestCase):
+    """Stage 2 (multi-user visibility): `brain doctor`'s detailed,
+    vault-wide diagnostics (ids/paths/titles, backup/state configuration)
+    are admin-only — it's reachable over the SSH dispatcher's read mode
+    like any other `brain doctor` call, so a non-admin family member
+    asking for it must not get the full picture just by asking. The
+    underlying checks (check_duplicate_ids etc.) stay unfiltered/
+    whole-vault internally — only run_all's gate guards the output."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.vault.write_note("60_KNOWLEDGE", "a.md", id="knowledge-a", type="knowledge")
+        self.vault.write_note("60_KNOWLEDGE", "b.md", id="knowledge-a", type="knowledge")  # duplicate id
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _as(self, principal_id: str):
+        return dataclasses.replace(self.config, acting_principal=principal_id)
+
+    def test_no_principal_records_at_all_gets_full_diagnostics(self):
+        # Matches every pre-Stage-1 identity's established "full access"
+        # default (Config.acting_principal) — a vault that hasn't
+        # bootstrapped Stage 1 yet must not suddenly lose doctor output
+        # the day this gate landed.
+        problems = validate.run_all(self.config)
+        checks = {p.check for p in problems}
+        self.assertIn("duplicate_ids", checks)
+
+    def test_admin_principal_gets_full_diagnostics(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        problems = validate.run_all(self._as("principal-marcin"))
+        checks = {p.check for p in problems}
+        self.assertIn("duplicate_ids", checks)
+
+    def test_non_admin_principal_gets_generic_message_only(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        identity.create_principal(self.config, display_name="Ania", role="adult",
+                                   principal_id="principal-ania")
+        problems = validate.run_all(self._as("principal-ania"))
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0].check, "admin_required")
+        # Never leaks the actual finding to a non-admin caller.
+        self.assertNotIn("knowledge-a", problems[0].message)
+
+    def test_disabled_admin_principal_also_denied(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        identity.set_principal_status(self.config, "principal-marcin", "disabled")
+        problems = validate.run_all(self._as("principal-marcin"))
+        self.assertEqual(problems[0].check, "admin_required")
+
+    def test_unknown_principal_in_a_populated_vault_is_denied(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        problems = validate.run_all(self._as("principal-does-not-exist"))
+        self.assertEqual(problems[0].check, "admin_required")
 
 
 if __name__ == "__main__":

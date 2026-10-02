@@ -164,5 +164,69 @@ class TestClientTomlRoundTrip(unittest.TestCase):
         self.assertEqual(loaded.identity_file, cfg.identity_file)
 
 
+class TestProxyToRemoteDelegation(unittest.TestCase):
+    """Stage 2 (multi-user visibility, gateway delegation): proxy_to_remote
+    is what the remote gateway's own `brain` client process uses to reach
+    canonical Brain — when BRAIN_GATEWAY_ACTING_PRINCIPAL is set (only the
+    gateway ever sets it, from an already-validated OAuth token's
+    principal_id), the SSH command it sends must carry a
+    '--acting-principal <id> -- ' prefix the server-side dispatcher can
+    independently re-validate. An ordinary desktop/TRON client never sets
+    this env var, so its command is unaffected — unit-tested here as "not
+    present means the prefix is absent", the actual trust decision is
+    brain-dispatch.py's resolve_effective_principal(), tested in
+    sako-brain-tooling's own suite."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.cfg = remote.ClientConfig(
+            server="brain.example.invalid", ssh_user="brain", ssh_port="2222",
+            identity_file="/k-read", write_identity_file="/k-write",
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _run_proxy(self, argv, *, acting_principal=None):
+        captured = {}
+
+        def fake_execvp(file, ssh_argv):
+            captured["file"] = file
+            captured["argv"] = ssh_argv
+
+        env_patch = ({remote.GATEWAY_ACTING_PRINCIPAL_ENV: acting_principal}
+                     if acting_principal else {})
+        with patch.object(remote, "load_client_config", return_value=self.cfg), \
+             patch.object(Path, "is_file", return_value=True), \
+             patch.object(os, "execvp", fake_execvp), \
+             patch.dict(os.environ, env_patch, clear=False):
+            if not acting_principal:
+                os.environ.pop(remote.GATEWAY_ACTING_PRINCIPAL_ENV, None)
+            remote.proxy_to_remote(argv)
+        return captured
+
+    def _remote_command(self, captured) -> str:
+        # ssh_argv is ["ssh", "-F", <cfg_path>, <alias>, "--", <remote_command>]
+        return captured["argv"][-1]
+
+    def test_no_acting_principal_set_sends_the_plain_command(self):
+        captured = self._run_proxy(["status"])
+        self.assertEqual(self._remote_command(captured), "status")
+
+    def test_acting_principal_set_prepends_the_delegation_prefix(self):
+        captured = self._run_proxy(["context", "widget"], acting_principal="principal-ania")
+        self.assertEqual(
+            self._remote_command(captured),
+            "--acting-principal principal-ania -- context widget",
+        )
+
+    def test_delegated_write_subcommand_still_selects_the_write_host_alias(self):
+        captured = self._run_proxy(["decision", "create", "--title", "x"],
+                                    acting_principal="principal-ania")
+        # Delegation changes the asserted principal, never which SSH
+        # identity (and therefore which --mode) this process connects as.
+        self.assertIn(f"{remote.SLUG}-write", captured["argv"])
+
+
 if __name__ == "__main__":
     unittest.main()

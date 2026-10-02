@@ -46,6 +46,13 @@ def ensure_private_file(path: Path) -> None:
 SYSTEM_DIRNAME = "90_SYSTEM"
 VAULT_CONFIG_RELPATH = Path(SYSTEM_DIRNAME) / "config.yaml"
 
+# Stage 1's own backward-compat default ("every pre-existing identity becomes
+# principal-marcin"), reused as Stage 2's default acting principal — see
+# Config.acting_principal below. The SSH dispatcher (a separate deployment
+# script, not part of this package) hardcodes the same literal for the same
+# reason: the two can't share an import, only a documented convention.
+DEFAULT_ACTING_PRINCIPAL = "principal-marcin"
+
 
 class VaultNotFoundError(RuntimeError):
     """Raised when no vault can be resolved from any configured source.
@@ -236,6 +243,29 @@ class Config:
     # Read once here so validate.py never has to guess "am I the server"
     # from a hardcoded path like "/vault".
     remote_project_paths: bool = False
+    # Stage 2 (multi-user visibility): the trusted caller identity for this
+    # process, for every read path to check against a record's own
+    # owner_principal/audience. Comes ONLY from BRAIN_CALLER_PRINCIPAL, which
+    # only the SSH forced-command dispatcher sets (from its own
+    # authorized_keys-fixed --principal flag, never anything a client can
+    # send — see brain-dispatch.py). Defaults to DEFAULT_ACTING_PRINCIPAL,
+    # the same "every pre-Stage-2 identity is principal-marcin" default
+    # Stage 1 already established, so a caller that hasn't been wired
+    # through this threading yet sees exactly what it always saw — the
+    # vault owner's own full access — never a different, lower-privileged
+    # principal's view by accident.
+    acting_principal: str = DEFAULT_ACTING_PRINCIPAL
+    # Stage 2 provenance (gateway delegation): which SSH identity actually
+    # connected (BRAIN_CALLER_CLIENT, e.g. "remote-gateway-read" or
+    # "desktop-client") and whether acting_principal came from that
+    # identity's own fixed --principal ("ssh") or from a gateway's
+    # per-request --acting-principal assertion ("gateway") —
+    # BRAIN_CALLER_TRANSPORT, set by brain-dispatch.py alongside
+    # BRAIN_CALLER_PRINCIPAL. Not yet read anywhere except to be threaded
+    # into the Brain-core audit log extension; carried here now so that
+    # extension doesn't also need a dispatcher/threading change.
+    caller_client: str = ""
+    caller_transport: str = ""
 
     def __post_init__(self):
         # frozen dataclass — the documented way to fill a derived default.
@@ -372,6 +402,9 @@ def default_config(brain_root: Path | None = None) -> Config:
         configured_vault_name=str(data.get("vault_name") or ""),
         areas=tuple(str(a).strip() for a in (data.get("areas") or []) if str(a).strip()),
         remote_project_paths=os.environ.get("BRAIN_REMOTE_PROJECT_PATHS") == "1",
+        acting_principal=os.environ.get("BRAIN_CALLER_PRINCIPAL") or DEFAULT_ACTING_PRINCIPAL,
+        caller_client=os.environ.get("BRAIN_CALLER_CLIENT") or "",
+        caller_transport=os.environ.get("BRAIN_CALLER_TRANSPORT") or "",
     )
 
 

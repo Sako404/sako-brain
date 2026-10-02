@@ -20,8 +20,10 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+from . import audit
 from . import frontmatter
 from . import indexer
+from . import visibility
 from .capture import slugify
 from .paths import Config
 
@@ -63,7 +65,8 @@ def create_memory(config: Config, type_: str, title: str, text: str = "",
                    tags: list[str] | None = None, people: list[str] | None = None,
                    projects: list[str] | None = None, sensitivity: str = "normal",
                    confidence: str = "fact", source: str = "", source_date: str = "",
-                   area: str | None = None, doc_path: str = "") -> Path:
+                   area: str | None = None, doc_path: str = "",
+                   audience: list[str] | None = None) -> Path:
     allowed = config.vocabulary.note_types
     if type_ not in allowed:
         raise MemoryWriteError(f"unknown type '{type_}', must be one of {sorted(allowed)}")
@@ -108,9 +111,14 @@ def create_memory(config: Config, type_: str, title: str, text: str = "",
     if type_ == "document":
         meta["path"] = doc_path
     meta["aliases"] = []
+    meta["owner_principal"] = visibility.id_to_ref(config.acting_principal)
+    meta["audience"] = audience or []
 
     note = frontmatter.Note(path=dest, meta=meta, body=_body_for(type_, title, text))
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(frontmatter.render(note), encoding="utf-8")
     indexer.index_note(config, dest)
+    audit.log_event(config, event="note.write", principal_id=config.acting_principal,
+                     client_id=config.caller_client, transport=config.caller_transport,
+                     detail=f"id={note_id}")
     return dest
