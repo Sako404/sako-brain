@@ -127,6 +127,19 @@ def write(config: Config, project_id: str, sections: HandoffSections,
             # prepend the new session under the title.
             head, _, body = text.partition("\n---\n")
             fm = head + "\n---\n"
+
+            principal_id = config.acting_principal
+            existing_meta = frontmatter.parse_text(fm + "\n(body omitted)\n", path).meta
+            if not visibility.is_owner(config, principal_id, existing_meta):
+                current_owner, _ = visibility.owner_and_audience(existing_meta)
+                audit.log_event(config, event="note.write.denied", principal_id=principal_id,
+                                 client_id=config.caller_client, transport=config.caller_transport,
+                                 detail=f"id=handoff-{entry.id} owner={current_owner}")
+                raise HandoffError(
+                    f"only '{current_owner}' (this handoff's current owner) may add a new "
+                    f"session to it — '{principal_id}' is not permitted"
+                )
+
             fm = _touch_updated(fm, today)
             title_line, _, rest = body.lstrip("\n").partition("\n")
             new_text = fm + "\n" + title_line + "\n\n" + new_section + "\n" + rest.lstrip("\n")

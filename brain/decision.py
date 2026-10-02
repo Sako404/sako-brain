@@ -42,6 +42,17 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
         old_path = find_note_path(config, supersedes)
         if old_path is None:
             raise DecisionError(f"supersedes target '{supersedes}' not found")
+        principal_id = config.acting_principal
+        old_note = frontmatter.parse_file(old_path)
+        if not visibility.is_owner(config, principal_id, old_note.meta):
+            current_owner, _ = visibility.owner_and_audience(old_note.meta)
+            audit.log_event(config, event="note.write.denied", principal_id=principal_id,
+                             client_id=config.caller_client, transport=config.caller_transport,
+                             detail=f"id={supersedes} owner={current_owner}")
+            raise DecisionError(
+                f"only '{current_owner}' (the owner of '{supersedes}') may mark it superseded "
+                f"— '{principal_id}' is not permitted"
+            )
 
     today = date or dt.date.today().isoformat()
     slug = slugify(title)

@@ -16,17 +16,19 @@ from .paths import Config
 
 
 class UpdateError(ValueError):
-    """An update that cannot be applied safely — e.g. a sharing change
-    (owner_principal/audience) attempted by someone other than the
-    record's current owner."""
+    """An update that cannot be applied safely — e.g. a modification
+    attempted by someone other than the record's current owner."""
 
 
-# Stage 2 (multi-user visibility): changing WHO can see a record is a
-# privilege that belongs to its owner alone — write access to the record's
-# other fields does not imply authority to reshare it. Checked here, the
-# one place every caller (brain update, brain project update, the
-# update_memory MCP tool) ultimately goes through, rather than in each of
-# them separately.
+# Stage 2 V1 write rule, locked per Marcin's own explicit decision:
+# owner_principal may modify a record; audience grants READ visibility
+# only. update_memory refuses ANY change (not just owner_principal/
+# audience) from a non-owner — audience membership alone must never grant
+# edit/update/delete rights, and this is the one place every caller
+# (brain update, brain project update, the update_memory MCP tool)
+# ultimately goes through. _SHARING_FIELDS is kept separate only to label
+# the audit event distinctly (note.sharing_change.denied vs
+# note.write.denied) — both are refused the same way.
 _SHARING_FIELDS = {"owner_principal", "audience"}
 
 
@@ -49,22 +51,22 @@ def update_memory(config: Config, note_id: str, set_fields: dict | None = None,
 
     note = frontmatter.parse_file(path)
     set_fields = set_fields or {}
+    if principal_id is None:
+        principal_id = config.acting_principal
 
     is_sharing_change = bool(_SHARING_FIELDS & set_fields.keys())
-    if is_sharing_change:
-        if principal_id is None:
-            principal_id = config.acting_principal
+    if not visibility.is_owner(config, principal_id, note.meta):
         current_owner, _ = visibility.owner_and_audience(note.meta)
-        if principal_id != current_owner:
-            audit.log_event(
-                config, event="note.sharing_change.denied", principal_id=principal_id,
-                client_id=config.caller_client, transport=config.caller_transport,
-                detail=f"id={note_id} owner={current_owner}",
-            )
-            raise UpdateError(
-                f"only '{current_owner}' (this record's current owner) may change its "
-                f"owner_principal/audience — '{principal_id}' is not permitted"
-            )
+        event = "note.sharing_change.denied" if is_sharing_change else "note.write.denied"
+        audit.log_event(
+            config, event=event, principal_id=principal_id,
+            client_id=config.caller_client, transport=config.caller_transport,
+            detail=f"id={note_id} owner={current_owner}",
+        )
+        raise UpdateError(
+            f"only '{current_owner}' (this record's current owner) may modify it "
+            f"— '{principal_id}' is not permitted"
+        )
 
     for key, value in set_fields.items():
         if key in {"id", "created"}:
@@ -82,7 +84,7 @@ def update_memory(config: Config, note_id: str, set_fields: dict | None = None,
 
     event = "note.sharing_change" if is_sharing_change else "note.write"
     audit.log_event(
-        config, event=event, principal_id=principal_id or config.acting_principal,
+        config, event=event, principal_id=principal_id,
         client_id=config.caller_client, transport=config.caller_transport, detail=f"id={note_id}",
     )
     return path

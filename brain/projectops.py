@@ -208,6 +208,17 @@ def set_project_status(config: Config, project_id: str, new_status: str) -> Stat
     note = frontmatter.parse_file(old_path)
     old_status = note.status or "unknown"
 
+    principal_id = config.acting_principal
+    if not visibility.is_owner(config, principal_id, note.meta):
+        current_owner, _ = visibility.owner_and_audience(note.meta)
+        audit.log_event(config, event="note.write.denied", principal_id=principal_id,
+                         client_id=config.caller_client, transport=config.caller_transport,
+                         detail=f"id={project_id} owner={current_owner}")
+        raise ProjectWriteError(
+            f"only '{current_owner}' (this record's current owner) may change its status "
+            f"— '{principal_id}' is not permitted"
+        )
+
     new_folder = config.taxonomy.folder_for_status(new_status)
     new_path = config.projects_dir / new_folder / old_path.name
 
@@ -317,6 +328,17 @@ def update_section(config: Config, project_id: str, section: str, mode: str, con
     note = frontmatter.parse_file(path)
     if note.type != "project":
         raise SectionEditError(f"'{project_id}' is not a project record (type={note.type!r})")
+
+    principal_id = config.acting_principal
+    if not visibility.is_owner(config, principal_id, note.meta):
+        current_owner, _ = visibility.owner_and_audience(note.meta)
+        audit.log_event(config, event="note.write.denied", principal_id=principal_id,
+                         client_id=config.caller_client, transport=config.caller_transport,
+                         detail=f"id={project_id} owner={current_owner}")
+        raise SectionEditError(
+            f"only '{current_owner}' (this record's current owner) may edit its sections "
+            f"— '{principal_id}' is not permitted"
+        )
 
     lines = note.body.splitlines(keepends=True)
     start, end = _section_span(lines, section)

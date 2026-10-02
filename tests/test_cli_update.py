@@ -110,13 +110,20 @@ class TestUpdateAudienceAuthorization(unittest.TestCase):
         note = frontmatter.parse_file(self.path)
         self.assertEqual(note.meta["audience"], [])
 
-    def test_unrelated_field_update_by_a_non_owner_still_works(self):
-        # The authorization check is scoped to owner_principal/audience
-        # specifically — a non-owner with write access can still update
-        # ordinary fields (out of Stage 2's scope; this is a write-ACL
-        # question this project hasn't taken on generally).
+    def test_unrelated_field_update_by_a_non_owner_is_also_refused(self):
+        # Stage 2 V1 write rule, locked explicitly: owner_principal may
+        # modify a record; audience grants READ visibility only — write
+        # access is never implied by being in a record's audience, for
+        # ANY field, not just owner_principal/audience themselves.
         rc, out = run_cli(["update", "knowledge-widget", "--set", "status=current"],
                            self.vault, acting_principal="principal-ania")
+        self.assertEqual(rc, 1)
+        note = frontmatter.parse_file(self.path)
+        self.assertNotEqual(note.meta.get("status"), "current")
+
+    def test_owner_can_update_unrelated_fields(self):
+        rc, out = run_cli(["update", "knowledge-widget", "--set", "status=current"],
+                           self.vault, acting_principal="principal-marcin")
         self.assertEqual(rc, 0)
         note = frontmatter.parse_file(self.path)
         self.assertEqual(note.meta["status"], "current")

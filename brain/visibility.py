@@ -124,6 +124,22 @@ def can_view_note(config: Config, principal_id: str, note: "frontmatter.Note") -
     return can_view(config, principal_id, note.meta)
 
 
+def is_owner(config: Config, principal_id: str, meta: dict) -> bool:
+    """Stage 2 V1 write rule, locked per Marcin's own explicit decision:
+    owner_principal may modify a record; audience grants READ visibility
+    only — membership alone must never grant edit/update/delete rights.
+    No editors/grants/collaboration subsystem exists for V1; every write
+    path that modifies an EXISTING record (update_memory, project status/
+    section changes, a decision's own supersede-marking of an OLDER
+    decision, an existing handoff's next session) must call this before
+    touching anything, and refuse if it returns False — including for an
+    admin principal, which carries no routine content-edit bypass here
+    (see validate.is_admin_principal for the SEPARATE, operational-tooling
+    sense of "admin" that already exists — unrelated to this)."""
+    owner_id, _ = owner_and_audience(meta)
+    return principal_id == owner_id
+
+
 def filter_visible(config: Config, principal_id: str,
                     notes: "list[frontmatter.Note]") -> "list[frontmatter.Note]":
     """Filters a list of already-parsed Notes down to the ones `principal_id`

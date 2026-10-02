@@ -74,7 +74,7 @@ class TestCreationPathsAreAudited(AuditTestCase):
                              and "id=handoff-project-example" in l for l in lines), lines)
 
     def test_project_status_change_is_audited(self):
-        projectops.create_project(self.config, id="project-widget", name="Widget",
+        projectops.create_project(self._as("principal-ania"), id="project-widget", name="Widget",
                                    path="/tmp/example-widget")
         projectops.set_project_status(self._as("principal-ania"), "project-widget", "on-hold")
         lines = self._audit_lines()
