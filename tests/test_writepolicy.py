@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import unittest
 
-from brain import writepolicy
+from brain import identity, rolepolicy, writepolicy
+from tests.helpers import TempVault
 
 
 class TestScanForSecrets(unittest.TestCase):
@@ -35,23 +36,46 @@ class TestScanForSecrets(unittest.TestCase):
 
 
 class TestRequireRestrictedConfirmation(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
     def test_restricted_without_confirmation_raises(self):
         with self.assertRaises(writepolicy.WritePolicyError) as ctx:
-            writepolicy.require_restricted_confirmation("restricted", False)
+            writepolicy.require_restricted_confirmation(self.config, "principal-marcin", "restricted", False)
         self.assertIn("confirm_restricted", str(ctx.exception))
         self.assertIn("--confirm-restricted", str(ctx.exception))
 
     def test_restricted_with_confirmation_does_not_raise(self):
-        writepolicy.require_restricted_confirmation("restricted", True)
+        writepolicy.require_restricted_confirmation(self.config, "principal-marcin", "restricted", True)
 
     def test_normal_sensitivity_never_requires_confirmation(self):
-        writepolicy.require_restricted_confirmation("normal", False)
+        writepolicy.require_restricted_confirmation(self.config, "principal-marcin", "normal", False)
 
     def test_private_sensitivity_never_requires_confirmation(self):
         # Only 'restricted' carries the extra friction — 'private' is a
         # real, distinct sensitivity level in this vault's vocabulary, not
         # a synonym for 'restricted'.
-        writepolicy.require_restricted_confirmation("private", False)
+        writepolicy.require_restricted_confirmation(self.config, "principal-marcin", "private", False)
+
+    def test_role_policy_denial_wins_even_with_confirmation_given(self):
+        # Pre-onboarding hardening: confirm_restricted=True answers "did you
+        # mean to write restricted content", never "is this role allowed
+        # to at all" — a role-level denial must still win.
+        identity.create_principal(self.config, display_name="Marcel", role="restricted_child",
+                                   principal_id="principal-marcel")
+        rolepolicy.set_role_policy(self.config, role="restricted_child", can_write_restricted=False)
+        with self.assertRaises(rolepolicy.RolePolicyError):
+            writepolicy.require_restricted_confirmation(self.config, "principal-marcel", "restricted", True)
+
+    def test_role_policy_allows_when_permitted(self):
+        identity.create_principal(self.config, display_name="Ania", role="adult",
+                                   principal_id="principal-ania")
+        rolepolicy.set_role_policy(self.config, role="adult", can_write_restricted=True)
+        writepolicy.require_restricted_confirmation(self.config, "principal-ania", "restricted", True)
 
 
 if __name__ == "__main__":

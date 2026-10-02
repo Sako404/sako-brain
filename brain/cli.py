@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, migrate_stage2, projectops, projectsync, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, visibility, writepolicy
+from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, migrate_stage2, projectops, projectsync, rolepolicy, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, visibility, writepolicy
 from . import paths
 from . import __version__
 from . import init as init_mod
@@ -108,7 +108,9 @@ def cmd_get(config: Config, args) -> int:
 
 
 def cmd_remember(config: Config, args) -> int:
-    writepolicy.require_restricted_confirmation(args.sensitivity, getattr(args, "confirm_restricted", False))
+    writepolicy.require_restricted_confirmation(config, config.acting_principal, args.sensitivity,
+                                                 getattr(args, "confirm_restricted", False))
+    rolepolicy.require_audience_allowed(config, config.acting_principal, getattr(args, "audience", None))
     writepolicy.scan_for_secrets(args.title, args.text or "")
     try:
         dest = capture.capture(
@@ -154,7 +156,10 @@ def cmd_update(config: Config, args) -> int:
     if getattr(args, "audience", None) is not None:
         set_fields["audience"] = args.audience
     if set_fields.get("sensitivity") == "restricted":
-        writepolicy.require_restricted_confirmation("restricted", getattr(args, "confirm_restricted", False))
+        writepolicy.require_restricted_confirmation(config, config.acting_principal, "restricted",
+                                                     getattr(args, "confirm_restricted", False))
+    if "audience" in set_fields:
+        rolepolicy.require_audience_allowed(config, config.acting_principal, set_fields["audience"])
     writepolicy.scan_for_secrets(args.append_text or "", *(str(v) for v in set_fields.values()))
     try:
         path = update_mod.update_memory(
@@ -241,6 +246,7 @@ def cmd_project_sync(config: Config, project_id: str) -> int:
 
 
 def cmd_project_create(config: Config, args) -> int:
+    rolepolicy.require_audience_allowed(config, config.acting_principal, getattr(args, "audience", None))
     writepolicy.scan_for_secrets(args.name, args.category or "")
     try:
         dest = projectops.create_project(
@@ -283,7 +289,10 @@ def cmd_project_update(config: Config, args) -> int:
         args.id = entry.id
 
     if set_fields.get("sensitivity") == "restricted":
-        writepolicy.require_restricted_confirmation("restricted", getattr(args, "confirm_restricted", False))
+        writepolicy.require_restricted_confirmation(config, config.acting_principal, "restricted",
+                                                     getattr(args, "confirm_restricted", False))
+    if "audience" in set_fields:
+        rolepolicy.require_audience_allowed(config, config.acting_principal, set_fields["audience"])
     writepolicy.scan_for_secrets(args.append_text or "", *(str(v) for v in set_fields.values()))
 
     lines = []
@@ -368,7 +377,9 @@ def cmd_project_section_update(config: Config, args) -> int:
 
 
 def cmd_decision_create(config: Config, args) -> int:
-    writepolicy.require_restricted_confirmation(args.sensitivity, getattr(args, "confirm_restricted", False))
+    writepolicy.require_restricted_confirmation(config, config.acting_principal, args.sensitivity,
+                                                 getattr(args, "confirm_restricted", False))
+    rolepolicy.require_audience_allowed(config, config.acting_principal, getattr(args, "audience", None))
     writepolicy.scan_for_secrets(args.title, args.context or "", args.options or "",
                                   args.decision or "", args.reasoning or "", args.consequences or "")
     try:
@@ -550,6 +561,58 @@ def cmd_group_remove_member(config: Config, args) -> int:
     return 0
 
 
+def cmd_role_policy_set(config: Config, args) -> int:
+    try:
+        p = rolepolicy.set_role_policy(
+            config, role=args.role, can_write_restricted=args.can_write_restricted,
+            audience_allowlist=args.audience_allowlist,
+        )
+    except rolepolicy.RolePolicyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if getattr(args, "json", False):
+        print(json.dumps(dataclasses.asdict(p), indent=2, ensure_ascii=False))
+        return 0
+    print(f"Role policy for '{args.role}': can_write_restricted={p.can_write_restricted} "
+          f"audience_allowlist={p.audience_allowlist}")
+    return 0
+
+
+def cmd_role_policy_show(config: Config, args) -> int:
+    p = rolepolicy.get_role_policy(config, args.role)
+    if getattr(args, "json", False):
+        print(json.dumps(dataclasses.asdict(p), indent=2, ensure_ascii=False))
+        return 0
+    print(f"Role policy for '{args.role}': can_write_restricted={p.can_write_restricted} "
+          f"audience_allowlist={p.audience_allowlist}")
+    return 0
+
+
+def cmd_role_policy_list(config: Config, args) -> int:
+    policies = rolepolicy.list_role_policies(config)
+    if getattr(args, "json", False):
+        print(json.dumps([{"role": role, **dataclasses.asdict(p)} for role, p in policies],
+                          indent=2, ensure_ascii=False))
+        return 0
+    if not policies:
+        print("No role policies set yet (every role is fully permissive by default).")
+        return 0
+    for role, p in policies:
+        print(f"{role}  can_write_restricted={p.can_write_restricted}  "
+              f"audience_allowlist={p.audience_allowlist}")
+    return 0
+
+
+def cmd_role_policy_delete(config: Config, args) -> int:
+    try:
+        rolepolicy.delete_role_policy(config, args.role)
+    except rolepolicy.RolePolicyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    print(f"Deleted role policy for '{args.role}' (reverts to the fully-permissive default)")
+    return 0
+
+
 def cmd_timeline(config: Config, args) -> int:
     entries = timeline.list_timeline(config)
     query = getattr(args, "query", None)
@@ -570,7 +633,9 @@ def cmd_timeline(config: Config, args) -> int:
 
 
 def cmd_timeline_add(config: Config, args) -> int:
-    writepolicy.require_restricted_confirmation(args.sensitivity, getattr(args, "confirm_restricted", False))
+    writepolicy.require_restricted_confirmation(config, config.acting_principal, args.sensitivity,
+                                                 getattr(args, "confirm_restricted", False))
+    rolepolicy.require_audience_allowed(config, config.acting_principal, getattr(args, "audience", None))
     writepolicy.scan_for_secrets(args.title, args.what_happened or "", args.why_it_matters or "")
     try:
         path = timeline.create_event(
@@ -592,7 +657,9 @@ def cmd_timeline_add(config: Config, args) -> int:
 
 
 def cmd_note_create(config: Config, args) -> int:
-    writepolicy.require_restricted_confirmation(args.sensitivity, getattr(args, "confirm_restricted", False))
+    writepolicy.require_restricted_confirmation(config, config.acting_principal, args.sensitivity,
+                                                 getattr(args, "confirm_restricted", False))
+    rolepolicy.require_audience_allowed(config, config.acting_principal, getattr(args, "audience", None))
     writepolicy.scan_for_secrets(args.title, args.text or "")
     try:
         path = memoryops.create_memory(
@@ -1123,6 +1190,7 @@ def cmd_handoff_write(config: Config, args) -> int:
         files_changed=payload.get("files_changed", []),
         decisions=payload.get("decisions", []),
     )
+    rolepolicy.require_audience_allowed(config, config.acting_principal, payload.get("audience"))
     writepolicy.scan_for_secrets(sections.attempted, sections.changed, sections.working_state,
                                   sections.unresolved, sections.next_action,
                                   *sections.files_changed, *sections.decisions)
@@ -1537,6 +1605,40 @@ def build_parser() -> argparse.ArgumentParser:
     p_group_remove.add_argument("id")
     p_group_remove.add_argument("--principal", required=True)
 
+    p_rolepolicy = sub.add_parser(
+        "role-policy", help="Administer role policies (what a role may do — local only, same "
+                             "as `principal`/`group`). Orthogonal to groups: a group decides who "
+                             "may see a shared record, a role policy decides what a principal "
+                             "whose own role matches may do.")
+    rolepolicy_sub = p_rolepolicy.add_subparsers(dest="role_policy_command", required=True)
+
+    p_rp_set = rolepolicy_sub.add_parser(
+        "set", help="Create or replace the policy for one role string")
+    p_rp_set.add_argument("role", help="A deployment-defined role id (e.g. 'adult', "
+                                        "'standard_child') — the engine does not enumerate these")
+    p_rp_set.add_argument("--can-write-restricted", dest="can_write_restricted",
+                           action="store_true", default=True,
+                           help="This role may write sensitivity='restricted' content (default)")
+    p_rp_set.add_argument("--no-write-restricted", dest="can_write_restricted",
+                           action="store_false",
+                           help="This role may NEVER write sensitivity='restricted' content")
+    p_rp_set.add_argument("--audience-allowlist", nargs="*", default=None, dest="audience_allowlist",
+                           help="Audience targets this role may share its own records with, e.g. "
+                                "'group:household' 'principal:marcin' — omit for unrestricted, "
+                                "pass with no values for 'may never share beyond private'")
+    p_rp_set.add_argument("--json", action="store_true")
+
+    p_rp_show = rolepolicy_sub.add_parser("show", help="Show the policy for one role string")
+    p_rp_show.add_argument("role")
+    p_rp_show.add_argument("--json", action="store_true")
+
+    p_rp_list = rolepolicy_sub.add_parser("list", help="List every role that has an explicit policy")
+    p_rp_list.add_argument("--json", action="store_true")
+
+    p_rp_delete = rolepolicy_sub.add_parser(
+        "delete", help="Remove a role's policy (that role reverts to the fully-permissive default)")
+    p_rp_delete.add_argument("role")
+
     p_timeline = sub.add_parser("timeline", help="List timeline entries, newest first (or 'add' one)")
     p_timeline.add_argument("--limit", type=int, default=50)
     p_timeline.add_argument("--query", default=None,
@@ -1796,6 +1898,7 @@ USER_FACING_ERRORS = (
     memoryops.MemoryWriteError,
     timeline.TimelineWriteError,
     writepolicy.WritePolicyError,
+    rolepolicy.RolePolicyError,
     remote.RemoteConfigError,
 )
 
@@ -1937,6 +2040,15 @@ def _dispatch(config: Config, args, parser) -> int:
             return cmd_group_add_member(config, args)
         if args.group_command == "remove-member":
             return cmd_group_remove_member(config, args)
+    if args.command == "role-policy":
+        if args.role_policy_command == "set":
+            return cmd_role_policy_set(config, args)
+        if args.role_policy_command == "show":
+            return cmd_role_policy_show(config, args)
+        if args.role_policy_command == "list":
+            return cmd_role_policy_list(config, args)
+        if args.role_policy_command == "delete":
+            return cmd_role_policy_delete(config, args)
     if args.command == "timeline":
         if getattr(args, "timeline_command", None) == "add":
             return cmd_timeline_add(config, args)
