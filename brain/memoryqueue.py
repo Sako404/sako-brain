@@ -18,6 +18,15 @@ with dozens of small "maybe" facts accumulating as individual notes would
 be worse to review than a single list. It is a YAML file, not Markdown
 with frontmatter, so the FTS5 indexer's markdown scanner never picks up
 entries as if they were authoritative notes.
+
+INVARIANT (pre-onboarding hardening, 2026-10-02): this queue carries no
+owner_principal/audience fields at all — every entry is implicitly
+Marcin's own pending review, with no concept of whose candidate memory
+it is. It must NOT be exposed to multi-user clients (the Remote MCP
+gateway, any non-marcin principal, any future tool surface) until either
+it gains its own ownership/visibility fields or every read/write of it is
+routed through visibility.py the same way every other content path
+already is. Until then, treat it as single-principal-only by construction.
 """
 from __future__ import annotations
 
