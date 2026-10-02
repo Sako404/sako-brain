@@ -1,5 +1,6 @@
 import dataclasses
 import unittest
+from pathlib import Path
 
 from brain import identity, validate
 from tests.helpers import TempVault
@@ -347,6 +348,85 @@ class TestDoctorAdminGate(unittest.TestCase):
                                    principal_id="principal-marcin")
         problems = validate.run_all(self._as("principal-does-not-exist"))
         self.assertEqual(problems[0].check, "admin_required")
+
+
+class TestDispatcherDeploymentInfo(unittest.TestCase):
+    """Pre-onboarding hardening item 6: makes a deployed brain-dispatch.py's
+    hash VISIBLE via `brain doctor`, so a deploy's acceptance step can
+    compare it against `sha256sum server/brain-dispatch.py` in
+    sako-brain-tooling instead of only discovering drift behaviorally.
+    Written by sako-brain-tooling's 10-setup-brain.sh at container start —
+    never by this package itself."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _as(self, principal_id: str):
+        return dataclasses.replace(self.config, acting_principal=principal_id)
+
+    def _marker_path(self) -> Path:
+        return self.config.state_dir / ".dispatcher-deployment-info.json"
+
+    def test_no_marker_file_reports_nothing(self):
+        # A purely local desktop install has no dispatcher at all — it is
+        # not missing anything by not having this marker.
+        self.assertFalse(self._marker_path().exists())
+        problems = validate.check_dispatcher_deployment_info(self.config)
+        self.assertEqual(problems, [])
+
+    def test_valid_marker_reports_hash_and_timestamp(self):
+        self.config.state_dir.mkdir(parents=True, exist_ok=True)
+        self._marker_path().write_text(
+            '{"sha256": "abc123", "recorded_at": "2026-10-02T12:00:00Z"}',
+            encoding="utf-8",
+        )
+        problems = validate.check_dispatcher_deployment_info(self.config)
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0].check, "dispatcher_deployment_info")
+        self.assertIn("abc123", problems[0].message)
+        self.assertIn("2026-10-02T12:00:00Z", problems[0].message)
+
+    def test_malformed_marker_reports_unreadable_not_a_crash(self):
+        self.config.state_dir.mkdir(parents=True, exist_ok=True)
+        self._marker_path().write_text("not valid json {{{", encoding="utf-8")
+        problems = validate.check_dispatcher_deployment_info(self.config)
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0].check, "dispatcher_deployment_info_unreadable")
+
+    def test_marker_never_leaks_paths_keys_or_config(self):
+        self.config.state_dir.mkdir(parents=True, exist_ok=True)
+        self._marker_path().write_text(
+            '{"sha256": "abc123", "recorded_at": "2026-10-02T12:00:00Z"}',
+            encoding="utf-8",
+        )
+        problems = validate.check_dispatcher_deployment_info(self.config)
+        message = problems[0].message
+        self.assertNotIn(str(self.config.brain_root), message)
+        self.assertNotIn(str(self.config.state_dir), message)
+
+    def test_subject_to_the_same_admin_gate_as_the_rest_of_run_all(self):
+        self.config.state_dir.mkdir(parents=True, exist_ok=True)
+        self._marker_path().write_text(
+            '{"sha256": "abc123", "recorded_at": "2026-10-02T12:00:00Z"}',
+            encoding="utf-8",
+        )
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        identity.create_principal(self.config, display_name="Ania", role="adult",
+                                   principal_id="principal-ania")
+
+        admin_problems = validate.run_all(self._as("principal-marcin"))
+        checks = {p.check for p in admin_problems}
+        self.assertIn("dispatcher_deployment_info", checks)
+
+        non_admin_problems = validate.run_all(self._as("principal-ania"))
+        self.assertEqual(len(non_admin_problems), 1)
+        self.assertEqual(non_admin_problems[0].check, "admin_required")
+        self.assertNotIn("abc123", non_admin_problems[0].message)
 
 
 if __name__ == "__main__":
