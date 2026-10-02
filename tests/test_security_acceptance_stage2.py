@@ -351,5 +351,69 @@ class Test23AuditAttributionCorrectAndSafe(SecurityAcceptanceTestCase):
         self.assertLess(len(denial[0]), 400)  # redaction-safe length cap
 
 
+# ---- pre-onboarding hardening item 9: admin carries no routine content- --
+# ---- read/write bypass; Marcin's own message asked this be CONFIRMED,  --
+# ---- not just asserted, before family credentials are created.          --
+
+class Test26AdminRoleGrantsNoContentBypass(SecurityAcceptanceTestCase):
+    """validate.is_admin_principal/role=admin gates two OPERATIONAL tools
+    only (brain doctor, brain state) — it is never consulted by
+    visibility.can_view/is_owner, which check ONLY owner_principal/
+    audience/group membership. Proven here directly: an admin-role
+    principal who neither owns nor is in a record's audience is denied
+    exactly like any other non-owner, non-audience principal would be —
+    for both reading AND writing."""
+
+    def test_admin_principal_cannot_read_a_private_record_they_do_not_own(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        identity.create_principal(self.config, display_name="Ania", role="adult",
+                                   principal_id="principal-ania")
+        self.vault.write_note("60_KNOWLEDGE", "secret.md", id="knowledge-secret",
+                               type="knowledge", title="Ania's private note",
+                               owner_principal="principal:ania", audience=[])
+        with self.assertRaises(FileNotFoundError):
+            visibility.read_visible_note_text(self.config, "principal-marcin", "knowledge-secret")
+
+    def test_admin_principal_cannot_search_discover_it_either(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        self.vault.write_note("60_KNOWLEDGE", "secret.md", id="knowledge-secret",
+                               type="knowledge", title="Ania's Unique Widgetronic Note",
+                               owner_principal="principal:ania", audience=[])
+        indexer.rebuild(self.config)
+        results = search.search(self._as("principal-marcin"), "Widgetronic")
+        self.assertEqual([r.id for r in results], [])
+
+    def test_admin_principal_cannot_modify_a_record_they_do_not_own(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        path = self.vault.write_note("60_KNOWLEDGE", "secret.md", id="knowledge-secret",
+                                      type="knowledge", title="Ania's note",
+                                      owner_principal="principal:ania", audience=[])
+        with self.assertRaises(update_mod.UpdateError):
+            update_mod.update_memory(self._as("principal-marcin"), "knowledge-secret",
+                                      set_fields={"status": "current"})
+        note = frontmatter.parse_file(path)
+        self.assertNotEqual(note.meta.get("status"), "current")
+
+    def test_admin_principal_can_read_their_own_and_shared_records_normally(self):
+        # The point isn't that admin is penalized — ordinary owner/audience
+        # rules just apply to admin exactly like anyone else, no special
+        # case either way.
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        self.vault.write_note("60_KNOWLEDGE", "own.md", id="knowledge-own",
+                               type="knowledge", title="Marcin's own note",
+                               owner_principal="principal:marcin", audience=[])
+        self.vault.write_note("60_KNOWLEDGE", "shared.md", id="knowledge-shared",
+                               type="knowledge", title="Shared with marcin",
+                               owner_principal="principal:ania", audience=["principal:marcin"])
+        self.assertIn("own note", visibility.read_visible_note_text(
+            self.config, "principal-marcin", "knowledge-own"))
+        self.assertIn("Shared", visibility.read_visible_note_text(
+            self.config, "principal-marcin", "knowledge-shared"))
+
+
 if __name__ == "__main__":
     unittest.main()

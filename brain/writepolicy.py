@@ -19,7 +19,9 @@ immediately flag anyway.
 """
 from __future__ import annotations
 
+from . import rolepolicy
 from . import validate as validate_mod
+from .paths import Config
 
 
 class WritePolicyError(RuntimeError):
@@ -44,15 +46,24 @@ def scan_for_secrets(*texts: str) -> None:
                     )
 
 
-def require_restricted_confirmation(sensitivity: str, confirm_restricted: bool) -> None:
+def require_restricted_confirmation(config: Config, principal_id: str, sensitivity: str,
+                                     confirm_restricted: bool) -> None:
     """sensitivity='restricted' requires an explicit, separate confirmation
     — a deliberate friction point so a restricted write can never happen as
     an unnoticed side effect of an automated call (an MCP tool call, or a
     write routed through the CLI on an automated caller's behalf, e.g. via
-    mcp_bridge.py). Raises WritePolicyError if the confirmation is missing."""
+    mcp_bridge.py). Raises WritePolicyError if the confirmation is missing.
+
+    Pre-onboarding hardening: also checks the acting principal's role
+    policy (rolepolicy.py) — a role that disallows restricted writes
+    outright is refused here too, independent of confirm_restricted. Both
+    checks live in this one function for the same reason this module
+    exists at all: one real implementation every write path goes through,
+    never a second copy one caller has and another doesn't."""
     if sensitivity == "restricted" and not confirm_restricted:
         raise WritePolicyError(
             "sensitivity='restricted' requires confirm_restricted=true (MCP) or "
             "--confirm-restricted (CLI) — this is a deliberate friction point so a "
             "restricted write can never happen as an unnoticed side effect."
         )
+    rolepolicy.require_restricted_write_allowed(config, principal_id, sensitivity)

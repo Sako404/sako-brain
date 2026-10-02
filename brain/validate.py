@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -351,6 +352,37 @@ def check_password_file_not_backed_up(config: Config) -> list[Problem]:
     return problems
 
 
+def check_dispatcher_deployment_info(config: Config) -> list[Problem]:
+    """Pre-onboarding hardening: a real incident (2026-10-02) demonstrated
+    that the SSH dispatcher script (brain-dispatch.py — deliberately
+    outside the pip wheel, deployed via a separate step) can be correct
+    and tested in git while production keeps running an older copy. This
+    cannot PREVENT that — nothing here knows what hash is "expected",
+    since the dispatcher is versioned in a separate repository with no
+    shared release cycle — but it makes the deployed hash VISIBLE, so a
+    deploy's acceptance step can compare it against a local
+    `sha256sum` of the dispatcher script's own source instead of only
+    discovering drift via a live behavioral test (how the original
+    incident was actually found). Informational: always reported when the
+    marker file exists (written by the server's own init script at
+    container start), never reported on a vault with no dispatcher at
+    all — a purely local desktop install is not missing anything by not
+    having one."""
+    marker = config.state_dir / ".dispatcher-deployment-info.json"
+    if not marker.exists():
+        return []
+    try:
+        info = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [Problem("dispatcher_deployment_info_unreadable", str(exc))]
+    return [Problem(
+        "dispatcher_deployment_info",
+        f"deployed dispatcher script sha256: {info.get('sha256', '(unknown)')} "
+        f"(recorded at container start: {info.get('recorded_at', '(unknown)')}) — "
+        "compare against a local sha256sum of the dispatcher script's own source.",
+    )]
+
+
 def is_admin_principal(config: Config, principal_id: str) -> bool:
     p = identity.get_principal(config, principal_id)
     if p is None:
@@ -404,4 +436,5 @@ def run_all(config: Config, principal_id: str | None = None) -> list[Problem]:
     problems += check_sqlite_fts5(config)
     problems += check_unsafe_plaintext_backup(config)
     problems += check_password_file_not_backed_up(config)
+    problems += check_dispatcher_deployment_info(config)
     return problems

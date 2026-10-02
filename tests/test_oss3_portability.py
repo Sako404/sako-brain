@@ -651,11 +651,13 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
         section-update` (the /project-sync named-section primitive), and by
         one more (v0.10.1) for writepolicy.WritePolicyError — shared
         secret-pattern-scan refusal, now enforced at the CLI layer too, not
-        just the in-process MCP server — and by one more (v0.11.0) for
+        just the in-process MCP server — by one more (v0.11.0) for
         remote.RemoteConfigError — a broken/incomplete client.toml for a
-        configured remote canonical Brain.
+        configured remote canonical Brain — and by one more (pre-onboarding
+        hardening, 2026-10-02) for rolepolicy.RolePolicyError — a role-policy
+        refusal (restricted-write capability, audience allowlist).
         """
-        from brain import backup, cli, decision, gitops, handoff, memoryops, projectops, timeline, writepolicy
+        from brain import backup, cli, decision, gitops, handoff, memoryops, projectops, rolepolicy, timeline, writepolicy
         from brain import init as init_mod
         from brain import paths as paths_mod
         from brain import remote
@@ -668,7 +670,8 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
              decision.DecisionError, projectops.ProjectWriteError,
              projectops.SectionEditError,
              memoryops.MemoryWriteError, timeline.TimelineWriteError,
-             writepolicy.WritePolicyError, remote.RemoteConfigError},
+             writepolicy.WritePolicyError, remote.RemoteConfigError,
+             rolepolicy.RolePolicyError},
         )
 
 

@@ -9,6 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from . import frontmatter
+from . import visibility
 from .paths import Config, ensure_private_file
 
 SCHEMA = """
@@ -67,28 +68,68 @@ def connect(config: Config) -> sqlite3.Connection:
     return conn
 
 
-def count_by_type(config: Config) -> dict[str, int]:
+def count_by_type(config: Config, principal_id: str | None = None) -> dict[str, int]:
     """Indexed note counts grouped by type, in the same order the index
     returns them (`(none)` for a missing/blank type). {} if the index has not
-    been built yet."""
+    been built yet.
+
+    Stage 2 (pre-onboarding hardening): counts are visibility-filtered —
+    an aggregate count is itself a way to infer hidden record volume
+    (`brain status` showing "person: 7" to a principal who can see 2 of
+    them would leak that 5 more exist), so this reads each candidate
+    row's live frontmatter the same way every other read path does,
+    never trusting the index's own numbers directly. Small-scale cost
+    (a handful of principals, a few hundred notes) accepted the same way
+    search.py's overfetch-and-filter already is."""
+    if principal_id is None:
+        principal_id = config.acting_principal
     if not config.db_path.exists():
         return {}
     conn = connect(config)
     try:
-        rows = conn.execute(
-            "SELECT type, COUNT(*) c FROM notes GROUP BY type ORDER BY type"
-        ).fetchall()
+        rows = conn.execute("SELECT type, path FROM notes").fetchall()
     finally:
         conn.close()
-    return {(row["type"] or "(none)"): row["c"] for row in rows}
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        note_path = config.brain_root / row["path"]
+        try:
+            note = frontmatter.parse_file(note_path)
+        except (frontmatter.FrontmatterError, OSError):
+            continue
+        if not visibility.can_view_note(config, principal_id, note):
+            continue
+        key = row["type"] or "(none)"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
 
 
-def count_inbox_pending(config: Config) -> int:
-    """Markdown files sitting in the inbox, not yet triaged into the vault."""
+def count_inbox_pending(config: Config, principal_id: str | None = None) -> int:
+    """Markdown files sitting in the inbox, not yet triaged into the vault.
+    Visibility-filtered for the same reason count_by_type is — see its
+    own docstring. A raw capture with no frontmatter at all (a quick
+    dictation/draft, not yet structured — the common inbox shape) is NOT
+    the same case as a note whose frontmatter parsed but omitted
+    owner_principal; there's no meta dict to read at all. Treated as an
+    empty meta rather than skipped outright, so it still falls through to
+    visibility.py's own missing-owner default (principal-marcin) instead
+    of silently vanishing from everyone's count, including its default
+    owner's."""
+    if principal_id is None:
+        principal_id = config.acting_principal
     inbox = config.inbox_dir
     if not inbox.exists():
         return 0
-    return len(list(inbox.glob("*.md")))
+    count = 0
+    for path in inbox.glob("*.md"):
+        try:
+            meta = frontmatter.parse_file(path).meta
+        except frontmatter.FrontmatterError:
+            meta = {}
+        if visibility.can_view(config, principal_id, meta):
+            count += 1
+    return count
 
 
 def _upsert_note(conn: sqlite3.Connection, config: Config, path: Path) -> str | None:

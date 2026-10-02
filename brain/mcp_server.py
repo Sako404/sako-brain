@@ -45,6 +45,7 @@ from . import search as search_mod
 from . import state as state_mod
 from . import timeline as timeline_mod
 from . import update as update_mod
+from . import rolepolicy
 from . import validate as validate_mod
 from . import visibility
 from . import writepolicy
@@ -141,7 +142,8 @@ def tool_remember(config: Config, type: str, title: str, text: str = "",
                    projects: list | None = None, sensitivity: str = "normal",
                    confidence: str = "fact", source: str = "", source_date: str = "",
                    confirm_restricted: bool = False, audience: list | None = None) -> dict:
-    _require_restricted_confirmation(sensitivity, confirm_restricted)
+    _require_restricted_confirmation(config, config.acting_principal, sensitivity, confirm_restricted)
+    rolepolicy.require_audience_allowed(config, config.acting_principal, audience)
     _scan_for_secrets(title, text)
     path = capture.capture(
         config, type_=type, title=title, text=text, tags=tags, people=people,
@@ -155,7 +157,9 @@ def tool_update_memory(config: Config, id: str, set_fields: dict | None = None,
                         append_text: str | None = None, confirm_restricted: bool = False) -> dict:
     set_fields = set_fields or {}
     if set_fields.get("sensitivity") == "restricted":
-        _require_restricted_confirmation("restricted", confirm_restricted)
+        _require_restricted_confirmation(config, config.acting_principal, "restricted", confirm_restricted)
+    if "audience" in set_fields:
+        rolepolicy.require_audience_allowed(config, config.acting_principal, set_fields["audience"])
     _scan_for_secrets(append_text or "", *(str(v) for v in set_fields.values()))
     path = update_mod.update_memory(config, id, set_fields=set_fields, append_text=append_text)
     return {"updated_path": str(path.relative_to(config.brain_root))}
@@ -219,6 +223,7 @@ def tool_write_handoff(config: Config, project_id: str, attempted: str = "", cha
     `initialize`'s clientInfo) rather than a hardcoded value — this is the
     one call site that previously hardcoded "claude-session" regardless of
     which client (or human) actually wrote the handoff."""
+    rolepolicy.require_audience_allowed(config, config.acting_principal, audience)
     _scan_for_secrets(attempted, changed, working_state, unresolved, next_action,
                        *(files_changed or []), *(decisions or []))
     sections = handoff_mod.HandoffSections(
@@ -240,7 +245,8 @@ def tool_create_decision(config: Config, title: str, context: str = "", options:
                           audience: list | None = None) -> dict:
     """Thin wrapper over decision.create_decision() — the exact function
     `brain decision create` already calls. No new logic."""
-    _require_restricted_confirmation(sensitivity, confirm_restricted)
+    _require_restricted_confirmation(config, config.acting_principal, sensitivity, confirm_restricted)
+    rolepolicy.require_audience_allowed(config, config.acting_principal, audience)
     _scan_for_secrets(title, context, options, decision, reasoning, consequences)
     path = decision_mod.create_decision(
         config, title=title, context=context, options=options, decision=decision,
@@ -256,6 +262,7 @@ def tool_create_project(config: Config, id: str, name: str, path: str, status: s
                          audience: list | None = None) -> dict:
     """Thin wrapper over projectops.create_project(). No new logic. Never
     copies project source files — `path` is a reference only."""
+    rolepolicy.require_audience_allowed(config, config.acting_principal, audience)
     _scan_for_secrets(name, category or "")
     dest = projectops.create_project(
         config, id=id, name=name, path=path, status=status, category=category, aliases=aliases,
@@ -308,7 +315,8 @@ def tool_create_memory_note(config: Config, type: str, title: str, text: str = "
     `brain note create` already calls. No new logic. Never accepts a
     client-supplied path: the destination is derived from `type` (plus a
     validated `area` for facts), never taken as-is."""
-    _require_restricted_confirmation(sensitivity, confirm_restricted)
+    _require_restricted_confirmation(config, config.acting_principal, sensitivity, confirm_restricted)
+    rolepolicy.require_audience_allowed(config, config.acting_principal, audience)
     _scan_for_secrets(title, text)
     path = memoryops.create_memory(
         config, type_=type, title=title, text=text, tags=tags, people=people,
@@ -326,7 +334,8 @@ def tool_create_timeline_event(config: Config, title: str, valid_from: str,
                                 confidence: str = "fact", source: str = "", source_date: str = "",
                                 confirm_restricted: bool = False, audience: list | None = None) -> dict:
     """Thin wrapper over timeline.create_event(). No new logic."""
-    _require_restricted_confirmation(sensitivity, confirm_restricted)
+    _require_restricted_confirmation(config, config.acting_principal, sensitivity, confirm_restricted)
+    rolepolicy.require_audience_allowed(config, config.acting_principal, audience)
     _scan_for_secrets(title, what_happened, why_it_matters)
     path = timeline_mod.create_event(
         config, title=title, valid_from=valid_from, what_happened=what_happened,

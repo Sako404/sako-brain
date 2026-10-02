@@ -233,12 +233,23 @@ class TestWriteSetsOwnership(unittest.TestCase):
         note = frontmatter.parse_file(path)
         self.assertEqual(note.meta["audience"], ["group:household"])
 
-    def test_second_write_never_changes_the_original_owner(self):
+    def test_second_write_by_a_non_owner_is_refused(self):
+        # Stage 2 V1 write rule, locked explicitly: only a handoff's owner
+        # may add a new session to it — a different principal's write
+        # attempt must be refused outright, not silently allowed with
+        # ownership merely left unchanged.
+        handoff.write(self._as("principal-ania"), "project-example",
+                       handoff.HandoffSections(attempted="first"))
+        with self.assertRaises(handoff.HandoffError):
+            handoff.write(self._as("principal-marcin"), "project-example",
+                           handoff.HandoffSections(attempted="second"))
+
+    def test_owners_second_write_preserves_their_own_ownership(self):
         first = handoff.write(self._as("principal-ania"), "project-example",
                                handoff.HandoffSections(attempted="first"))
         self.assertEqual(frontmatter.parse_file(first).meta["owner_principal"], "principal:ania")
 
-        second = handoff.write(self._as("principal-marcin"), "project-example",
+        second = handoff.write(self._as("principal-ania"), "project-example",
                                 handoff.HandoffSections(attempted="second"))
         self.assertEqual(frontmatter.parse_file(second).meta["owner_principal"], "principal:ania")
 
