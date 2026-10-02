@@ -1,3 +1,4 @@
+import dataclasses
 import shutil
 import stat
 import unittest
@@ -142,6 +143,18 @@ class TestIndexer(unittest.TestCase):
         (inbox / "notes.txt").write_text("not markdown\n")
         self.assertEqual(indexer.count_inbox_pending(self.config), 2)
 
+    def test_count_inbox_pending_raw_draft_with_no_frontmatter_defaults_to_marcin(self):
+        # A raw capture with no frontmatter at all is NOT the same case as
+        # a note whose frontmatter parsed but omitted owner_principal —
+        # there's no meta dict to read. It must still count for the
+        # default owner (principal-marcin), not vanish from everyone's
+        # count including its own.
+        inbox = self.config.inbox_dir
+        inbox.mkdir(parents=True, exist_ok=True)
+        (inbox / "raw.md").write_text("just a raw draft, no frontmatter\n")
+        self.assertEqual(indexer.count_inbox_pending(self.config, "principal-marcin"), 1)
+        self.assertEqual(indexer.count_inbox_pending(self.config, "principal-ania"), 0)
+
     def test_db_file_not_world_or_group_readable(self):
         # The index holds full note bodies, restricted ones included —
         # same privacy reasoning as the MCP log files (see paths.py's
@@ -153,6 +166,45 @@ class TestIndexer(unittest.TestCase):
         mode = self.config.db_path.stat().st_mode
         self.assertEqual(mode & stat.S_IRWXG, 0, "db file should not be group-accessible")
         self.assertEqual(mode & stat.S_IRWXO, 0, "db file should not be other-accessible")
+
+
+class TestCountsAreVisibilityFiltered(unittest.TestCase):
+    """Pre-onboarding hardening: `brain status`'s aggregate counts are
+    themselves an information-leak surface — a non-admin principal could
+    otherwise infer hidden record volume (e.g. "person: 7" shown to
+    someone who can only see 2 of them reveals that 5 more exist) purely
+    from the numbers, without ever reading a single title or snippet."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.vault.write_note("10_PEOPLE", "p1.md", id="person-p1", type="person",
+                               owner_principal="principal:marcin", audience=[])
+        self.vault.write_note("10_PEOPLE", "p2.md", id="person-p2", type="person",
+                               owner_principal="principal:marcin", audience=[])
+        self.vault.write_note("10_PEOPLE", "p3.md", id="person-p3", type="person",
+                               owner_principal="principal:marcin", audience=["principal:ania"])
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _as(self, principal_id: str):
+        return dataclasses.replace(self.config, acting_principal=principal_id)
+
+    def test_owner_sees_the_full_count(self):
+        self.assertEqual(indexer.count_by_type(self._as("principal-marcin")), {"person": 3})
+
+    def test_non_owner_only_sees_the_count_of_what_was_shared_with_them(self):
+        self.assertEqual(indexer.count_by_type(self._as("principal-ania")), {"person": 1})
+
+    def test_unrelated_third_party_sees_nothing_not_even_a_zero_entry(self):
+        # dict with no "person" key at all, not {"person": 0} — the TYPE
+        # itself existing is not revealed either, only actual visible counts.
+        self.assertEqual(indexer.count_by_type(self._as("principal-marcel")), {})
+
+    def test_defaults_to_config_acting_principal_when_not_given_explicitly(self):
+        self.assertEqual(indexer.count_by_type(self._as("principal-ania")), {"person": 1})
 
 
 if __name__ == "__main__":
