@@ -105,6 +105,34 @@ class TestToolsListAdvertisedMatchesExecutable(unittest.TestCase):
         self.assertTrue(advertised.issubset(mcp_bridge.TRANSLATORS.keys()))
         self.assertEqual(advertised, set(mcp_bridge.TRANSLATORS.keys()))
 
+    # Deliberately, permanently unsupported over this bridge — see
+    # mcp_bridge.py's own module docstring (the dispatcher's security
+    # boundary doesn't allow `brain memory` at all, not an oversight).
+    DELIBERATELY_UNBRIDGED_TOOLS = {"queue_memory"}
+
+    def test_translators_has_no_gap_against_the_real_tool_source(self):
+        """Pre-onboarding hardening (2026-10-02): the test above only proves
+        TRANSLATORS is internally consistent against a *synthetic* caps
+        fixture built FROM TRANSLATORS itself — it can never notice a tool
+        that mcp_server.TOOLS (the actual, hand-maintained source of truth
+        `brain capabilities` serves) has grown and TRANSLATORS has not. That
+        is exactly the shape of the historical v0.9.2 incident this module's
+        docstring references (20 real tools, only 9 translated) — caught
+        that time by a manual audit, not by any automated test. This closes
+        that gap directly: no synthetic fixture, no mock, a straight
+        comparison of the two real, in-process dicts a human would otherwise
+        have to remember to compare by hand."""
+        from brain import mcp_server
+
+        real_tools = set(mcp_server.TOOLS.keys())
+        bridged_tools = set(mcp_bridge.TRANSLATORS.keys())
+        self.assertEqual(
+            real_tools - self.DELIBERATELY_UNBRIDGED_TOOLS, bridged_tools,
+            "mcp_server.TOOLS and mcp_bridge.TRANSLATORS have drifted — a new "
+            "tool needs a translator (or an explicit addition to "
+            "DELIBERATELY_UNBRIDGED_TOOLS above, with a reason).",
+        )
+
 
 class TestTranslatorsPreferJsonOverTextParsing(unittest.TestCase):
     """Contract: a translator should build a `brain` invocation that emits
