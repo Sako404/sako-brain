@@ -1,5 +1,10 @@
 # SAKO Brain
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="SAKO-Brain-Logo-Kit/sako-brain-dark.png">
+  <img alt="SAKO Brain" src="SAKO-Brain-Logo-Kit/sako-brain-light.png" width="360">
+</picture>
+
 **Structured Augmented Knowledge Orchestrator** —<br>
 **S**tructured knowledge, projects, decisions, timeline and context;<br>
 **A**ugmented by AI, tooling, indexing and automation;<br>
@@ -15,7 +20,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.13.1.** Pre-1.0 means the command line and configuration
+**Current release: 0.14.3.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -82,14 +87,14 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.13.1-py3-none-any.whl
+pipx install ./sako_brain-0.14.3-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
 downloaded:
 
 ```sh
-sha256sum ./sako_brain-0.13.1-py3-none-any.whl
+sha256sum ./sako_brain-0.14.3-py3-none-any.whl
 ```
 
 Or build from source:
@@ -98,7 +103,7 @@ Or build from source:
 git clone https://github.com/Sako404/sako-brain.git
 cd sako-brain
 python -m build
-pipx install ./dist/sako_brain-0.13.1-py3-none-any.whl
+pipx install ./dist/sako_brain-0.14.3-py3-none-any.whl
 ```
 
 `pipx` puts `brain` on your PATH and keeps it isolated. A plain virtualenv
@@ -106,7 +111,7 @@ works too:
 
 ```sh
 python -m venv ~/.venvs/brain
-~/.venvs/brain/bin/pip install ./dist/sako_brain-0.13.1-py3-none-any.whl
+~/.venvs/brain/bin/pip install ./dist/sako_brain-0.14.3-py3-none-any.whl
 ```
 
 Either way, exactly one dependency is installed: PyYAML.
@@ -114,7 +119,7 @@ Either way, exactly one dependency is installed: PyYAML.
 ### Update and uninstall
 
 ```sh
-pipx install --force ./dist/sako_brain-0.13.1-py3-none-any.whl
+pipx install --force ./dist/sako_brain-0.14.3-py3-none-any.whl
 pipx uninstall sako-brain
 ```
 
@@ -298,11 +303,14 @@ if you'd rather not install first) for the full detail.
 ## Remote / web AI access
 
 `brain remote-gateway` is an optional, self-hosted OAuth 2.1 + Streamable
-HTTP MCP server so ChatGPT web and Claude.ai web can reach your canonical
-Brain live — without either ever touching the vault filesystem, SSH, or
-bypassing Brain's write safety. Every tool call it handles is forwarded,
-unmodified, to the same `brain.mcp_bridge` dispatch Claude Code and Codex
-already use.
+HTTP MCP server so ChatGPT web, Claude.ai web, or any other MCP-over-HTTPS
+client — including a local agent runtime with a native remote-MCP-with-OAuth
+client, such as Hermes Agent — can reach your canonical Brain live, without
+ever touching the vault filesystem, SSH, or bypassing Brain's write
+safety. Every tool call it handles is forwarded, unmodified, to the same
+`brain.mcp_bridge` dispatch Claude Code and Codex already use. No client
+gets special-cased code — the same OAuth/MCP surface serves all of them
+identically.
 
 ```sh
 pip install 'sako-brain[remote-gateway]'
@@ -316,8 +324,46 @@ Three scopes (`brain.read`, `brain.write`, `brain.restricted`), a human
 consent screen for every new client, and a one-command kill-switch
 (`brain remote-gateway revoke-all`) that cuts off every remote web AI
 connection without touching Claude Code, Codex, or any local client. Full
-architecture, security model, deployment guidance, and ChatGPT/Claude.ai
-connection steps: [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
+architecture, security model, deployment guidance, and client connection
+steps: [docs/REMOTE_ACCESS.md](docs/REMOTE_ACCESS.md).
+
+## Multi-user: private and shared knowledge
+
+Optional, opt-in, and additive — a single-user vault needs none of this.
+Enable it and one canonical Brain can serve several people, each with
+their own private records and deliberately shared ones, without separate
+vaults, separate indexes, or separate installations:
+
+- **Principals and groups.** `brain principal create` / `brain group
+  create` register who can act, and which groups decide who may see a
+  shared record. Local-CLI-only by construction — never reachable over
+  the remote gateway or the SSH dispatcher, for any role, admin
+  included.
+- **Private and shared logical spaces.** Every record carries
+  `owner_principal` / `audience` in its own frontmatter — read live off
+  the file itself, never trusted from a cached index. A record's owner
+  may modify it; audience membership grants read only, never edit —
+  there is no separate editors/grants subsystem. New records default to
+  private; sharing is always an explicit, visible choice.
+- **Role policy.** A minimal, generic capability layer — not
+  hardcoded role names, deployment configuration keyed by whatever
+  string is in a principal's own `role` field: whether that role may
+  write `sensitivity: restricted` content at all, and which audience
+  targets it may share its own records with. **Fails closed**: a role
+  that can't resolve a valid policy (typo, deleted record, deployment
+  drift) never silently becomes permissive — the strictest point in the
+  whole capability space, not the most permissive one.
+- **Admin carries no silent bypass.** An admin principal's own ordinary
+  reads and writes still go through the exact same ownership/audience
+  checks as everyone else's; admin status only gates two operational
+  tools (`brain doctor`, `brain state`). Recovery from a locked-out
+  state is a separate, explicit, audited break-glass path — never an
+  implicit side effect of being admin.
+- **Provenance and audit.** Every write logs who (principal), how (CLI,
+  MCP, remote gateway), and through which transport — append-only, on
+  disk, outside the vault. Nothing is silently attributed to a default
+  identity. (A dedicated `brain` command to query it is not shipped yet
+  — see Roadmap.)
 
 ## Optional features
 
@@ -367,8 +413,13 @@ at whichever one fits, in its own config.
 ## Roadmap
 
 Not implemented, and not promised for any date: editor- and agent-specific
-rule packs beyond `AGENTS.md`, macOS verification, and PyPI distribution.
-Everything else described above this section exists today.
+rule packs beyond `AGENTS.md`, macOS verification, PyPI distribution, a
+`brain` command to query the audit log (it is written, just not yet
+readable without direct file access), self-service credential rotation
+for a non-admin remote-gateway principal (today only an admin with local
+access can set one), and passkey/WebAuthn login for the remote gateway
+(password-only today). Everything else described above this section
+exists today.
 
 ## Contributing
 

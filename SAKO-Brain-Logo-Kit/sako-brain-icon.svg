@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 768 768"
+   version="1.1"
+   id="svg7"
+   sodipodi:docname="sako-brain-icon.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs7" />
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="0.69401042"
+     inkscape:cx="41.786116"
+     inkscape:cy="400.57036"
+     inkscape:window-width="2133"
+     inkscape:window-height="1275"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg7" />
+  <title
+     id="title1">SAKO Brain icon</title>
+  <g
+     id="g1"
+     transform="translate(-266,-111)">
+    <path
+       id="path16"
+       style="fill:#087ee0;fill-opacity:1;stroke-linejoin:round"
+       d="M 653.94414,569.63407 776.2168,640.25 c 12,8.66667 11.66667,17 -1,25 l -98,55 c -10,6 -20,6.66667 -30,2 L 514.05273,641.4707 c 0.3096,2.83256 0.46478,5.67987 0.46485,8.5293 -2e-5,38.23645 -27.54369,70.91328 -65.22852,77.38477 L 639.2168,824.25 c 15.33333,8.66667 31,9 47,1 l 206,-108 c 14,-9.33333 21,-22.33333 21,-39 v -73 c 0,-18 -8,-31.66667 -24,-41 L 717.48562,475.35116 c 13.63876,47.22885 -18.17154,91.80573 -63.54148,94.28291 z"
+       sodipodi:nodetypes="cccccccccccssccc" />
+    <path
+       d="M 438,652 650,495"
+       stroke="#087ee0"
+       stroke-width="43"
+       id="path3-2"
+       style="stroke-linejoin:round" />
+    <path
+       d="M 721.5058,431.51909 853.36382,331.25038"
+       stroke="#00a8ad"
+       stroke-width="43"
+       id="path4-7"
+       style="stroke-linecap:round;stroke-linejoin:round"
+       sodipodi:nodetypes="cc" />
+    <path
+       id="circle4-0"
+       style="fill:#00a8ad;stroke-linejoin:round"
+       d="m 911.36382,331.25038 a 58,58 0 0 1 -58,58 58,58 0 0 1 -58,-58 58,58 0 0 1 58,-58 58,58 0 0 1 58,58 z" />
+    <path
+       id="circle6-9"
+       style="fill:#087ee0;stroke-linejoin:round"
+       d="m 501,652 a 63,63 0 0 1 -63,63 63,63 0 0 1 -63,-63 63,63 0 0 1 63,-63 63,63 0 0 1 63,63 z" />
+    <path
+       id="circle6-6"
+       style="fill:#087ee0;stroke-linejoin:round"
+       d="m 707,495 a 63,63 0 0 1 -63,63 63,63 0 0 1 -63,-63 63,63 0 0 1 63,-63 63,63 0 0 1 63,63 z" />
+    <path
+       id="path18"
+       style="fill:#00a8ad;fill-opacity:1;stroke-linejoin:round"
+       d="M 624.94073,419.15548 513.64064,347.54205 c -12,-8.66667 -11.66667,-17 1,-25 l 98,-55 c 10,-6 20,-6.66667 30,-2 l 137.90222,72.79925 c -3.76973,-34.48967 13.13144,-69.88106 60.02552,-77.93402 L 650.64064,163.54205 c -15.33333,-8.66667 -31,-9 -47,-1 l -206,108 c -14,9.33333 -21,22.33333 -21,39 v 73 c 0,18 8,31.66667 24,41 l 168.73867,78.6744 c -5.98319,-33.97578 13.51941,-70.32497 55.56142,-83.06097 z"
+       sodipodi:nodetypes="ccccccccccssccc" />
+  </g>
+</svg>
