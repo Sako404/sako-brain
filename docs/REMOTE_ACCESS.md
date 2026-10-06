@@ -186,6 +186,36 @@ a firewall, it must be reachable from the public internet (again, a
 tunnel is the simplest way to achieve this without a new inbound rule).
 Claude completes the OAuth flow the same way ChatGPT does.
 
+## Connecting a local agent (e.g. Hermes Agent)
+
+A local agent runtime that supports remote HTTP MCP servers with OAuth
+(register → authorize → PKCE → token, same flow as ChatGPT/Claude.ai
+above) can connect the same way — point it at `https://your-hostname/mcp`
+with `auth: oauth` (the exact config key depends on the agent; Hermes
+Agent's is `mcp_servers.<name>.auth: oauth` in its own config). On a
+machine with a real display, the agent opens a local browser tab for the
+owner-login/consent screens, same as the web clients. On a genuinely
+headless/remote agent host, use that agent's own documented workaround
+for the OAuth loopback-redirect problem (SSH port-forward, or whatever
+front door it offers) — this gateway's own OAuth implementation is
+unchanged either way; it has no special case for any particular client.
+
+Give the agent its own distinct OAuth client registration rather than
+reusing one meant for a different tool — set a per-server `client_name`
+if the agent's config supports one, so `brain remote-gateway list-clients`
+can tell it apart later. This gateway does not currently distinguish
+individual gateway-connected clients in `brain doctor`'s audit log beyond
+the shared `client=remote-gateway-read/write` SSH-transport identity —
+every gateway client's writes attribute to the same dispatcher identity
+there today; `oauth_clients.client_name` is the per-client distinction
+available right now (`brain remote-gateway list-clients`).
+
+Keep the agent's own memory/state separate from this Brain's canonical
+one: query this gateway's MCP tools for anything durable or current
+rather than letting the agent's local memory answer from a stale local
+copy, and make sure the agent fails closed (reports unavailability,
+never answers from stale local state) if this gateway is unreachable.
+
 ## Revocation
 
 ```sh
