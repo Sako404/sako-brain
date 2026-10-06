@@ -367,7 +367,7 @@ class Test26AdminRoleGrantsNoContentBypass(SecurityAcceptanceTestCase):
     def test_admin_principal_cannot_read_a_private_record_they_do_not_own(self):
         identity.create_principal(self.config, display_name="Marcin", role="admin",
                                    principal_id="principal-marcin")
-        identity.create_principal(self.config, display_name="Ania", role="adult",
+        identity.create_principal(self.config, display_name="Ania", role="",
                                    principal_id="principal-ania")
         self.vault.write_note("60_KNOWLEDGE", "secret.md", id="knowledge-secret",
                                type="knowledge", title="Ania's private note",

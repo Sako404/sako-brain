@@ -22,7 +22,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from brain import cli, identity, rolepolicy
+from brain import cli, identity, rolepolicy, writepolicy
 from tests.helpers import TempVault
 
 
@@ -108,18 +108,18 @@ class TestRolePolicyStorage(RolePolicyTestCase):
             rolepolicy.set_role_policy(self.config, role="adult", audience_allowlist=["not-a-valid-ref"])
 
     def test_policy_for_principal_follows_live_role(self):
+        rolepolicy.set_role_policy(self.config, role="standard_child", can_write_restricted=False)
         identity.create_principal(self.config, display_name="Wiktor", role="standard_child",
                                    principal_id="principal-wiktor")
-        rolepolicy.set_role_policy(self.config, role="standard_child", can_write_restricted=False)
         p = rolepolicy.policy_for_principal(self.config, "principal-wiktor")
         self.assertFalse(p.can_write_restricted)
 
     def test_policy_for_principal_is_read_live_not_cached(self):
         """Same discipline as identity.is_active()/visibility.py: a stale
         answer here could broaden access."""
+        rolepolicy.set_role_policy(self.config, role="standard_child", can_write_restricted=True)
         identity.create_principal(self.config, display_name="Wiktor", role="standard_child",
                                    principal_id="principal-wiktor")
-        rolepolicy.set_role_policy(self.config, role="standard_child", can_write_restricted=True)
         self.assertTrue(rolepolicy.policy_for_principal(self.config, "principal-wiktor").can_write_restricted)
         rolepolicy.set_role_policy(self.config, role="standard_child", can_write_restricted=False)
         self.assertFalse(rolepolicy.policy_for_principal(self.config, "principal-wiktor").can_write_restricted)
@@ -229,6 +229,18 @@ class TestAdversarialFamilyScenario(RolePolicyTestCase):
 
     def setUp(self):
         super().setUp()
+        # Pre-onboarding hardening, round 2: role policies must exist
+        # BEFORE a principal with that role can become active -- this is
+        # the real safe creation order, not just test setup convenience.
+        # admin gets no explicit policy -- DEFAULT_POLICY already matches
+        # "normal read/write of own + audience-visible records".
+        rolepolicy.set_role_policy(self.config, role="adult", can_write_restricted=True,
+                                    audience_allowlist=None)
+        rolepolicy.set_role_policy(self.config, role="standard_child", can_write_restricted=False,
+                                    audience_allowlist=["group:household"])
+        rolepolicy.set_role_policy(self.config, role="restricted_child", can_write_restricted=False,
+                                    audience_allowlist=[])
+
         identity.create_principal(self.config, display_name="Marcin", role="admin",
                                    principal_id="principal-marcin")
         identity.create_principal(self.config, display_name="Ania", role="adult",
@@ -243,15 +255,6 @@ class TestAdversarialFamilyScenario(RolePolicyTestCase):
             identity.add_group_member(self.config, "group-household", pid)
         identity.add_group_member(self.config, "group-parents", "principal-marcin")
         identity.add_group_member(self.config, "group-parents", "principal-ania")
-
-        # admin gets no explicit policy -- DEFAULT_POLICY already matches
-        # "normal read/write of own + audience-visible records".
-        rolepolicy.set_role_policy(self.config, role="adult", can_write_restricted=True,
-                                    audience_allowlist=None)
-        rolepolicy.set_role_policy(self.config, role="standard_child", can_write_restricted=False,
-                                    audience_allowlist=["group:household"])
-        rolepolicy.set_role_policy(self.config, role="restricted_child", can_write_restricted=False,
-                                    audience_allowlist=[])
 
     def test_admin_needs_no_explicit_policy_to_write_normally(self):
         rc, out = run_cli(["note", "create", "--type", "knowledge", "--title", "Marcin's note"],
@@ -362,6 +365,189 @@ class TestAdversarialFamilyScenario(RolePolicyTestCase):
         self.assertEqual(rc, 0)
         self.assertIn("principal-marcel", identity.get_group(self.config, "group-household").members)
         self.assertIn("principal-wiktor", identity.get_group(self.config, "group-household").members)
+
+
+class TestFailClosedOnMissingRolePolicy(RolePolicyTestCase):
+    """Pre-onboarding hardening, round 2 (2026-10-02) -- Marcin's own
+    explicit, named security requirement: a role that fails to resolve a
+    policy (typo, deletion, malformed record, deployment drift) must NEVER
+    silently become permissive. DEFAULT_POLICY existing at all must never
+    be reachable by a real, active, non-admin principal whose role simply
+    doesn't resolve -- only FAIL_CLOSED_POLICY may be reached that way."""
+
+    def test_unknown_role_name_fails_closed_at_creation(self):
+        """A typo'd/never-configured role has no policy -- creation itself
+        must refuse, not silently create an active, unrestricted principal."""
+        with self.assertRaises(identity.IdentityError):
+            identity.create_principal(self.config, display_name="Marcel", role="restricted_chld",
+                                       principal_id="principal-marcel")
+        self.assertIsNone(identity.get_principal(self.config, "principal-marcel"))
+
+    def test_typo_in_role_name_is_not_silently_treated_as_the_real_role(self):
+        """The typo'd role and the real role are NOT the same string --
+        configuring 'restricted_child' must not rescue 'restricted_chid'."""
+        rolepolicy.set_role_policy(self.config, role="restricted_child", can_write_restricted=False,
+                                    audience_allowlist=[])
+        with self.assertRaises(identity.IdentityError):
+            identity.create_principal(self.config, display_name="Marcel", role="restricted_chid",
+                                       principal_id="principal-marcel")
+
+    def test_deleted_role_policy_fails_closed_for_already_active_principal(self):
+        """The critical drift scenario: a principal was validly activated,
+        then its role's policy is deleted later (deployment drift, admin
+        mistake). The next request must fail closed immediately -- never
+        wait for a re-login or re-activation to notice."""
+        rolepolicy.set_role_policy(self.config, role="restricted_child", can_write_restricted=False,
+                                    audience_allowlist=["group:parents"])
+        identity.create_principal(self.config, display_name="Marcel", role="restricted_child",
+                                   principal_id="principal-marcel")
+        self.assertTrue(rolepolicy.policy_for_principal(self.config, "principal-marcel").audience_allowlist)
+
+        rolepolicy.delete_role_policy(self.config, "restricted_child")
+
+        policy = rolepolicy.policy_for_principal(self.config, "principal-marcel")
+        self.assertEqual(policy, rolepolicy.FAIL_CLOSED_POLICY)
+        self.assertFalse(policy.can_write_restricted)
+        self.assertEqual(policy.audience_allowlist, [])
+
+    def test_malformed_role_policy_fails_closed_not_default(self):
+        """A policy record that exists but is corrupted (a bad ref in its
+        own stored audience_allowlist) must resolve as 'no valid policy',
+        never fall through to the permissive default."""
+        rolepolicy.set_role_policy(self.config, role="standard_child", can_write_restricted=False,
+                                    audience_allowlist=["group:household"])
+        identity.create_principal(self.config, display_name="Wiktor", role="standard_child",
+                                   principal_id="principal-wiktor")
+
+        # Corrupt the stored policy record directly, bypassing set_role_policy's
+        # own validation -- simulates hand-edited or drifted-on-disk state.
+        path = rolepolicy._policy_path(self.config, "standard_child")
+        text = path.read_text(encoding="utf-8")
+        corrupted = text.replace("- group:household", "- not-a-valid-ref")
+        path.write_text(corrupted, encoding="utf-8")
+
+        policy = rolepolicy.policy_for_principal(self.config, "principal-wiktor")
+        self.assertEqual(policy, rolepolicy.FAIL_CLOSED_POLICY)
+
+    def test_policy_disappearing_after_credential_issuance_is_caught_live(self):
+        """Simulates: principal activated + gateway credential issued while
+        a valid policy existed, then the policy vanishes. The principal's
+        identity/credential still exist (a token could still be valid) --
+        only the POLICY-CONTROLLED capabilities must fail closed, checked
+        live on every call, never cached from whenever the token/session
+        was created."""
+        rolepolicy.set_role_policy(self.config, role="adult", can_write_restricted=True,
+                                    audience_allowlist=None)
+        identity.create_principal(self.config, display_name="Ania", role="adult",
+                                   principal_id="principal-ania")
+        # "Credential issuance" is simulated by nothing more than time
+        # passing with the principal active -- policy_for_principal has no
+        # notion of a session/token at all, so there is nothing to refresh;
+        # this test proves exactly that it is never cached.
+        self.assertTrue(rolepolicy.policy_for_principal(self.config, "principal-ania").can_write_restricted)
+
+        rolepolicy.delete_role_policy(self.config, "adult")
+
+        with self.assertRaises(rolepolicy.RolePolicyError):
+            writepolicy.require_restricted_confirmation(self.config, "principal-ania", "restricted", True)
+        with self.assertRaises(rolepolicy.RolePolicyError):
+            rolepolicy.require_audience_allowed(self.config, "principal-ania", ["group:anyone"])
+
+    def test_existing_active_token_cannot_exploit_missing_policy(self):
+        """Reframed from the OAuth/token layer into what this module can
+        actually prove directly: nothing about a principal being "already
+        in a session" changes policy_for_principal's answer -- there is no
+        session-scoped cache anywhere in this path for a stale token to
+        exploit. Calling it twice in a row, simulating two requests on the
+        same already-issued token, gives the same fail-closed answer both
+        times once the policy is gone -- not permissive on a first 'cached'
+        call and strict only later."""
+        rolepolicy.set_role_policy(self.config, role="standard_child", can_write_restricted=False,
+                                    audience_allowlist=["group:household"])
+        identity.create_principal(self.config, display_name="Wiktor", role="standard_child",
+                                   principal_id="principal-wiktor")
+        rolepolicy.delete_role_policy(self.config, "standard_child")
+
+        first = rolepolicy.policy_for_principal(self.config, "principal-wiktor")
+        second = rolepolicy.policy_for_principal(self.config, "principal-wiktor")
+        self.assertEqual(first, rolepolicy.FAIL_CLOSED_POLICY)
+        self.assertEqual(second, rolepolicy.FAIL_CLOSED_POLICY)
+
+    def test_restricted_child_can_never_become_more_permissive_than_fail_closed(self):
+        """However restricted_child's policy fails to resolve (missing,
+        deleted, malformed, typo'd), the result can never grant MORE than
+        FAIL_CLOSED_POLICY already grants -- i.e. restricted_child can
+        never end up more permissive purely because its policy vanished."""
+        identity.create_principal(self.config, display_name="X", role="",
+                                   principal_id="principal-x")
+        # No role assigned at all yet -- give it the real restricted_child
+        # role only once a (deliberately broken) policy situation exists.
+        rolepolicy.set_role_policy(self.config, role="restricted_child", can_write_restricted=False,
+                                    audience_allowlist=["group:parents"])
+        identity.set_principal_role(self.config, "principal-x", "restricted_child")
+        rolepolicy.delete_role_policy(self.config, "restricted_child")
+
+        policy = rolepolicy.policy_for_principal(self.config, "principal-x")
+        # FAIL_CLOSED_POLICY is the strictest point in the whole space --
+        # nothing else to compare against except itself.
+        self.assertFalse(policy.can_write_restricted)
+        self.assertEqual(policy.audience_allowlist, [])
+        self.assertEqual(policy, rolepolicy.FAIL_CLOSED_POLICY)
+
+    def test_inactive_principal_with_unresolvable_role_also_fails_closed(self):
+        """A disabled principal is already denied everything by
+        identity.is_active() elsewhere -- this is defense in depth, not
+        the primary gate, but it must still never answer permissively."""
+        rolepolicy.set_role_policy(self.config, role="standard_child", audience_allowlist=["group:household"])
+        identity.create_principal(self.config, display_name="Wiktor", role="standard_child",
+                                   principal_id="principal-wiktor")
+        identity.set_principal_status(self.config, "principal-wiktor", "disabled")
+        rolepolicy.delete_role_policy(self.config, "standard_child")
+
+        policy = rolepolicy.policy_for_principal(self.config, "principal-wiktor")
+        self.assertEqual(policy, rolepolicy.FAIL_CLOSED_POLICY)
+
+    def test_admin_role_stays_exempt_even_without_a_policy_record(self):
+        """Documents the one deliberate exemption explicitly: admin never
+        needs a role-policy record, matching validate.is_admin_principal's
+        own, separate admin gate."""
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        self.assertEqual(rolepolicy.policy_for_principal(self.config, "principal-marcin"),
+                          rolepolicy.DEFAULT_POLICY)
+
+    def test_empty_role_stays_exempt_as_the_pre_rollout_default(self):
+        identity.create_principal(self.config, display_name="Legacy", role="",
+                                   principal_id="principal-legacy")
+        self.assertEqual(rolepolicy.policy_for_principal(self.config, "principal-legacy"),
+                          rolepolicy.DEFAULT_POLICY)
+
+    def test_activation_of_a_disabled_principal_is_also_gated(self):
+        """The staged-creation path: create disabled, then activate later
+        -- activation itself must refuse if the role still has no policy
+        at that point, not just at creation time."""
+        identity.create_principal(self.config, display_name="Marcel", role="restricted_child",
+                                   principal_id="principal-marcel", status="disabled")
+        with self.assertRaises(identity.IdentityError):
+            identity.set_principal_status(self.config, "principal-marcel", "active")
+        self.assertEqual(identity.get_principal(self.config, "principal-marcel").status, "disabled")
+
+        rolepolicy.set_role_policy(self.config, role="restricted_child", can_write_restricted=False,
+                                    audience_allowlist=["group:parents"])
+        identity.set_principal_status(self.config, "principal-marcel", "active")
+        self.assertEqual(identity.get_principal(self.config, "principal-marcel").status, "active")
+
+    def test_set_role_on_an_already_active_principal_is_also_gated(self):
+        """A role CHANGE on an already-active principal must be checked
+        just as strictly as creation -- an admin fat-fingering a role
+        update must not leave an active principal with an unresolvable
+        role in between."""
+        rolepolicy.set_role_policy(self.config, role="adult", can_write_restricted=True)
+        identity.create_principal(self.config, display_name="Ania", role="adult",
+                                   principal_id="principal-ania")
+        with self.assertRaises(identity.IdentityError):
+            identity.set_principal_role(self.config, "principal-ania", "typo_role")
+        self.assertEqual(identity.get_principal(self.config, "principal-ania").role, "adult")
 
 
 if __name__ == "__main__":

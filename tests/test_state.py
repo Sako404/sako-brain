@@ -377,7 +377,7 @@ class TestOperationalStateAdminGate(unittest.TestCase):
     def test_non_admin_principal_gets_empty_envelope(self):
         identity.create_principal(self.config, display_name="Marcin", role="admin",
                                    principal_id="principal-marcin")
-        identity.create_principal(self.config, display_name="Ania", role="adult",
+        identity.create_principal(self.config, display_name="Ania", role="",
                                    principal_id="principal-ania")
         memoryqueue.add(self.config, candidate_fact="a private fact about ania")
         result = state.get_operational_state(self._as("principal-ania"))
@@ -390,7 +390,7 @@ class TestOperationalStateAdminGate(unittest.TestCase):
     def test_explicit_principal_id_argument_overrides_config(self):
         identity.create_principal(self.config, display_name="Marcin", role="admin",
                                    principal_id="principal-marcin")
-        identity.create_principal(self.config, display_name="Ania", role="adult",
+        identity.create_principal(self.config, display_name="Ania", role="",
                                    principal_id="principal-ania")
         result = state.get_operational_state(self.config, principal_id="principal-ania")
         self.assertIn("state", result.sources)

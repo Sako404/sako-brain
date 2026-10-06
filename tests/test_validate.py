@@ -328,7 +328,7 @@ class TestDoctorAdminGate(unittest.TestCase):
     def test_non_admin_principal_gets_generic_message_only(self):
         identity.create_principal(self.config, display_name="Marcin", role="admin",
                                    principal_id="principal-marcin")
-        identity.create_principal(self.config, display_name="Ania", role="adult",
+        identity.create_principal(self.config, display_name="Ania", role="",
                                    principal_id="principal-ania")
         problems = validate.run_all(self._as("principal-ania"))
         self.assertEqual(len(problems), 1)
@@ -416,7 +416,7 @@ class TestDispatcherDeploymentInfo(unittest.TestCase):
         )
         identity.create_principal(self.config, display_name="Marcin", role="admin",
                                    principal_id="principal-marcin")
-        identity.create_principal(self.config, display_name="Ania", role="adult",
+        identity.create_principal(self.config, display_name="Ania", role="",
                                    principal_id="principal-ania")
 
         admin_problems = validate.run_all(self._as("principal-marcin"))
