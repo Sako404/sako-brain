@@ -77,6 +77,27 @@ class RolePolicy:
 
 DEFAULT_POLICY = RolePolicy(can_write_restricted=True, audience_allowlist=None)
 
+# Pre-onboarding hardening, round 2 (2026-10-02): the fully-permissive
+# DEFAULT_POLICY above must NEVER be what a real, active, non-admin
+# principal silently falls back to when its role fails to resolve a
+# policy (typo, deleted policy, never configured, malformed record,
+# deployment drift) -- that would turn a configuration error into a
+# privilege expansion, exactly the failure Marcin named explicitly. This
+# is the strictest point in the whole capability space: no restricted
+# writes, no sharing beyond private. Resolving to this can therefore
+# never make any role MORE permissive than its own intended policy,
+# whatever that policy turns out to be.
+FAIL_CLOSED_POLICY = RolePolicy(can_write_restricted=False, audience_allowlist=[])
+
+# Roles exempt from needing an explicit policy record at all -- "admin"
+# because validate.is_admin_principal already grants it full capability
+# with no role-policy involvement whatsoever (same exemption, same
+# reasoning, see validate.py), and "" (no role assigned) because that is
+# every pre-Stage-1/pre-role-policy identity's own established default,
+# never a new restriction. Anything else -- including a typo that merely
+# LOOKS like one of these -- is a real role and must resolve a real policy.
+_EXEMPT_FROM_POLICY_REQUIREMENT = {"", "admin"}
+
 
 def _policies_dir(config: Config) -> Path:
     return config.brain_root / identity.IDENTITY_DIRNAME / POLICIES_SUBDIR
@@ -87,6 +108,11 @@ def _policy_path(config: Config, role: str) -> Path:
 
 
 def _policy_from_note(note: frontmatter.Note) -> RolePolicy:
+    """Raises visibility.VisibilityError on a malformed stored ref -- never
+    silently drops it. Both callers below decide what "malformed" means
+    for their own purpose (resolve_role_policy treats it as no-policy-at-
+    all/fail closed; get_role_policy, a display/admin convenience, treats
+    it as not-yet-configured)."""
     raw_allowlist = note.meta.get("audience_allowlist")
     if raw_allowlist is None:
         allowlist = None
@@ -98,6 +124,25 @@ def _policy_from_note(note: frontmatter.Note) -> RolePolicy:
         can_write_restricted=bool(note.meta.get("can_write_restricted", True)),
         audience_allowlist=allowlist,
     )
+
+
+def resolve_role_policy(config: Config, role: str) -> RolePolicy | None:
+    """The STRICT resolver: None means "no valid policy for this role at
+    all" (no record, unparseable record, or a malformed stored ref) --
+    never DEFAULT_POLICY. Used wherever the answer feeds a security
+    decision (policy_for_principal, principal activation). Never caches:
+    same live-read discipline as identity.is_active()/visibility.py, so a
+    policy deleted or corrupted after a credential was issued takes effect
+    on that principal's very next request, not just its next login."""
+    if not role:
+        return None
+    path = _policy_path(config, role)
+    if not path.exists():
+        return None
+    try:
+        return _policy_from_note(frontmatter.parse_file(path))
+    except (frontmatter.FrontmatterError, visibility.VisibilityError):
+        return None
 
 
 def set_role_policy(config: Config, *, role: str, can_write_restricted: bool = True,
@@ -135,19 +180,14 @@ def set_role_policy(config: Config, *, role: str, can_write_restricted: bool = T
 
 
 def get_role_policy(config: Config, role: str) -> RolePolicy:
-    """The fully-permissive DEFAULT_POLICY for an empty role or one with no
-    policy record yet — this is the Stage-2-compatibility default: a
-    principal nobody has restricted behaves exactly as before this module
-    existed."""
-    if not role:
-        return DEFAULT_POLICY
-    path = _policy_path(config, role)
-    if not path.exists():
-        return DEFAULT_POLICY
-    try:
-        return _policy_from_note(frontmatter.parse_file(path))
-    except frontmatter.FrontmatterError:
-        return DEFAULT_POLICY
+    """Display/admin convenience only (e.g. `brain role-policy show`) —
+    reports DEFAULT_POLICY for an empty role, a role with no policy record
+    yet, or a malformed one, so an admin inspecting a role always gets an
+    answer rather than an exception. NEVER call this for a security
+    decision — use resolve_role_policy (strict) via policy_for_principal,
+    which treats exactly the same three cases as fail-closed instead."""
+    resolved = resolve_role_policy(config, role)
+    return resolved if resolved is not None else DEFAULT_POLICY
 
 
 def list_role_policies(config: Config) -> list[tuple[str, RolePolicy]]:
@@ -178,11 +218,62 @@ def policy_for_principal(config: Config, principal_id: str) -> RolePolicy:
     """What policy actually governs this principal right now — reads the
     principal's live `role` field, then that role's live policy record.
     Never cached, same discipline as identity.is_active()/visibility.py's
-    own live-read rule: a stale answer here could broaden access."""
+    own live-read rule: a stale answer here could broaden access.
+
+    Fail-closed invariant (Marcin's own explicit security requirement,
+    2026-10-02): an active principal whose role is neither exempt ("",
+    "admin") nor resolves a real policy gets FAIL_CLOSED_POLICY, never
+    DEFAULT_POLICY. A typo, a deleted/malformed policy record, or
+    deployment drift must never silently become a privilege expansion.
+    An inactive principal gets the same fail-closed treatment — visibility
+    enforcement handles "disabled" at the read/write-ownership layer, but
+    nothing here should wait for that; defense in depth costs nothing.
+
+    The one true exemption from needing a principal record at all is the
+    same one validate.is_admin_principal already relies on: a vault with
+    NO principal records whatsoever hasn't bootstrapped multi-user yet,
+    so it stays fully permissive (this module existing must never, by
+    itself, break a single-user vault). A *specific* unknown id in an
+    already-populated vault (deleted principal, typo'd id) is a different
+    situation entirely and fails closed, exactly like is_admin_principal's
+    own split."""
     p = identity.get_principal(config, principal_id)
     if p is None:
+        return DEFAULT_POLICY if not identity.list_principals(config) else FAIL_CLOSED_POLICY
+    if not p.is_active:
+        return FAIL_CLOSED_POLICY
+    if p.role in _EXEMPT_FROM_POLICY_REQUIREMENT:
+        # "admin": same exemption as validate.is_admin_principal, which has
+        # never consulted a role-policy record either — principal-marcin's
+        # own backward-compatibility case is fully covered here, since
+        # production bootstraps marcin with role="admin" explicitly
+        # (10-setup-brain.sh); no separate legacy carve-out is needed.
+        # "": every pre-Stage-1/pre-role-policy identity's own established
+        # default — never a new restriction on a principal nobody has
+        # assigned a role to at all.
         return DEFAULT_POLICY
-    return get_role_policy(config, p.role)
+    resolved = resolve_role_policy(config, p.role)
+    return resolved if resolved is not None else FAIL_CLOSED_POLICY
+
+
+def require_valid_policy_for_activation(config: Config, role: str) -> None:
+    """The create-time/activation-time half of the fail-closed invariant —
+    policy_for_principal is the runtime half, covering drift that happens
+    AFTER activation (a policy deleted or corrupted later, which no check
+    made at creation time can see into the future to prevent). Called by
+    identity.create_principal (when creating directly as active) and
+    identity.set_principal_status (on every transition INTO status=active)
+    so there is no interval where an active, non-exempt-role principal
+    exists without a resolvable policy already in place. Raises
+    RolePolicyError -- callers in identity.py wrap it as IdentityError to
+    keep that module's own exception contract intact."""
+    if role in _EXEMPT_FROM_POLICY_REQUIREMENT:
+        return
+    if resolve_role_policy(config, role) is None:
+        raise RolePolicyError(
+            f"role '{role}' has no valid role policy -- create one first with "
+            f"'brain role-policy set {role} ...' before this principal can be active"
+        )
 
 
 def require_restricted_write_allowed(config: Config, principal_id: str, sensitivity: str) -> None:

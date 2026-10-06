@@ -103,10 +103,30 @@ def _principal_from_note(note: frontmatter.Note) -> Principal:
     )
 
 
+def _require_role_policy_ready(config: Config, role: str) -> None:
+    """Pre-onboarding hardening, round 2: refuses to let a principal become
+    active with a role that cannot resolve a real policy (typo, never
+    configured, deleted, malformed) — a configuration error must never
+    turn into a privilege expansion. Local import: rolepolicy.py depends
+    on this module (reads a principal's own `role`/`status`), so the
+    dependency only works this direction if this one call site imports it
+    lazily rather than at module level."""
+    from . import rolepolicy
+    try:
+        rolepolicy.require_valid_policy_for_activation(config, role)
+    except rolepolicy.RolePolicyError as exc:
+        raise IdentityError(str(exc)) from exc
+
+
 def create_principal(config: Config, *, display_name: str, kind: str = "human",
-                      role: str = "", principal_id: str | None = None) -> Principal:
+                      role: str = "", principal_id: str | None = None,
+                      status: str = "active") -> Principal:
     if kind not in VALID_KINDS:
         raise IdentityError(f"kind must be one of {VALID_KINDS}")
+    if status not in VALID_STATUSES:
+        raise IdentityError(f"status must be one of {VALID_STATUSES}")
+    if status == "active":
+        _require_role_policy_ready(config, role)
     pid = principal_id or f"principal-{slugify(display_name)}"
     path = _principal_path(config, pid)
     if path.exists():
@@ -114,7 +134,7 @@ def create_principal(config: Config, *, display_name: str, kind: str = "human",
     today = dt.date.today().isoformat()
     meta = {
         "id": pid, "type": "principal", "display_name": display_name,
-        "kind": kind, "status": "active", "role": role,
+        "kind": kind, "status": status, "role": role,
         "created": today, "updated": today,
     }
     note = frontmatter.Note(
@@ -157,6 +177,8 @@ def set_principal_status(config: Config, principal_id: str, status: str) -> Prin
     if not path.exists():
         raise IdentityError(f"no principal '{principal_id}'")
     note = frontmatter.parse_file(path)
+    if status == "active":
+        _require_role_policy_ready(config, str(note.meta.get("role", "")))
     note.meta["status"] = status
     note.meta["updated"] = dt.date.today().isoformat()
     path.write_text(frontmatter.render(note), encoding="utf-8")
@@ -169,6 +191,11 @@ def set_principal_role(config: Config, principal_id: str, role: str) -> Principa
     if not path.exists():
         raise IdentityError(f"no principal '{principal_id}'")
     note = frontmatter.parse_file(path)
+    # Only an ALREADY-active principal needs this gate here — a disabled
+    # one changing role is exactly the safe staging order (role before
+    # activation), already covered when it's later activated.
+    if str(note.meta.get("status", "")) == "active":
+        _require_role_policy_ready(config, role)
     note.meta["role"] = role
     note.meta["updated"] = dt.date.today().isoformat()
     path.write_text(frontmatter.render(note), encoding="utf-8")

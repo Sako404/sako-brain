@@ -65,16 +65,16 @@ class TestRequireRestrictedConfirmation(unittest.TestCase):
         # Pre-onboarding hardening: confirm_restricted=True answers "did you
         # mean to write restricted content", never "is this role allowed
         # to at all" — a role-level denial must still win.
+        rolepolicy.set_role_policy(self.config, role="restricted_child", can_write_restricted=False)
         identity.create_principal(self.config, display_name="Marcel", role="restricted_child",
                                    principal_id="principal-marcel")
-        rolepolicy.set_role_policy(self.config, role="restricted_child", can_write_restricted=False)
         with self.assertRaises(rolepolicy.RolePolicyError):
             writepolicy.require_restricted_confirmation(self.config, "principal-marcel", "restricted", True)
 
     def test_role_policy_allows_when_permitted(self):
+        rolepolicy.set_role_policy(self.config, role="adult", can_write_restricted=True)
         identity.create_principal(self.config, display_name="Ania", role="adult",
                                    principal_id="principal-ania")
-        rolepolicy.set_role_policy(self.config, role="adult", can_write_restricted=True)
         writepolicy.require_restricted_confirmation(self.config, "principal-ania", "restricted", True)
 
 

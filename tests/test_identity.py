@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import unittest
 
-from brain import identity, search
+from brain import identity, rolepolicy, search
 from brain.indexer import rebuild
 from tests.helpers import TempVault
 
@@ -67,6 +67,8 @@ class TestPrincipalLifecycle(IdentityTestCase):
         self.assertFalse(identity.is_active(self.config, "principal-does-not-exist"))
 
     def test_set_role_updates_role(self):
+        rolepolicy.set_role_policy(self.config, role="standard_child")
+        rolepolicy.set_role_policy(self.config, role="restricted_child")
         identity.create_principal(self.config, display_name="Wiktor", role="standard_child")
         identity.set_principal_role(self.config, "principal-wiktor", "restricted_child")
         self.assertEqual(identity.get_principal(self.config, "principal-wiktor").role, "restricted_child")
@@ -124,7 +126,7 @@ class TestGroupLifecycle(IdentityTestCase):
 
 class TestDeletePrincipal(IdentityTestCase):
     def test_deletes_an_unreferenced_principal(self):
-        identity.create_principal(self.config, display_name="Throwaway Test", kind="service", role="test")
+        identity.create_principal(self.config, display_name="Throwaway Test", kind="service", role="")
         identity.delete_principal(self.config, "principal-throwaway-test")
         self.assertIsNone(identity.get_principal(self.config, "principal-throwaway-test"))
 
@@ -168,6 +170,7 @@ class TestBreakGlass(IdentityTestCase):
         self.assertEqual(p.role, "admin")
 
     def test_does_not_touch_other_principals_or_groups(self):
+        rolepolicy.set_role_policy(self.config, role="adult")
         identity.create_principal(self.config, display_name="Marcin", role="admin")
         identity.create_principal(self.config, display_name="Ania", role="adult")
         identity.create_group(self.config, display_name="Household")

@@ -420,7 +420,8 @@ def cmd_principal_create(config: Config, args) -> int:
     writepolicy.scan_for_secrets(args.display_name)
     try:
         p = identity.create_principal(config, display_name=args.display_name,
-                                       kind=args.kind, role=args.role or "")
+                                       kind=args.kind, role=args.role or "",
+                                       status=getattr(args, "status", "active"))
     except identity.IdentityError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -1561,6 +1562,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_principal_create.add_argument("--kind", default="human", choices=list(identity.VALID_KINDS))
     p_principal_create.add_argument("--role", default="", help="A deployment-defined role id "
                                      "(e.g. 'admin', 'adult') — the engine does not enumerate these")
+    p_principal_create.add_argument("--status", default="active", choices=list(identity.VALID_STATUSES),
+                                     help="'disabled' creates a non-login-capable principal, for the "
+                                          "safe staging order: create disabled -> assign role -> ensure "
+                                          "role policy exists -> set up groups -> activate -> only then "
+                                          "set a gateway credential")
     p_principal_create.add_argument("--json", action="store_true")
 
     p_principal_list = principal_sub.add_parser("list", help="List every principal")
