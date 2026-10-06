@@ -198,6 +198,21 @@ class AuthorizationServer:
         return self._issue_tokens(client_id, row["principal_id"], granted, row["resource"])
 
     def _issue_tokens(self, client_id: str, principal_id: str, scope: list[str], resource: str) -> dict:
+        # Pre-onboarding hardening, P1 (2026-10-06): a usable token must
+        # NEVER be issued with no principal bound, in multi-user mode or
+        # otherwise — the permanent guard behind a real production
+        # incident where a pre-Stage-1 refresh_token kept rotating an
+        # empty principal_id forward indefinitely (storage.py's
+        # _migrate_legacy_tokens is the one-time cure for rows that
+        # already exist; this is what stops it from ever being reachable
+        # again, from exchange_code, refresh, or any future grant type).
+        # Every legitimate caller of this function already has a real
+        # principal_id by construction (session-authenticated at login,
+        # or carried forward from an already-valid row) — this should
+        # never actually fire; it exists so a gap like this one fails
+        # loudly instead of silently shipping a useless token.
+        if not principal_id:
+            raise OAuthError("server_error", "no principal bound to this grant — cannot issue a token", status=500)
         access_token = secrets.token_urlsafe(32)
         refresh_token = secrets.token_urlsafe(32)
         self.storage.save_token(
@@ -239,6 +254,15 @@ class AuthorizationServer:
         # same-process "is active" flag here would only be a cache this
         # gateway cannot keep honestly fresh — see storage.py's SCHEMA
         # comment on the same point.
+        if not row["principal_id"]:
+            # Defense in depth, P1 (2026-10-06): _issue_tokens already
+            # refuses to create a token like this going forward, and
+            # storage.py's migration backfills every row that already
+            # existed — this should be unreachable. If it ever is anyway
+            # (a future bug, a hand-edited row), fail closed here rather
+            # than handing mcp_transport a token nothing can meaningfully
+            # act as.
+            raise OAuthError("invalid_token", "token has no principal bound", status=401)
         self.storage.touch_token(access_token)
         return TokenInfo(client_id=row["client_id"], principal_id=row["principal_id"],
                           scope=frozenset(row["scope"].split()), resource=row["resource"])

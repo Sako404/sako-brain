@@ -510,9 +510,15 @@ class TestOpeningARealPreStage1DatabaseDoesNotCrash(unittest.TestCase):
         self.assertEqual(client["client_name"], "ChatGPT")
         token = storage.get_token("real-access-token")
         self.assertIsNotNone(token)
-        # Pre-existing tokens predate principal binding — the migrated
-        # column defaults to '', never crashes a caller that reads it.
-        self.assertEqual(token["principal_id"], "")
+        # Pre-onboarding hardening, P1 (2026-10-06): the migrated column
+        # no longer surfaces '' at all -- a real production incident
+        # showed an empty principal_id surviving indefinitely through
+        # refresh-token rotation, invisible until Stage 2's dispatcher
+        # delegation started requiring a real one. _migrate_legacy_tokens
+        # backfills it the same way the legacy owner password already is
+        # (every pre-Stage-1 identity has always implicitly been
+        # principal-marcin).
+        self.assertEqual(token["principal_id"], "principal-marcin")
 
     def test_owner_password_still_migrates_on_a_fully_populated_database(self):
         storage = Storage(self.db_path)
@@ -542,6 +548,80 @@ class TestOpeningARealPreStage1DatabaseDoesNotCrash(unittest.TestCase):
         self.addCleanup(storage2.close)
         cred = storage2.get_credential("principal-marcin")
         self.assertEqual(cred["password_hash"], "real-legacy-hash")
+
+
+class TestEmptyPrincipalCannotProduceAUsableToken(unittest.TestCase):
+    """Pre-onboarding hardening, P1 (2026-10-06): the real production
+    incident this guards against. Marcin's own long-lived ChatGPT/
+    Claude.ai refresh tokens predated Stage 1's principal_id column
+    entirely -- oauth.refresh() faithfully preserved that '' forward
+    through every rotation since, invisible until Stage 2's dispatcher
+    delegation started requiring a real one. Two layers: storage.py's
+    one-time migration backfills every row that already exists; these
+    tests prove that layer AND the permanent _issue_tokens/validate_token
+    guards that stop it from ever being reachable again, by any path."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.db_path = Path(self._tmp.name) / "legacy.db"
+        _build_full_legacy_schema_db(self.db_path)
+        self.storage = Storage(self.db_path)
+        self.addCleanup(self.storage.close)
+        self.server = oauth.AuthorizationServer(
+            self.storage, issuer="https://brain-mcp.example.invalid",
+            resource="https://mcp.sako.systems/mcp",
+        )
+
+    def test_migration_backfills_existing_empty_principal_rows(self):
+        token = self.storage.get_token("real-access-token")
+        self.assertEqual(token["principal_id"], "principal-marcin")
+
+    def test_legacy_refresh_token_now_refreshes_to_principal_marcin_without_any_db_edit(self):
+        """The actual production fix, proven directly: Marcin's existing
+        refresh_token (unchanged, never reissued) now produces a token
+        correctly bound to principal-marcin on its very next refresh --
+        no reconnect, no manual DB edit, no operator intervention."""
+        result = self.server.refresh(
+            refresh_token="real-refresh-token", client_id="real-chatgpt-client",
+            requested_scope=None,
+        )
+        info = self.server.validate_token(result["access_token"])
+        self.assertEqual(info.principal_id, "principal-marcin")
+
+    def test_issue_tokens_refuses_an_empty_principal(self):
+        with self.assertRaises(oauth.OAuthError):
+            self.server._issue_tokens("real-chatgpt-client", "", ["brain.read"], "https://mcp.sako.systems/mcp")
+
+    def test_exchange_code_refuses_a_code_hand_edited_to_an_empty_principal(self):
+        """Defense in depth for a path the migration cannot see into the
+        future: an authorization_codes row created some other way (a
+        bug, a hand edit) with an empty principal_id must never reach
+        token issuance either, not just the refresh path."""
+        self.storage.save_code(
+            code="forged-empty-principal-code", client_id="real-chatgpt-client", principal_id="",
+            redirect_uri="https://chatgpt.com/connector_platform_oauth_redirect",
+            code_challenge="x", code_challenge_method="plain",
+            scope="brain.read", resource="https://mcp.sako.systems/mcp", ttl_seconds=600,
+        )
+        with self.assertRaises(oauth.OAuthError):
+            self.server.exchange_code(
+                code="forged-empty-principal-code", client_id="real-chatgpt-client",
+                redirect_uri="https://chatgpt.com/connector_platform_oauth_redirect",
+                code_verifier="x",
+            )
+
+    def test_validate_token_refuses_a_token_hand_edited_to_an_empty_principal(self):
+        """Same defense in depth, at the resource-server side: even if a
+        token row somehow ends up with '' again later (this guard exists
+        specifically for the case nothing upstream caught it)."""
+        self.storage.save_token(
+            access_token="forged-empty-principal-token", refresh_token="forged-empty-principal-refresh",
+            client_id="real-chatgpt-client", principal_id="", scope="brain.read",
+            resource="https://mcp.sako.systems/mcp", access_ttl_seconds=3600, refresh_ttl_seconds=86400,
+        )
+        with self.assertRaises(oauth.OAuthError):
+            self.server.validate_token("forged-empty-principal-token")
 
 
 class TestRevocation(GatewayTestCase):
