@@ -5,6 +5,31 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.14.2 — 2026-10-02 — Fail-closed role policy
+
+Security fix requested after reviewing the v0.14.1 hardening report, before any real family credentials could be created. **No family access is activated by this release.**
+
+### Fixed
+
+- **Role policy now fails closed on resolution failure.** An active,
+  non-admin principal whose role could not resolve a policy (typo,
+  deleted policy record, malformed record, deployment drift) previously
+  fell back to the fully-permissive default — a configuration error could
+  silently become a privilege expansion. `policy_for_principal()` now
+  returns a strict `FAIL_CLOSED_POLICY` (no restricted writes, no sharing
+  beyond private) in every such case. The only remaining permissive
+  fallback is the same one `validate.is_admin_principal` already relies
+  on: a vault with zero principal records at all (never bootstrapped
+  multi-user).
+- **Creation/activation-time enforcement**: `brain principal create`
+  (new `--status` flag; default unchanged) and every transition into
+  `status=active` (`set-status`, `set-role`) now refuse outright when the
+  assigned role has no valid policy at that moment — closing the window
+  where a credential could exist before its authorization is valid.
+  Enables a safe staged creation order: create disabled → assign role →
+  configure its policy → set up groups → activate → only then issue a
+  gateway credential.
+
 ## 0.14.1 — 2026-10-02 — Pre-onboarding hardening: owner-only writes, status leak, dispatcher drift, role policy
 
 Hardening requested before any real family principal (`principal-ania`,
