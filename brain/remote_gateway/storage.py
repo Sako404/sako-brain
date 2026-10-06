@@ -157,6 +157,7 @@ class Storage:
         _ensure_column(self._conn, "authorization_codes", "principal_id", "TEXT NOT NULL DEFAULT ''")
         self._conn.execute(_PRINCIPAL_INDEX_DDL)
         self._migrate_legacy_owner()
+        self._migrate_legacy_tokens()
         self._conn.commit()
         paths_mod.ensure_private_file(self.db_path)
 
@@ -182,6 +183,31 @@ class Storage:
             "INSERT INTO credentials (principal_id, password_hash, salt, updated_at) VALUES (?, ?, ?, ?)",
             (LEGACY_OWNER_PRINCIPAL_ID, legacy["password_hash"], legacy["salt"], legacy["updated_at"]),
         )
+
+    def _migrate_legacy_tokens(self) -> None:
+        """One-time, idempotent: a real production incident (2026-10-06,
+        pre-onboarding hardening) traced to exactly this gap.
+        `_ensure_column`'s `DEFAULT ''` keeps a pre-Stage-1 `tokens`/
+        `authorization_codes` row from crashing the upgrade (see
+        TestOpeningARealPreStage1DatabaseDoesNotCrash), but '' is not a
+        real principal — every pre-Stage-1 identity has always implicitly
+        been principal-marcin (same convention as brain-dispatch.py's own
+        DEFAULT_PRINCIPAL and _migrate_legacy_owner above), so backfill it
+        the same way the legacy owner password already is. Without this,
+        a long-lived refresh_token issued before Stage 1 keeps rotating
+        forward through oauth.refresh() — which faithfully preserves
+        whatever principal_id the row already has — carrying an empty
+        principal_id indefinitely into brand-new token rows with today's
+        own timestamp, invisible until something downstream (Stage 2's
+        dispatcher-level delegation) started requiring a real one. This
+        is the one-time cure; _issue_tokens' own refusal (oauth.py) is the
+        permanent guard against this ever being reachable again by any
+        path, including ones that don't exist yet."""
+        for table in ("tokens", "authorization_codes"):
+            self._conn.execute(
+                f"UPDATE {table} SET principal_id = ? WHERE principal_id = ''",
+                (LEGACY_OWNER_PRINCIPAL_ID,),
+            )
 
     @contextmanager
     def _cursor(self):
