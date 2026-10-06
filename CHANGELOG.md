@@ -5,6 +5,27 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.14.3 — 2026-10-06 — P1: fix OAuth tokens surviving with an empty principal_id
+
+Fixes a real production issue found while onboarding real family principals: Marcin's own long-standing ChatGPT/Claude.ai connector tokens had an empty `principal_id`, causing gateway-delegation writes to fail. Root-caused end to end (see docs/decision record); not an architecture change.
+
+### Fixed
+
+- **`storage.py`**: new one-time `_migrate_legacy_tokens()` backfills any
+  existing `''` `principal_id` on `tokens`/`authorization_codes` to
+  `principal-marcin` — every pre-Stage-1 identity has always implicitly
+  been principal-marcin, same convention as the existing legacy
+  owner-password migration. Fixes already-issued refresh tokens with
+  zero reconnect needed.
+- **`oauth.py`**: `_issue_tokens()` now refuses outright to create a
+  token with no principal bound (covers both `exchange_code` and
+  `refresh`); `validate_token()` refuses to honor one that somehow has
+  no principal anyway. Permanent guards against this exact gap ever
+  being reachable again. `principal.status` enforcement is unchanged —
+  stays exclusively the dispatcher's job.
+- Documented connecting a local MCP-capable agent (e.g. Hermes Agent)
+  over Remote MCP, alongside the existing ChatGPT/Claude.ai sections.
+
 ## 0.14.2 — 2026-10-02 — Fail-closed role policy
 
 Security fix requested after reviewing the v0.14.1 hardening report, before any real family credentials could be created. **No family access is activated by this release.**
