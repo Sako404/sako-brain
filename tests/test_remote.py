@@ -187,21 +187,31 @@ class TestProxyToRemoteDelegation(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def _run_proxy(self, argv, *, acting_principal=None):
+    def _run_proxy(self, argv, *, acting_principal=None, acting_client_id=None,
+                   acting_client_name=None):
         captured = {}
 
         def fake_execvp(file, ssh_argv):
             captured["file"] = file
             captured["argv"] = ssh_argv
 
-        env_patch = ({remote.GATEWAY_ACTING_PRINCIPAL_ENV: acting_principal}
-                     if acting_principal else {})
+        env_patch = {}
+        if acting_principal:
+            env_patch[remote.GATEWAY_ACTING_PRINCIPAL_ENV] = acting_principal
+        if acting_client_id:
+            env_patch[remote.GATEWAY_ACTING_CLIENT_ID_ENV] = acting_client_id
+        if acting_client_name:
+            env_patch[remote.GATEWAY_ACTING_CLIENT_NAME_ENV] = acting_client_name
         with patch.object(remote, "load_client_config", return_value=self.cfg), \
              patch.object(Path, "is_file", return_value=True), \
              patch.object(os, "execvp", fake_execvp), \
              patch.dict(os.environ, env_patch, clear=False):
             if not acting_principal:
                 os.environ.pop(remote.GATEWAY_ACTING_PRINCIPAL_ENV, None)
+            if not acting_client_id:
+                os.environ.pop(remote.GATEWAY_ACTING_CLIENT_ID_ENV, None)
+            if not acting_client_name:
+                os.environ.pop(remote.GATEWAY_ACTING_CLIENT_NAME_ENV, None)
             remote.proxy_to_remote(argv)
         return captured
 
@@ -226,6 +236,33 @@ class TestProxyToRemoteDelegation(unittest.TestCase):
         # Delegation changes the asserted principal, never which SSH
         # identity (and therefore which --mode) this process connects as.
         self.assertIn(f"{remote.SLUG}-write", captured["argv"])
+
+    def test_acting_client_id_and_name_are_appended_to_the_delegation_prefix(self):
+        captured = self._run_proxy(
+            ["context", "widget"], acting_principal="principal-ania",
+            acting_client_id="oauth-client-hermes", acting_client_name="Hermes Desktop (Marcin)")
+        self.assertEqual(
+            self._remote_command(captured),
+            "--acting-principal principal-ania --acting-client-id oauth-client-hermes "
+            "--acting-client-name 'Hermes Desktop (Marcin)' -- context widget",
+        )
+
+    def test_acting_client_id_without_name_omits_the_name_flag(self):
+        captured = self._run_proxy(
+            ["status"], acting_principal="principal-ania", acting_client_id="oauth-client-hermes")
+        self.assertEqual(
+            self._remote_command(captured),
+            "--acting-principal principal-ania --acting-client-id oauth-client-hermes -- status",
+        )
+
+    def test_client_id_env_without_acting_principal_is_never_sent(self):
+        # GATEWAY_ACTING_CLIENT_ID_ENV alone (no principal) should never
+        # happen in practice — mcp_bridge.acting_as() always sets both
+        # from the same validated token — but if it somehow did, the
+        # plain command must still be sent, never a dangling client-id
+        # prefix with no principal.
+        captured = self._run_proxy(["status"], acting_client_id="oauth-client-orphan")
+        self.assertEqual(self._remote_command(captured), "status")
 
 
 if __name__ == "__main__":

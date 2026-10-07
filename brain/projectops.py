@@ -180,7 +180,7 @@ def create_project(config: Config, id: str, name: str, path: str, status: str = 
     })
     indexer.index_note(config, dest)
     audit.log_event(config, event="note.write", principal_id=config.acting_principal,
-                     client_id=config.caller_client, transport=config.caller_transport,
+                     **audit.caller_provenance(config),
                      detail=f"id={id}")
     return dest
 
@@ -212,7 +212,7 @@ def set_project_status(config: Config, project_id: str, new_status: str) -> Stat
     if not visibility.is_owner(config, principal_id, note.meta):
         current_owner, _ = visibility.owner_and_audience(note.meta)
         audit.log_event(config, event="note.write.denied", principal_id=principal_id,
-                         client_id=config.caller_client, transport=config.caller_transport,
+                         **audit.caller_provenance(config),
                          detail=f"id={project_id} owner={current_owner}")
         raise ProjectWriteError(
             f"only '{current_owner}' (this record's current owner) may change its status "
@@ -243,7 +243,7 @@ def set_project_status(config: Config, project_id: str, new_status: str) -> Stat
 
     indexer.index_note(config, new_path)
     audit.log_event(config, event="note.write", principal_id=config.acting_principal,
-                     client_id=config.caller_client, transport=config.caller_transport,
+                     **audit.caller_provenance(config),
                      detail=f"id={project_id} status={old_status}->{new_status}")
     return StatusChangeResult(
         id=project_id, old_status=old_status, new_status=new_status,
@@ -333,7 +333,7 @@ def update_section(config: Config, project_id: str, section: str, mode: str, con
     if not visibility.is_owner(config, principal_id, note.meta):
         current_owner, _ = visibility.owner_and_audience(note.meta)
         audit.log_event(config, event="note.write.denied", principal_id=principal_id,
-                         client_id=config.caller_client, transport=config.caller_transport,
+                         **audit.caller_provenance(config),
                          detail=f"id={project_id} owner={current_owner}")
         raise SectionEditError(
             f"only '{current_owner}' (this record's current owner) may edit its sections "
@@ -364,6 +364,6 @@ def update_section(config: Config, project_id: str, section: str, mode: str, con
     path.write_text(frontmatter.render(note), encoding="utf-8")
     indexer.index_note(config, path)
     audit.log_event(config, event="note.write", principal_id=config.acting_principal,
-                     client_id=config.caller_client, transport=config.caller_transport,
+                     **audit.caller_provenance(config),
                      detail=f"id={project_id} section={section}")
     return path

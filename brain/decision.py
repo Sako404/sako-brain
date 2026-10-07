@@ -47,7 +47,7 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
         if not visibility.is_owner(config, principal_id, old_note.meta):
             current_owner, _ = visibility.owner_and_audience(old_note.meta)
             audit.log_event(config, event="note.write.denied", principal_id=principal_id,
-                             client_id=config.caller_client, transport=config.caller_transport,
+                             **audit.caller_provenance(config),
                              detail=f"id={supersedes} owner={current_owner}")
             raise DecisionError(
                 f"only '{current_owner}' (the owner of '{supersedes}') may mark it superseded "
@@ -91,7 +91,7 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
 
     indexer.index_note(config, dest)
     audit.log_event(config, event="note.write", principal_id=config.acting_principal,
-                     client_id=config.caller_client, transport=config.caller_transport,
+                     **audit.caller_provenance(config),
                      detail=f"id={note_id}")
     return dest
 

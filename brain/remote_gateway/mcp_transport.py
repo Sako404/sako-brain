@@ -100,8 +100,8 @@ def handle_mcp_request(req: dict, granted_scopes: frozenset[str]) -> dict | None
     return response
 
 
-def handle_mcp_body(body: bytes, granted_scopes: frozenset[str],
-                     principal_id: str) -> tuple[dict | None, int, str | None]:
+def handle_mcp_body(body: bytes, granted_scopes: frozenset[str], principal_id: str,
+                     client_id: str = "", client_name: str = "") -> tuple[dict | None, int, str | None]:
     """Parses one Streamable-HTTP MCP POST body (a single JSON-RPC object;
     batching is not implemented — no current target client requires it)
     and returns (response_dict_or_None, http_status, missing_scope_str).
@@ -116,14 +116,19 @@ def handle_mcp_body(body: bytes, granted_scopes: frozenset[str],
     (app.py's `info.principal_id`, never anything else) — scopes every
     tool call this request makes to that principal via
     mcp_bridge.acting_as(), which the server-side dispatcher independently
-    re-validates before honoring."""
+    re-validates before honoring. `client_id`/`client_name` are the SAME
+    token's validated client_id (app.py's `info.client_id`) and a
+    server-side oauth_clients.client_name lookup — never anything read
+    from the request body — carried through purely as audit provenance
+    (Stage 2 remote-MCP per-client audit); neither is ever checked by any
+    scope/ACL path."""
     try:
         req = json_mod.loads(body)
     except json_mod.JSONDecodeError:
         return {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}}, 400, None
 
     try:
-        with mcp_bridge.acting_as(principal_id):
+        with mcp_bridge.acting_as(principal_id, client_id=client_id, client_name=client_name):
             result = handle_mcp_request(req, granted_scopes)
     except ScopeError as exc:
         missing_str = " ".join(sorted(exc.missing))

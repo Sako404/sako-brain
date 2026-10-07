@@ -225,6 +225,15 @@ def should_proxy(argv: list[str]) -> bool:
 # never what it's granted. See brain-dispatch.py's
 # resolve_effective_principal() for the actual trust boundary.
 GATEWAY_ACTING_PRINCIPAL_ENV = "BRAIN_GATEWAY_ACTING_PRINCIPAL"
+# Stage 2 remote-MCP per-client audit provenance: set alongside
+# GATEWAY_ACTING_PRINCIPAL_ENV, from the SAME validated OAuth token (see
+# mcp_bridge.acting_as()) — never independently, and never from anything
+# an MCP client's request body could supply. Carried through the SSH
+# delegation prefix the same way the acting principal already is; see
+# brain-dispatch.py's parse_delegated_command() for how the server side
+# parses and (for GATEWAY_DELEGATION_CLIENTS only) trusts them.
+GATEWAY_ACTING_CLIENT_ID_ENV = "BRAIN_GATEWAY_ACTING_CLIENT_ID"
+GATEWAY_ACTING_CLIENT_NAME_ENV = "BRAIN_GATEWAY_ACTING_CLIENT_NAME"
 
 
 def proxy_to_remote(argv: list[str]) -> int:
@@ -250,7 +259,17 @@ def proxy_to_remote(argv: list[str]) -> int:
     alias = _host_alias(is_write)
 
     acting_principal = os.environ.get(GATEWAY_ACTING_PRINCIPAL_ENV)
-    full_argv = ["--acting-principal", acting_principal, "--", *argv] if acting_principal else argv
+    if acting_principal:
+        prefix = ["--acting-principal", acting_principal]
+        acting_client_id = os.environ.get(GATEWAY_ACTING_CLIENT_ID_ENV)
+        if acting_client_id:
+            prefix += ["--acting-client-id", acting_client_id]
+        acting_client_name = os.environ.get(GATEWAY_ACTING_CLIENT_NAME_ENV)
+        if acting_client_name:
+            prefix += ["--acting-client-name", acting_client_name]
+        full_argv = [*prefix, "--", *argv]
+    else:
+        full_argv = argv
     remote_command = shlex.join(full_argv)
 
     ssh_argv = ["ssh", "-F", str(cfg_path), alias, "--", remote_command]

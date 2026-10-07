@@ -62,14 +62,16 @@ class GatewayTestCase(unittest.TestCase):
         self.client = self.app.test_client()
         self.addCleanup(self.storage.close)
 
-    def register_client(self, redirect_uri="https://client.example.invalid/callback"):
-        r = self.client.post("/register", json={"client_name": "Test Client", "redirect_uris": [redirect_uri]})
+    def register_client(self, redirect_uri="https://client.example.invalid/callback",
+                         client_name="Test Client"):
+        r = self.client.post("/register", json={"client_name": client_name, "redirect_uris": [redirect_uri]})
         self.assertEqual(r.status_code, 201, r.get_json())
         return r.get_json()
 
     def get_token(self, scope="brain.read brain.write brain.restricted", redirect_uri=None,
-                  principal=None) -> dict:
-        reg = self.register_client(redirect_uri or "https://client.example.invalid/callback")
+                  principal=None, client_name="Test Client") -> dict:
+        reg = self.register_client(redirect_uri or "https://client.example.invalid/callback",
+                                    client_name=client_name)
         redirect_uri = redirect_uri or "https://client.example.invalid/callback"
         verifier, challenge = _pkce_pair()
         params = dict(response_type="code", client_id=reg["client_id"], redirect_uri=redirect_uri,
@@ -84,7 +86,33 @@ class GatewayTestCase(unittest.TestCase):
                                                "client_id": reg["client_id"], "redirect_uri": redirect_uri,
                                                "code_verifier": verifier})
         self.assertEqual(r.status_code, 200, r.get_json())
-        return r.get_json()
+        result = r.get_json()
+        result["client_id"] = reg["client_id"]  # not in the OAuth response itself; for test convenience
+        return result
+
+    def _call_search_memory_capturing_env(self, *, principal: str, client_name="Test Client",
+                                           arguments=None, access_token=None) -> dict:
+        captured_env = {}
+
+        def fake_run(argv, **kwargs):
+            captured_env.update(kwargs.get("env") or {})
+
+            class FakeCompleted:
+                returncode = 0
+                stdout = "[]"
+                stderr = ""
+            return FakeCompleted()
+
+        if access_token is None:
+            tok = self.get_token(scope="brain.read", principal=principal, client_name=client_name)
+            access_token = tok["access_token"]
+
+        with patch("subprocess.run", side_effect=fake_run):
+            self.client.post(
+                "/mcp", headers={"Authorization": f"Bearer {access_token}"},
+                json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                      "params": {"name": "search_memory", "arguments": arguments or {"query": "x"}}})
+        return captured_env
 
 
 class TestOAuthDiscovery(GatewayTestCase):
@@ -1000,27 +1028,6 @@ class TestGatewayDelegatesActingPrincipal(GatewayTestCase):
         pw_hash, salt = owner_auth.hash_password(self.owner_password)
         self.storage.set_credential(self.SECOND_PRINCIPAL, pw_hash, salt)
 
-    def _call_search_memory_capturing_env(self, *, principal: str) -> dict:
-        from brain import remote as remote_mod
-
-        tok = self.get_token(scope="brain.read", principal=principal)
-        captured_env = {}
-
-        def fake_run(argv, **kwargs):
-            captured_env.update(kwargs.get("env") or {})
-
-            class FakeCompleted:
-                returncode = 0
-                stdout = "[]"
-                stderr = ""
-            return FakeCompleted()
-
-        with patch("subprocess.run", side_effect=fake_run):
-            self.client.post("/mcp", headers={"Authorization": f"Bearer {tok['access_token']}"},
-                              json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                                    "params": {"name": "search_memory", "arguments": {"query": "x"}}})
-        return captured_env
-
     def test_tool_call_env_carries_the_tokens_own_principal(self):
         from brain import remote as remote_mod
         env = self._call_search_memory_capturing_env(principal=self.PRINCIPAL)
@@ -1040,6 +1047,103 @@ class TestGatewayDelegatesActingPrincipal(GatewayTestCase):
         second = self._call_search_memory_capturing_env(principal=self.PRINCIPAL)
         self.assertEqual(first.get(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV), self.SECOND_PRINCIPAL)
         self.assertEqual(second.get(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV), self.PRINCIPAL)
+
+
+class TestGatewayCarriesOAuthClientProvenance(GatewayTestCase):
+    """Stage 2 remote-MCP per-client audit provenance — end-to-end through
+    the real HTTP/OAuth stack. Brain-core audit used to see every gateway
+    request as the SAME delegator identity (remote-gateway-read/write),
+    with no way to tell which actual OAuth client (ChatGPT, Claude.ai,
+    Hermes, ...) made a call for a given principal. This proves the
+    gateway now sends the token's own validated client_id/client_name
+    alongside the acting principal, that neither can be forged through
+    the MCP request body, and that every existing behavior (scope
+    enforcement, refresh, the plain non-delegated case) is unaffected."""
+
+    def _client_id_of(self, env: dict) -> str | None:
+        return env.get("BRAIN_GATEWAY_ACTING_CLIENT_ID")
+
+    def test_two_distinct_oauth_clients_for_the_same_principal_produce_distinct_client_ids(self):
+        hermes_env = self._call_search_memory_capturing_env(
+            principal=self.PRINCIPAL, client_name="Hermes Desktop (Marcin)")
+        chatgpt_env = self._call_search_memory_capturing_env(
+            principal=self.PRINCIPAL, client_name="ChatGPT")
+        self.assertIsNotNone(self._client_id_of(hermes_env))
+        self.assertIsNotNone(self._client_id_of(chatgpt_env))
+        self.assertNotEqual(self._client_id_of(hermes_env), self._client_id_of(chatgpt_env))
+
+    def test_client_name_is_carried_as_display_metadata_distinctly_per_client(self):
+        hermes_env = self._call_search_memory_capturing_env(
+            principal=self.PRINCIPAL, client_name="Hermes Desktop (Marcin)")
+        chatgpt_env = self._call_search_memory_capturing_env(
+            principal=self.PRINCIPAL, client_name="ChatGPT")
+        self.assertEqual(hermes_env.get("BRAIN_GATEWAY_ACTING_CLIENT_NAME"), "Hermes Desktop (Marcin)")
+        self.assertEqual(chatgpt_env.get("BRAIN_GATEWAY_ACTING_CLIENT_NAME"), "ChatGPT")
+
+    def test_principal_id_is_unaffected_by_which_oauth_client_called(self):
+        from brain import remote as remote_mod
+        hermes_env = self._call_search_memory_capturing_env(
+            principal=self.PRINCIPAL, client_name="Hermes Desktop (Marcin)")
+        chatgpt_env = self._call_search_memory_capturing_env(
+            principal=self.PRINCIPAL, client_name="ChatGPT")
+        self.assertEqual(hermes_env.get(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV), self.PRINCIPAL)
+        self.assertEqual(chatgpt_env.get(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV), self.PRINCIPAL)
+
+    def test_client_id_cannot_be_forged_via_mcp_tool_arguments(self):
+        # A malicious or confused client stuffing a 'client_id' into its
+        # own tools/call arguments must never override the validated
+        # token's own client_id — the gateway only ever reads client_id
+        # from oauth.validate_token()'s result, never from the request body.
+        tok = self.get_token(scope="brain.read", principal=self.PRINCIPAL, client_name="Real Client")
+        env = self._call_search_memory_capturing_env(
+            principal=self.PRINCIPAL, access_token=tok["access_token"],
+            arguments={"query": "x", "client_id": "forged-client-id", "principal_id": "principal-forged"})
+        self.assertEqual(self._client_id_of(env), tok["client_id"])
+        self.assertNotEqual(self._client_id_of(env), "forged-client-id")
+
+    def test_client_name_cannot_affect_authorization(self):
+        # A restricted-scope token must still be refused brain.write
+        # regardless of what display name the registering client chose —
+        # client_name is never an authorization input.
+        tok = self.get_token(scope="brain.read", principal=self.PRINCIPAL,
+                              client_name="Totally Trustworthy Admin Client")
+        r = self.client.post(
+            "/mcp", headers={"Authorization": f"Bearer {tok['access_token']}"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                  "params": {"name": "remember", "arguments": {"type": "fact", "title": "x"}}})
+        self.assertEqual(r.status_code, 403)
+
+    def test_missing_or_default_client_name_does_not_break_the_request(self):
+        env = self._call_search_memory_capturing_env(principal=self.PRINCIPAL, client_name="")
+        self.assertIsNotNone(self._client_id_of(env))
+
+    def test_token_refresh_preserves_client_id_provenance(self):
+        tok = self.get_token(scope="brain.read", principal=self.PRINCIPAL, client_name="Hermes")
+        original_client_id = None
+        env_before = self._call_search_memory_capturing_env(
+            principal=self.PRINCIPAL, access_token=tok["access_token"])
+        original_client_id = self._client_id_of(env_before)
+
+        r = self.client.post("/token", data={
+            "grant_type": "refresh_token", "refresh_token": tok["refresh_token"],
+            "client_id": tok["client_id"],
+        })
+        self.assertEqual(r.status_code, 200, r.get_json())
+        refreshed = r.get_json()
+
+        env_after = self._call_search_memory_capturing_env(
+            principal=self.PRINCIPAL, access_token=refreshed["access_token"])
+        self.assertEqual(self._client_id_of(env_after), original_client_id)
+
+    def test_local_non_gateway_style_call_carries_no_oauth_client_env(self):
+        # Sanity check at the mcp_bridge boundary directly: a call made
+        # without going through acting_as() at all (the desktop/Claude
+        # Code/Codex shape) must never see these new env vars either —
+        # covered fully in test_mcp_bridge.py, repeated here as a guard
+        # against this suite's own fixtures accidentally threading them.
+        from brain import mcp_bridge
+        env = mcp_bridge._clean_env()
+        self.assertNotIn("BRAIN_GATEWAY_ACTING_CLIENT_ID", env)
 
 
 if __name__ == "__main__":

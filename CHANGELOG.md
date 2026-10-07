@@ -5,6 +5,41 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.14.4 — 2026-10-07 — Remote-MCP per-client audit provenance
+
+Brain-core's audit log previously recorded every gateway-mediated request
+under the same delegator identity (`client=remote-gateway-read` or
+`-write`), regardless of which actual OAuth client (ChatGPT, Claude.ai,
+Hermes, ...) made the call. Principal-level ownership/ACL was never
+affected by this — it was a provenance/audit-quality gap only. Closes it
+with a narrow propagation fix, not a new auth system.
+
+### Added
+
+- The validated OAuth token's own `client_id` (and, when the client
+  registered one, its `client_name`) now travels from
+  `oauth.validate_token()` through the gateway's `/mcp` handler,
+  `mcp_bridge.acting_as()`, the SSH delegation prefix, and
+  `brain-dispatch.py` (in `sako-brain-tooling`), ending up as distinct
+  `client_id`/`client_name` fields in the Brain-core audit log —
+  alongside a new `delegator` field that preserves the SSH identity
+  (`remote-gateway-read`/`-write`) that actually connected, so neither
+  loses visibility to the other. `client_name` is never consulted for
+  authorization anywhere in this chain — display metadata only, looked up
+  server-side from the client's own DCR registration record, never taken
+  from the MCP request body.
+- `brain/audit.py`'s `caller_provenance()` helper centralizes this
+  fallback logic (real OAuth client_id when present, the connecting SSH
+  identity otherwise) so every write-audit call site gets it uniformly.
+
+### Unaffected
+
+- Every non-Remote-MCP caller (desktop, Claude Code, Codex, local SSH,
+  TRON) — these new fields are simply absent for them, exactly as before.
+- Scope/principal/ACL enforcement, token refresh, and revocation — all
+  untouched; this release only adds provenance fields to what was already
+  logged.
+
 ## 0.14.3 — 2026-10-06 — P1: fix OAuth tokens surviving with an empty principal_id
 
 Fixes a real production issue found while onboarding real family principals: Marcin's own long-standing ChatGPT/Claude.ai connector tokens had an empty `principal_id`, causing gateway-delegation writes to fail. Root-caused end to end (see docs/decision record); not an architecture change.

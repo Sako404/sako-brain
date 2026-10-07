@@ -266,6 +266,20 @@ class Config:
     # extension doesn't also need a dispatcher/threading change.
     caller_client: str = ""
     caller_transport: str = ""
+    # Stage 2 remote-MCP per-client audit provenance: the REAL OAuth
+    # client_id (and, where the gateway has one on file, a display
+    # client_name) that validate_token() resolved for this request —
+    # BRAIN_CALLER_OAUTH_CLIENT_ID / _NAME, set by brain-dispatch.py ONLY
+    # when the connecting identity is one of the two gateway ones AND the
+    # gateway actually delegated this request (mirrors how
+    # BRAIN_CALLER_PRINCIPAL is only ever a delegated assertion for those
+    # same two identities — see brain-dispatch.py's
+    # resolve_effective_principal()). Empty for every other caller
+    # (desktop, Claude Code, Codex, local SSH, TRON) — nothing here
+    # changes their provenance. Never an authorization input: purely
+    # logged via audit.caller_provenance(), never checked by any ACL path.
+    caller_oauth_client_id: str = ""
+    caller_oauth_client_name: str = ""
 
     def __post_init__(self):
         # frozen dataclass — the documented way to fill a derived default.
@@ -405,6 +419,8 @@ def default_config(brain_root: Path | None = None) -> Config:
         acting_principal=os.environ.get("BRAIN_CALLER_PRINCIPAL") or DEFAULT_ACTING_PRINCIPAL,
         caller_client=os.environ.get("BRAIN_CALLER_CLIENT") or "",
         caller_transport=os.environ.get("BRAIN_CALLER_TRANSPORT") or "",
+        caller_oauth_client_id=os.environ.get("BRAIN_CALLER_OAUTH_CLIENT_ID") or "",
+        caller_oauth_client_name=os.environ.get("BRAIN_CALLER_OAUTH_CLIENT_NAME") or "",
     )
 
 

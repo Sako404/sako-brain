@@ -41,6 +41,53 @@ class TestCleanEnv(unittest.TestCase):
         self.assertEqual(cleaned["PATH"], "/usr/bin")
 
 
+class TestActingAsThreadsOAuthClientProvenance(unittest.TestCase):
+    """Stage 2 remote-MCP per-client audit provenance: acting_as()'s new
+    client_id/client_name parameters must reach _clean_env() as
+    BRAIN_GATEWAY_ACTING_CLIENT_ID/_NAME, exactly mirroring how
+    principal_id already becomes BRAIN_GATEWAY_ACTING_PRINCIPAL — and
+    must never leak into a later, undelegated call."""
+
+    def test_client_id_and_name_reach_clean_env(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with mcp_bridge.acting_as("principal-ania", client_id="oauth-client-hermes",
+                                       client_name="Hermes Desktop (Marcin)"):
+                env = mcp_bridge._clean_env()
+        self.assertEqual(env.get("BRAIN_GATEWAY_ACTING_PRINCIPAL"), "principal-ania")
+        self.assertEqual(env.get("BRAIN_GATEWAY_ACTING_CLIENT_ID"), "oauth-client-hermes")
+        self.assertEqual(env.get("BRAIN_GATEWAY_ACTING_CLIENT_NAME"), "Hermes Desktop (Marcin)")
+
+    def test_client_name_is_optional(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with mcp_bridge.acting_as("principal-ania", client_id="oauth-client-hermes"):
+                env = mcp_bridge._clean_env()
+        self.assertEqual(env.get("BRAIN_GATEWAY_ACTING_CLIENT_ID"), "oauth-client-hermes")
+        self.assertNotIn("BRAIN_GATEWAY_ACTING_CLIENT_NAME", env)
+
+    def test_no_client_id_means_no_env_var_at_all(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with mcp_bridge.acting_as("principal-ania"):
+                env = mcp_bridge._clean_env()
+        self.assertNotIn("BRAIN_GATEWAY_ACTING_CLIENT_ID", env)
+        self.assertNotIn("BRAIN_GATEWAY_ACTING_CLIENT_NAME", env)
+
+    def test_client_provenance_does_not_leak_to_a_later_undelegated_call(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with mcp_bridge.acting_as("principal-ania", client_id="oauth-client-hermes"):
+                pass
+            env = mcp_bridge._clean_env()
+        self.assertNotIn("BRAIN_GATEWAY_ACTING_CLIENT_ID", env)
+
+    def test_two_sequential_acting_as_calls_do_not_mix_client_ids(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with mcp_bridge.acting_as("principal-marcin", client_id="oauth-client-hermes"):
+                first = mcp_bridge._clean_env()
+            with mcp_bridge.acting_as("principal-marcin", client_id="oauth-client-chatgpt"):
+                second = mcp_bridge._clean_env()
+        self.assertEqual(first.get("BRAIN_GATEWAY_ACTING_CLIENT_ID"), "oauth-client-hermes")
+        self.assertEqual(second.get("BRAIN_GATEWAY_ACTING_CLIENT_ID"), "oauth-client-chatgpt")
+
+
 class TestBrainExecutableResolution(unittest.TestCase):
     def test_explicit_override_wins(self):
         with patch.dict(os.environ, {"BRAIN_MCP_BRIDGE_EXECUTABLE": "/custom/brain"}, clear=False):

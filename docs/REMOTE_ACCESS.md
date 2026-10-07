@@ -202,13 +202,12 @@ unchanged either way; it has no special case for any particular client.
 
 Give the agent its own distinct OAuth client registration rather than
 reusing one meant for a different tool — set a per-server `client_name`
-if the agent's config supports one, so `brain remote-gateway list-clients`
-can tell it apart later. This gateway does not currently distinguish
-individual gateway-connected clients in `brain doctor`'s audit log beyond
-the shared `client=remote-gateway-read/write` SSH-transport identity —
-every gateway client's writes attribute to the same dispatcher identity
-there today; `oauth_clients.client_name` is the per-client distinction
-available right now (`brain remote-gateway list-clients`).
+if the agent's config supports one, so `brain remote-gateway
+list-clients` and the Brain-core audit log can both tell it apart later
+(as of 0.14.4, the audit log records the validated OAuth `client_id`/
+`client_name` distinctly per gateway client, alongside — not instead of
+— the `remote-gateway-read`/`-write` delegator identity; `client_name`
+is display metadata only, never an authorization input).
 
 Keep the agent's own memory/state separate from this Brain's canonical
 one: query this gateway's MCP tools for anything durable or current
