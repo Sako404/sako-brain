@@ -90,6 +90,6 @@ def create_event(config: Config, title: str, valid_from: str, what_happened: str
     dest.write_text(frontmatter.render(note), encoding="utf-8")
     indexer.index_note(config, dest)
     audit.log_event(config, event="note.write", principal_id=config.acting_principal,
-                     client_id=config.caller_client, transport=config.caller_transport,
+                     **audit.caller_provenance(config),
                      detail=f"id={note_id}")
     return dest

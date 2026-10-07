@@ -133,7 +133,7 @@ def write(config: Config, project_id: str, sections: HandoffSections,
             if not visibility.is_owner(config, principal_id, existing_meta):
                 current_owner, _ = visibility.owner_and_audience(existing_meta)
                 audit.log_event(config, event="note.write.denied", principal_id=principal_id,
-                                 client_id=config.caller_client, transport=config.caller_transport,
+                                 **audit.caller_provenance(config),
                                  detail=f"id=handoff-{entry.id} owner={current_owner}")
                 raise HandoffError(
                     f"only '{current_owner}' (this handoff's current owner) may add a new "
@@ -152,7 +152,7 @@ def write(config: Config, project_id: str, sections: HandoffSections,
     path.write_text(new_text, encoding="utf-8")
     indexer.index_note(config, path)
     audit.log_event(config, event="note.write", principal_id=config.acting_principal,
-                     client_id=config.caller_client, transport=config.caller_transport,
+                     **audit.caller_provenance(config),
                      detail=f"id=handoff-{entry.id}")
     return path
 

@@ -60,7 +60,7 @@ def update_memory(config: Config, note_id: str, set_fields: dict | None = None,
         event = "note.sharing_change.denied" if is_sharing_change else "note.write.denied"
         audit.log_event(
             config, event=event, principal_id=principal_id,
-            client_id=config.caller_client, transport=config.caller_transport,
+            **audit.caller_provenance(config),
             detail=f"id={note_id} owner={current_owner}",
         )
         raise UpdateError(
@@ -85,6 +85,6 @@ def update_memory(config: Config, note_id: str, set_fields: dict | None = None,
     event = "note.sharing_change" if is_sharing_change else "note.write"
     audit.log_event(
         config, event=event, principal_id=principal_id,
-        client_id=config.caller_client, transport=config.caller_transport, detail=f"id={note_id}",
+        **audit.caller_provenance(config), detail=f"id={note_id}",
     )
     return path

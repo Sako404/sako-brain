@@ -106,22 +106,45 @@ _SUBPROCESS_TIMEOUT_SECONDS = 30.0
 _acting_principal_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "brain_mcp_bridge_acting_principal", default=None)
 
+# Stage 2 remote-MCP per-client audit provenance: the validated OAuth
+# token's own client_id/client_name (app.py's `info.client_id` and a
+# server-side oauth_clients lookup — NEVER anything from the MCP request
+# body), carried the same way acting_principal already is: a ContextVar
+# set only by acting_as(), read only by _clean_env(), for the same
+# concurrency reason given above. Distinct from _CURRENT_CLIENT below —
+# that one is untrusted (an MCP `initialize` clientInfo.name, used only
+# for logging/source defaults); this is the authenticated client identity
+# and ends up in the Brain-core audit log's own client_id/client_name
+# fields (see audit.caller_provenance()).
+_acting_client_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "brain_mcp_bridge_acting_client_id", default=None)
+_acting_client_name_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "brain_mcp_bridge_acting_client_name", default=None)
+
 
 @contextlib.contextmanager
-def acting_as(principal_id: str | None):
+def acting_as(principal_id: str | None, client_id: str | None = None, client_name: str | None = None):
     """Scopes every _run_brain() call made within this `with` block (however
     deeply nested inside handle_request's tool dispatch) to assert
     `principal_id` as the acting principal to the server-side dispatcher,
-    via BRAIN_GATEWAY_ACTING_PRINCIPAL. The dispatcher independently
-    re-validates this assertion and refuses it outright from any SSH
+    via BRAIN_GATEWAY_ACTING_PRINCIPAL — and, when given, the validated
+    OAuth `client_id`/`client_name` alongside it, via
+    BRAIN_GATEWAY_ACTING_CLIENT_ID/_NAME. The dispatcher independently
+    re-validates all of these and refuses them outright from any SSH
     identity other than the two dedicated gateway ones — this only
-    controls what gets ASKED for, never what's granted. Restores the
-    previous value on exit (never leaks across requests even if nested)."""
+    controls what gets ASKED for, never what's granted. `client_id` is
+    never an authorization input on this end either, only provenance for
+    the eventual audit entry. Restores the previous values on exit (never
+    leaks across requests even if nested)."""
     token = _acting_principal_var.set(principal_id)
+    client_token = _acting_client_id_var.set(client_id)
+    name_token = _acting_client_name_var.set(client_name)
     try:
         yield
     finally:
         _acting_principal_var.reset(token)
+        _acting_client_id_var.reset(client_token)
+        _acting_client_name_var.reset(name_token)
 
 # Set once per process from the `initialize` request's clientInfo, mirroring
 # mcp_server.py's own _CURRENT_CLIENT — used for logging and as the default
@@ -162,6 +185,18 @@ def _clean_env() -> dict:
         # environment — only acting_as() (the remote gateway) may set this,
         # and only for the one request it scopes.
         env.pop(remote_mod.GATEWAY_ACTING_PRINCIPAL_ENV, None)
+
+    acting_client_id = _acting_client_id_var.get()
+    if acting_client_id:
+        env[remote_mod.GATEWAY_ACTING_CLIENT_ID_ENV] = acting_client_id
+    else:
+        env.pop(remote_mod.GATEWAY_ACTING_CLIENT_ID_ENV, None)
+
+    acting_client_name = _acting_client_name_var.get()
+    if acting_client_name:
+        env[remote_mod.GATEWAY_ACTING_CLIENT_NAME_ENV] = acting_client_name
+    else:
+        env.pop(remote_mod.GATEWAY_ACTING_CLIENT_NAME_ENV, None)
     return env
 
 

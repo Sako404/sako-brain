@@ -315,8 +315,19 @@ access canonical SAKO Brain, as this principal, with the scopes below, until rev
         except OAuthError as exc:
             return _unauthorized(error=exc.error if exc.error == "invalid_token" else None)
 
+        # Stage 2 remote-MCP per-client audit provenance: info.client_id is
+        # the validated token's own OAuth client, never anything from this
+        # request's body. client_name is looked up here, server-side, from
+        # the client's own DCR registration record (storage.get_client) —
+        # display metadata only, never trusted input, and never an
+        # authorization check (that's scope/principal, both already
+        # resolved above and unaffected by this).
+        client_record = storage.get_client(info.client_id)
+        client_name = (client_record or {}).get("client_name", "")
+
         result, status, missing_scope = mcp_transport.handle_mcp_body(
-            request.get_data(), info.scope, info.principal_id)
+            request.get_data(), info.scope, info.principal_id,
+            client_id=info.client_id, client_name=client_name)
         if status == 403:
             resp = jsonify(result)
             resp.status_code = 403
