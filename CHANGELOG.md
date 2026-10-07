@@ -5,6 +5,49 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.14.5 — 2026-10-07 — Fresh-note-visibility investigation: observability fix, no freshness bug found
+
+An operator session reported fresh Matrix-captured notes sometimes appearing
+"not found" through `read_memory`/`search_memory` moments after a successful
+write, suspecting an indexing/freshness lag. Investigated end to end,
+reproduced with controlled immediate-after-write probes against both the
+`remember` and `note create` write paths: **no freshness/indexing bug
+exists**. `indexer.index_note()` already runs synchronously inside every
+write primitive (fixed in an earlier release — see `test_write_index_
+consistency.py`), and the exact-id read path (`visibility.
+read_visible_note_text`) never consults the index at all — it resolves via
+a live Markdown scan every time. Read-after-write was proven immediate in
+every reproduction.
+
+The actual cause: the reported "not found" notes were owned by a different
+principal with an empty `audience` (i.e. private) — `can_view()` correctly
+denied the caller (an admin principal, not the owner), exactly as designed.
+`read_visible_note_text` raises the identical bare `FileNotFoundError`
+whether a note genuinely doesn't exist, fails to parse, or is denied by
+ACL — a deliberate, correct anti-enumeration property for callers — but it
+left zero server-side trace of *which* of those three happened, which is
+what made a correct ACL denial indistinguishable from a real regression of
+the freshness bug the earlier release had already fixed.
+
+### Added
+
+- `read_visible_note_text` now logs one of three distinct audit events
+  server-side before raising — `note.read.missing` (no file resolves to
+  that id), `note.read.malformed` (file exists, frontmatter doesn't parse),
+  `note.read.denied` (file exists and parses, but the caller's principal is
+  neither owner nor audience) — so a future investigation can tell these
+  apart from the audit log alone, without guessing.
+
+### Unaffected
+
+- The exception raised and its message are byte-for-byte unchanged in every
+  case — no caller, authorized or not, can learn anything new from this
+  release. The anti-enumeration property (denied vs. missing being
+  indistinguishable *to the caller*) is explicitly preserved; only the
+  server's own operator-facing audit log gained the distinction.
+- No index/storage architecture change. No new dependency. No change to
+  `can_view`/ACL semantics.
+
 ## 0.14.4 — 2026-10-07 — Remote-MCP per-client audit provenance
 
 Brain-core's audit log previously recorded every gateway-mediated request

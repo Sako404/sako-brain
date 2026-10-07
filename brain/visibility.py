@@ -33,6 +33,7 @@ design settled on, not a simplification of it.
 """
 from __future__ import annotations
 
+from . import audit
 from . import frontmatter
 from .paths import DEFAULT_ACTING_PRINCIPAL, Config
 
@@ -161,18 +162,47 @@ def read_visible_note_text(config: Config, principal_id: str, note_id: str) -> s
     Raises FileNotFoundError identically whether the note doesn't exist at
     all or merely isn't visible to `principal_id` — a caller must never be
     able to tell the two apart from this alone; that distinction would
-    itself leak the note's existence."""
+    itself leak the note's existence.
+
+    2026-10-07 (fresh-note-visibility investigation): this was the one
+    read path with no audit trail of its own three genuinely different
+    failure causes (missing file / malformed frontmatter / ACL denial) —
+    every one of them surfaced identically as a bare FileNotFoundError,
+    indistinguishable from the server's own operator logs, which is
+    exactly what made a correctly-denied cross-principal read (a parent
+    principal reading a child's private capture) look identical to a
+    genuine indexing/freshness bug during that investigation. The fix is
+    observability-only: each branch now logs its own distinct event
+    server-side before raising the SAME exception with the SAME message
+    as before — the caller-visible behavior, and the anti-enumeration
+    guarantee above, are both unchanged."""
     # Local import: avoids update.py <-> visibility.py becoming a real
     # import cycle (update.py has no reason to import this module back).
     from .update import find_note_path
 
     path = find_note_path(config, note_id)
     if path is None:
+        audit.log_event(
+            config, event="note.read.missing", principal_id=principal_id,
+            **audit.caller_provenance(config), detail=f"id={note_id}",
+        )
         raise FileNotFoundError(f"no note with id '{note_id}'")
     try:
         note = frontmatter.parse_file(path)
     except frontmatter.FrontmatterError:
+        audit.log_event(
+            config, event="note.read.malformed", principal_id=principal_id,
+            **audit.caller_provenance(config), detail=f"id={note_id}",
+        )
         raise FileNotFoundError(f"no note with id '{note_id}'")
     if not can_view_note(config, principal_id, note):
+        try:
+            owner_id, _ = owner_and_audience(note.meta)
+        except VisibilityError:
+            owner_id = "(malformed)"
+        audit.log_event(
+            config, event="note.read.denied", principal_id=principal_id,
+            **audit.caller_provenance(config), detail=f"id={note_id} owner={owner_id}",
+        )
         raise FileNotFoundError(f"no note with id '{note_id}'")
     return path.read_text(encoding="utf-8")

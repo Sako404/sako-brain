@@ -415,5 +415,70 @@ class Test26AdminRoleGrantsNoContentBypass(SecurityAcceptanceTestCase):
             self.config, "principal-marcin", "knowledge-shared"))
 
 
+# ---- fresh-note-visibility investigation (2026-10-07): read_visible_note_text
+# ---- now logs WHICH of its three failure causes fired, server-side only —
+# ---- the caller-visible exception/message are unchanged in every case.
+
+class Test27ReadDenialObservabilityNeverBroadensVisibility(SecurityAcceptanceTestCase):
+    """The investigation that added this found zero freshness/indexing bug —
+    `index_note()` already runs synchronously inside every write primitive,
+    and `read_visible_note_text` never consults the index at all (see
+    test_write_index_consistency.py). What actually happened: an admin
+    principal correctly denied a cross-principal private read looked
+    identical, from the caller's side AND from the server's own logs, to a
+    genuine missing-file bug — because read_visible_note_text's three
+    different internal failure causes (missing file / malformed
+    frontmatter / ACL denial) all raised the exact same bare
+    FileNotFoundError with no trace anywhere. Fixed by logging each cause
+    under its own event name before raising — never by changing what is
+    raised or returned to any caller, authorized or not."""
+
+    def _log_lines(self) -> list[str]:
+        log_files = list(self.config.logs_dir.glob("brain-audit-*.log"))
+        if not log_files:
+            return []
+        return log_files[0].read_text(encoding="utf-8").splitlines()
+
+    def test_acl_denial_is_logged_distinctly_but_the_exception_is_unchanged(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        identity.create_principal(self.config, display_name="Ania", role="",
+                                   principal_id="principal-ania")
+        self.vault.write_note("60_KNOWLEDGE", "secret.md", id="knowledge-secret",
+                               type="knowledge", title="Ania's private note",
+                               owner_principal="principal:ania", audience=[])
+        with self.assertRaises(FileNotFoundError) as ctx:
+            visibility.read_visible_note_text(self.config, "principal-marcin", "knowledge-secret")
+        self.assertEqual(str(ctx.exception), "no note with id 'knowledge-secret'")
+
+        denial = [l for l in self._log_lines() if "event=note.read.denied" in l]
+        self.assertEqual(len(denial), 1)
+        self.assertIn("principal=principal-marcin", denial[0])
+        self.assertIn("id=knowledge-secret", denial[0])
+        self.assertIn("owner=principal-ania", denial[0])
+        self.assertLess(len(denial[0]), 400)  # redaction-safe length cap, matching item 23
+
+    def test_genuinely_missing_note_logs_a_different_event_than_a_denial(self):
+        with self.assertRaises(FileNotFoundError) as ctx:
+            visibility.read_visible_note_text(self.config, "principal-marcin", "knowledge-does-not-exist")
+        self.assertEqual(str(ctx.exception), "no note with id 'knowledge-does-not-exist'")
+
+        missing = [l for l in self._log_lines() if "event=note.read.missing" in l]
+        denied = [l for l in self._log_lines() if "event=note.read.denied" in l]
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(len(denied), 0)
+
+    def test_owned_read_logs_no_denial_at_all(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        self.vault.write_note("60_KNOWLEDGE", "own.md", id="knowledge-own",
+                               type="knowledge", title="Marcin's own note",
+                               owner_principal="principal:marcin", audience=[])
+        text = visibility.read_visible_note_text(self.config, "principal-marcin", "knowledge-own")
+        self.assertIn("own note", text)
+        self.assertEqual([l for l in self._log_lines() if "event=note.read.denied" in l], [])
+        self.assertEqual([l for l in self._log_lines() if "event=note.read.missing" in l], [])
+
+
 if __name__ == "__main__":
     unittest.main()
