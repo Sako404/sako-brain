@@ -33,6 +33,8 @@ design settled on, not a simplification of it.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from . import audit
 from . import frontmatter
 from .paths import DEFAULT_ACTING_PRINCIPAL, Config
@@ -44,7 +46,9 @@ class VisibilityError(ValueError):
 
 def _ref_to_id(ref: str) -> str:
     """'principal:ania' -> 'principal-ania'; 'group:household' -> 'group-household'."""
-    kind, sep, name = str(ref).partition(":")
+    if not isinstance(ref, str):
+        raise VisibilityError("ACL references must be strings")
+    kind, sep, name = ref.partition(":")
     if not sep or kind not in ("principal", "group") or not name:
         raise VisibilityError(
             f"malformed reference {ref!r} — expected 'principal:<name>' or 'group:<name>'"
@@ -72,12 +76,20 @@ def owner_and_audience(meta: dict) -> tuple[str, list[str]]:
     closed to DEFAULT_OWNER_ID (never to "visible to everyone"); a malformed
     reference fails closed by raising, which callers treat as "not visible"
     rather than letting a bad record become an open one."""
-    owner_ref = meta.get("owner_principal") or id_to_ref(DEFAULT_OWNER_ID)
+    owner_ref = meta.get("owner_principal")
+    if owner_ref is None:
+        owner_ref = id_to_ref(DEFAULT_OWNER_ID)
     owner_id = _ref_to_id(owner_ref)
+    if not owner_id.startswith("principal-"):
+        raise VisibilityError("owner_principal must name a principal")
 
-    audience_raw = meta.get("audience") or []
+    audience_raw = meta.get("audience")
+    if audience_raw is None:
+        audience_raw = []
     if isinstance(audience_raw, str):
         audience_raw = [audience_raw]
+    if not isinstance(audience_raw, list):
+        raise VisibilityError("audience must be a list of references or a string")
     audience_ids = [_ref_to_id(a) for a in audience_raw]
 
     return owner_id, audience_ids
@@ -151,7 +163,7 @@ def filter_visible(config: Config, principal_id: str,
 
 
 def read_visible_note_text(config: Config, principal_id: str, note_id: str) -> str:
-    """The authorized counterpart to update.find_note_path (a pure,
+    """The authorized counterpart to update.find_note_paths (a pure,
     unauthenticated id -> path primitive used internally by write
     functions, which must keep resolving regardless of visibility — Stage
     2 only gates reads). This is THE function every direct get/read path
@@ -175,34 +187,83 @@ def read_visible_note_text(config: Config, principal_id: str, note_id: str) -> s
     observability-only: each branch now logs its own distinct event
     server-side before raising the SAME exception with the SAME message
     as before — the caller-visible behavior, and the anti-enumeration
-    guarantee above, are both unchanged."""
+    guarantee above, are both unchanged.
+
+    Duplicate-ID handling used to resolve ONE path — the
+    first file claiming the id — and then authorize it. With a duplicated
+    id, a copy owned by someone else can sort first, and the caller's own
+    visible copy was then unreachable: the read reported "not found" for a
+    record they fully owned. Every candidate is now considered, and the
+    first visible one in `find_note_paths`' deterministic order is
+    returned. ACL semantics are untouched — this only stops an invisible
+    file from shadowing a visible one, and can never grant access to
+    anything `can_view_note` would refuse.
+
+    With several VISIBLE copies the first in that same deterministic order
+    wins, and `note.read.ambiguous_id` is logged so an operator can see it;
+    `brain get` separately warns the caller, naming only copies that caller
+    may see. Nothing about invisible copies ever reaches the caller.
+    """
     # Local import: avoids update.py <-> visibility.py becoming a real
     # import cycle (update.py has no reason to import this module back).
-    from .update import find_note_path
+    from .update import find_note_paths
 
-    path = find_note_path(config, note_id)
-    if path is None:
+    paths = find_note_paths(config, note_id)
+    if not paths:
         audit.log_event(
             config, event="note.read.missing", principal_id=principal_id,
             **audit.caller_provenance(config), detail=f"id={note_id}",
         )
         raise FileNotFoundError(f"no note with id '{note_id}'")
-    try:
-        note = frontmatter.parse_file(path)
-    except frontmatter.FrontmatterError:
-        audit.log_event(
-            config, event="note.read.malformed", principal_id=principal_id,
-            **audit.caller_provenance(config), detail=f"id={note_id}",
-        )
-        raise FileNotFoundError(f"no note with id '{note_id}'")
-    if not can_view_note(config, principal_id, note):
+
+    visible: list[Path] = []
+    for path in paths:
         try:
-            owner_id, _ = owner_and_audience(note.meta)
-        except VisibilityError:
-            owner_id = "(malformed)"
-        audit.log_event(
-            config, event="note.read.denied", principal_id=principal_id,
-            **audit.caller_provenance(config), detail=f"id={note_id} owner={owner_id}",
-        )
+            note = frontmatter.parse_file(path)
+        except frontmatter.FrontmatterError:
+            audit.log_event(
+                config, event="note.read.malformed", principal_id=principal_id,
+                **audit.caller_provenance(config), detail=f"id={note_id}",
+            )
+            continue
+        if not can_view_note(config, principal_id, note):
+            try:
+                owner_id, _ = owner_and_audience(note.meta)
+            except VisibilityError:
+                owner_id = "(malformed)"
+            audit.log_event(
+                config, event="note.read.denied", principal_id=principal_id,
+                **audit.caller_provenance(config), detail=f"id={note_id} owner={owner_id}",
+            )
+            continue
+        visible.append(path)
+
+    if not visible:
         raise FileNotFoundError(f"no note with id '{note_id}'")
-    return path.read_text(encoding="utf-8")
+    if len(visible) > 1:
+        audit.log_event(
+            config, event="note.read.ambiguous_id", principal_id=principal_id,
+            **audit.caller_provenance(config),
+            detail=f"id={note_id} visible_copies={len(visible)} served={visible[0].name}",
+        )
+    return visible[0].read_text(encoding="utf-8")
+
+
+def visible_note_paths(config: Config, principal_id: str, note_id: str) -> list[Path]:
+    """Every file claiming `note_id` that `principal_id` may see, in the same
+    deterministic order `read_visible_note_text` serves from.
+
+    Exists so a caller can warn about a duplicate without ever learning about
+    copies it may not see — `brain get` uses it for exactly that.
+    """
+    from .update import find_note_paths
+
+    found = []
+    for path in find_note_paths(config, note_id):
+        try:
+            note = frontmatter.parse_file(path)
+        except (frontmatter.FrontmatterError, OSError):
+            continue
+        if can_view_note(config, principal_id, note):
+            found.append(path)
+    return found

@@ -67,6 +67,8 @@ class TestCreationPathsAreAudited(AuditTestCase):
             "projects:\n  - id: project-example\n    name: Example\n"
             "    path: /tmp/does-not-need-to-exist\n    status: active\n"
         )
+        self.vault.write_note('30_PROJECTS/ACTIVE', 'project-example.md',
+                              id='project-example', type='project', status='active', owner_principal='principal:ania')
         sections = handoff.HandoffSections(attempted="x")
         handoff.write(self._as("principal-ania"), "project-example", sections)
         lines = self._audit_lines()
@@ -106,7 +108,7 @@ class TestUpdateMemoryIsAudited(AuditTestCase):
                              and "principal=principal-marcin" in l for l in lines), lines)
 
     def test_denied_sharing_change_is_audited(self):
-        with self.assertRaises(update_mod.UpdateError):
+        with self.assertRaises(FileNotFoundError):
             update_mod.update_memory(self._as("principal-ania"), "knowledge-widget",
                                       set_fields={"audience": ["group:household"]})
         lines = self._audit_lines()

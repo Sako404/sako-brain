@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import backup, frontmatter
-from . import identity
+from . import identity, visibility
 from . import paths as paths_mod
 from .paths import Config
 from .registry import find_duplicates, load_registry
@@ -398,6 +398,119 @@ def is_admin_principal(config: Config, principal_id: str) -> bool:
     return p.is_active and p.role == "admin"
 
 
+# Headings/markers a record's own body uses to say "this is finished". Kept
+# deliberately small and literal: this is the input to an ADVISORY check, and
+# a loose pattern would turn every passing mention of the word into a false
+# "please reconcile".
+_CLOSURE_HEADING_RE = re.compile(
+    r"(?im)^\s*#{1,6}\s*(closure|closed|resolution|resolved|outcome)\b"
+)
+_CLOSURE_STATEMENT_RE = re.compile(
+    r"(?im)^\s*\**status:?\**\s*\**\s*(closed|resolved|done|complete[d]?)\b"
+)
+
+
+def check_invalid_acl(notes: list[frontmatter.Note]) -> list[Problem]:
+    """Admin-only diagnostics; invalid ACLs are invisible to ordinary callers."""
+    problems = []
+    for note in notes:
+        try:
+            visibility.owner_and_audience(note.meta)
+        except visibility.VisibilityError:
+            problems.append(Problem("invalid_acl", f"{note.path}: invalid owner/audience metadata"))
+    return problems
+
+
+def check_symlink_escapes_vault(config: Config) -> list[Problem]:
+    """Markdown files inside a content directory that resolve OUTSIDE the vault.
+
+    `frontmatter.iter_markdown_files` skips these — the scan boundary is the
+    vault, not wherever its directories happen to point, and before that was
+    explicit a link dropped into a content directory pulled an outside file
+    into listings, the search index and this module's own integrity checks,
+    carrying content and an ACL from a file nobody managing the vault can
+    see. Skipping it silently would be its own version of the problem this
+    release exists to fix, so the operator is told: a vault with one of these
+    has either a mistake or an intent the tooling cannot honour.
+    """
+    problems = []
+    root = config.brain_root
+    for path in frontmatter.iter_external_links(root, config.content_dirs):
+        problems.append(Problem(
+            "symlink_escapes_vault",
+            f"{path} is an outside, protected-identity, broken or looping link"
+            " — it is NOT indexed, listed or integrity-checked as vault content. "
+            "Either copy the note into the vault or remove the link; a Brain record "
+            "must live in the Brain.",
+        ))
+    return problems
+
+
+def check_handoff_in_wrong_status_folder(config: Config) -> list[Problem]:
+    """Deterministic structural check: a project's handoff must sit in the
+    same status folder as the project record every reader resolves it from.
+
+    `handoff.handoff_path()` derives the location from the project's CURRENT
+    status, so a handoff left behind by a status change is invisible to
+    `brain handoff show`/`list` and to `/resume`, while still being found by
+    id-based reads — and the next `handoff write` could create a second document
+    under the same id. Pure filesystem/registry comparison: no content
+    is read and no heuristic is involved, so this is a hard error, not an
+    advisory.
+    """
+    problems = []
+    projects_dir = config.projects_dir
+    if not projects_dir.exists():
+        return problems
+    for entry in load_registry(config):
+        expected_folder = config.taxonomy.folder_for_status(entry.status)
+        filename = f"{entry.id}-handoff.md"
+        expected = projects_dir / expected_folder / filename
+        for _role, folder in config.taxonomy.project_status_folders:
+            candidate = projects_dir / folder / filename
+            if candidate == expected or not candidate.exists():
+                continue
+            problems.append(Problem(
+                "handoff_in_wrong_status_folder",
+                f"{candidate}: handoff for '{entry.id}' (status '{entry.status}') is in "
+                f"{folder}/ but every reader resolves it from {expected_folder}/. "
+                + ("Both copies exist — merge them by hand, keeping each one's unique "
+                   "sessions, then remove the stale path. "
+                   if expected.exists() else
+                   "Move it to the correct folder. ")
+                + "`brain project update-status` relocates it automatically as of v0.14.6; "
+                  "this one predates that.",
+            ))
+    return problems
+
+
+def check_status_content_conflict(config: Config, notes) -> list[Problem]:
+    """Advisory mismatch detection; never changes or blocks a record.
+
+    Synthetic example: a fictional service incident has an explicit closure
+    heading while its metadata remains proposed. Report it for human review;
+    a passing mention of closure in prose is not sufficient evidence.
+    """
+    problems = []
+    for n in notes:
+        if (n.status or "") != "proposed":
+            continue
+        body = n.body or ""
+        heading = _CLOSURE_HEADING_RE.search(body)
+        statement = _CLOSURE_STATEMENT_RE.search(body)
+        if not heading and not statement:
+            continue
+        evidence = (heading or statement).group(0).strip()
+        problems.append(Problem(
+            "status_content_conflict",
+            f"{n.path}: status is 'proposed' but the body contains {evidence!r} — "
+            "TO RECONCILE (not auto-corrected): confirm against the project's latest "
+            "handoff and any later record before changing the status, and leave it as "
+            "it is if the evidence is not conclusive.",
+        ))
+    return problems
+
+
 def run_all(config: Config, principal_id: str | None = None) -> list[Problem]:
     """Stage 2 (multi-user visibility): every check here walks the WHOLE
     vault (`load_all_notes`, `load_registry`, backup/state/secrets
@@ -421,6 +534,7 @@ def run_all(config: Config, principal_id: str | None = None) -> list[Problem]:
 
     notes, parse_errors = load_all_notes(config)
     problems: list[Problem] = list(parse_errors)
+    problems += check_invalid_acl(notes)
     problems += check_duplicate_ids(notes)
     problems += check_invalid_status(config, notes)
     problems += check_broken_links(notes)
@@ -437,4 +551,9 @@ def run_all(config: Config, principal_id: str | None = None) -> list[Problem]:
     problems += check_unsafe_plaintext_backup(config)
     problems += check_password_file_not_backed_up(config)
     problems += check_dispatcher_deployment_info(config)
+    problems += check_handoff_in_wrong_status_folder(config)
+    problems += check_symlink_escapes_vault(config)
+    # Advisory, last: a heuristic belongs after every deterministic check,
+    # and must never be added to gitops.BLOCKING_CHECKS.
+    problems += check_status_content_conflict(config, notes)
     return problems

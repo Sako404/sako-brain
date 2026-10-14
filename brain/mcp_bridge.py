@@ -253,6 +253,22 @@ def _t_search_memory(a: dict):
     return ["search", a["query"], "--limit", str(a.get("limit", 20)), "--json"], None
 
 
+def _t_list_notes(a: dict):
+    """Only the filters actually supplied are passed through — `brain list`
+    validates `--status` against the vault's own vocabulary, and sending an
+    empty string would be a value, not an absence."""
+    argv = ["list", "--json"]
+    for flag in ("type", "status", "project", "tag"):
+        value = a.get(flag)
+        if value:
+            argv += [f"--{flag}", str(value)]
+    if a.get("limit") is not None:
+        argv += ["--limit", str(a["limit"])]
+    if a.get("offset") is not None:
+        argv += ["--offset", str(a["offset"])]
+    return argv, None
+
+
 def _t_get_context(a: dict):
     argv = ["context", a["query"], "--json", "--limit", str(a.get("limit", 10))]
     if a.get("include_restricted"):
@@ -367,7 +383,13 @@ def _set_flags(a: dict, key: str = "set_fields") -> list[str]:
     fields = a.get(key) or {}
     out = []
     for k, v in fields.items():
-        out += ["--set", f"{k}={v}"]
+        # Only a string is safe as --set KEY=VALUE; anything else (a list
+        # for people/tags/projects, a bool, a number) would be written as
+        # its Python repr string. --set-json carries the real value.
+        if isinstance(v, str):
+            out += ["--set", f"{k}={v}"]
+        else:
+            out += ["--set-json", f"{k}={json.dumps(v, ensure_ascii=False)}"]
     return out
 
 
@@ -448,6 +470,7 @@ def _t_create_timeline_event(a: dict):
 
 TRANSLATORS = {
     "search_memory": _t_search_memory,
+    "list_notes": _t_list_notes,
     "get_context": _t_get_context,
     "read_memory": _t_read_memory,
     "list_projects": _t_list_projects,

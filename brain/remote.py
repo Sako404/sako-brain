@@ -218,7 +218,7 @@ def should_proxy(argv: list[str]) -> bool:
 # Stage 2 (multi-user visibility, gateway delegation): set ONLY by the
 # remote gateway process (brain/remote_gateway/*), per MCP request, from
 # an already-validated OAuth token's own principal_id — never by an
-# ordinary desktop/TRON client, which has no reason to ever set this. The
+# ordinary desktop/example-service client, which has no reason to ever set this. The
 # server-side dispatcher independently re-validates this assertion (and
 # refuses it outright from any identity other than the two dedicated
 # gateway ones) — this env var only controls what THIS process asks for,

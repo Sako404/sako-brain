@@ -141,6 +141,8 @@ class TestHandoffIsImmediatelyVisible(WriteIndexConsistencyTestCase):
         self.config.registry_path.write_text(
             "projects:\n  - id: project-example\n    name: Example\n    path: /tmp/x\n    status: active\n"
         )
+        self.vault.write_note('30_PROJECTS/ACTIVE', 'project-example.md',
+                              id='project-example', type='project', status='active')
 
     def test_handoff_write_is_immediately_searchable(self):
         sections = handoff.HandoffSections(attempted="Grimwattle integration attempt")

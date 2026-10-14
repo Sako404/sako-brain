@@ -275,7 +275,7 @@ class Config:
     # BRAIN_CALLER_PRINCIPAL is only ever a delegated assertion for those
     # same two identities — see brain-dispatch.py's
     # resolve_effective_principal()). Empty for every other caller
-    # (desktop, Claude Code, Codex, local SSH, TRON) — nothing here
+    # (desktop, Claude Code, Codex, local SSH, example-service) — nothing here
     # changes their provenance. Never an authorization input: purely
     # logged via audit.caller_provenance(), never checked by any ACL path.
     caller_oauth_client_id: str = ""

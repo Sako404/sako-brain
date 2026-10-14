@@ -171,7 +171,7 @@ class TestProxyToRemoteDelegation(unittest.TestCase):
     gateway ever sets it, from an already-validated OAuth token's
     principal_id), the SSH command it sends must carry a
     '--acting-principal <id> -- ' prefix the server-side dispatcher can
-    independently re-validate. An ordinary desktop/TRON client never sets
+    independently re-validate. An ordinary desktop/example-service client never sets
     this env var, so its command is unaffected — unit-tested here as "not
     present means the prefix is absent", the actual trust decision is
     brain-dispatch.py's resolve_effective_principal(), tested in

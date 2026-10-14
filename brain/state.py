@@ -8,13 +8,8 @@ business logic of its own: no new definition of "stale", "blocked" or
 lives in `cli.py` or elsewhere — see `count_by_type`/`count_inbox_pending` in
 `indexer.py`, extracted for exactly this reason.
 
-Design record: the operating vault's own architecture-audit and
-design-decision notes for this component (kept outside this package, per
-the usual separation between the portable core and its deployment's
-private records).
-
 Hard rules this module must never break:
-- Deterministic only. No AI call, no network call, no Matrix/TRON/n8n call.
+- Deterministic only. No AI calls, network calls or unrelated service calls.
 - Read-only. Never writes to the vault, the index, or anything else.
 - Never crashes as a whole: every section is collected independently, and a
   single failing section degrades to an empty/default value plus a `sources`

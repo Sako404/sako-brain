@@ -41,6 +41,7 @@ from pathlib import Path
 from . import capture, context as context_mod, discover as discover_mod, memoryops, memoryqueue, projectops, projectsync
 from . import decision as decision_mod
 from . import handoff as handoff_mod
+from . import listing
 from . import search as search_mod
 from . import state as state_mod
 from . import timeline as timeline_mod
@@ -116,8 +117,62 @@ _require_restricted_confirmation = writepolicy.require_restricted_confirmation
 # ---- tool implementations -------------------------------------------------
 
 def tool_search_memory(config: Config, query: str, limit: int = 20) -> dict:
+    """RANKED FULL-TEXT SEARCH over note text, truncated at `limit`. NOT a
+    metadata filter and NOT a complete listing.
+
+    A query like "status: proposed" is matched as the WORDS "status" and
+    "proposed" against title/body/tags — so it returns records whose status
+    is `decided` (their body text quotes the word, e.g. in a template
+    heading or a superseded-history line) and omits `proposed` ones that
+    never spell it out. Use `list_notes` for any question of the form "all
+    X with status Y", "every open decision", "what is still pending" — it
+    filters on frontmatter and reports its own completeness. Results here
+    are ranked by relevance, so they are also NOT a stable or exhaustive
+    enumeration of anything.
+    """
     results = search_mod.search(config, query, limit=limit)
     return {"results": [r.__dict__ for r in results]}
+
+
+def tool_list_notes(config: Config, type: str | None = None, status: str | None = None,
+                     project: str | None = None, tag: str | None = None,
+                     limit: int = listing.DEFAULT_LIMIT, offset: int = 0) -> dict:
+    """COMPLETE listing by METADATA — the correct tool for "every decision
+    with status proposed", "all notes for project X", or any other question
+    that needs an exhaustive answer rather than the best text matches.
+
+    Both discovery and filtering read canonical Markdown directly, never the
+    search index, so a note written a second ago is listed now and a note
+    deleted a second ago is not, with no reindex in between. Filters
+    (`type`, `status`, `project`, `tag`) come from each note's live
+    frontmatter, never its text, so the result does not depend on what the
+    body happens to say. Ordering is deterministic: updated descending, then
+    id ascending.
+
+    Three completeness fields, and they mean different things:
+    `source_complete` is false when a visible file could not be read as a note
+    (`unreadable`) or lacks metadata (`unstructured_skipped`) — those are missing from
+    the listing whatever the filters say. It is also false when traversal
+    fails or a file's visibility cannot be established; these unknowns add
+    no paths or counts. A known ACL denial does not affect the result.
+    `page_complete` is false whenever
+    `entries` is a window rather than the whole match set: any `offset > 0`,
+    any `limit` that cut the result, the FINAL page, and an offset past the
+    last match all count as windows. `complete` is both together, and is
+    the only field that means "entries is the full answer" — never report a
+    count as complete without it. `next_offset` continues the listing, or is
+    null when nothing follows this page.
+
+    `total_visible` counts only matches this caller may see. `status` is
+    validated against the vault's own vocabulary, so a typo is refused
+    instead of returning an empty list that reads like "none exist".
+    """
+    try:
+        result = listing.list_notes(config, type=type, status=status, project=project,
+                                     tag=tag, limit=limit, offset=offset)
+    except listing.ListingError as exc:
+        return {"error": str(exc)}
+    return listing.result_to_dict(result)
 
 
 def tool_get_context(config: Config, query: str, limit: int = 10,
@@ -134,6 +189,15 @@ def tool_get_context(config: Config, query: str, limit: int = 10,
 
 
 def tool_read_memory(config: Config, id: str) -> dict:
+    """One full record by its exact id, resolved from Markdown (never the
+    search index, so a note written a second ago is readable now).
+
+    "Not found" is returned identically whether the id does not exist, its
+    frontmatter does not parse, or the record simply is not visible to the
+    calling principal — deliberately indistinguishable, so a caller cannot
+    enumerate other people's records. Never report "no such record" when
+    "not visible to this principal" is the honest statement.
+    """
     return {"id": id, "content": _read_note_text(config, id)}
 
 
@@ -142,6 +206,12 @@ def tool_remember(config: Config, type: str, title: str, text: str = "",
                    projects: list | None = None, sensitivity: str = "normal",
                    confidence: str = "fact", source: str = "", source_date: str = "",
                    confirm_restricted: bool = False, audience: list | None = None) -> dict:
+    """Raw capture into the inbox, for triage later — the deliberately
+    unstructured write path. Use `create_memory_note` instead when the note
+    already has an obvious final home, and the dedicated
+    `create_decision`/`create_project`/`create_timeline_event` tools for
+    those types. Secret-shaped content is refused outright, and
+    `sensitivity="restricted"` requires `confirm_restricted=true`."""
     _require_restricted_confirmation(config, config.acting_principal, sensitivity, confirm_restricted)
     rolepolicy.require_audience_allowed(config, config.acting_principal, audience)
     _scan_for_secrets(title, text)
@@ -155,6 +225,15 @@ def tool_remember(config: Config, type: str, title: str, text: str = "",
 
 def tool_update_memory(config: Config, id: str, set_fields: dict | None = None,
                         append_text: str | None = None, confirm_restricted: bool = False) -> dict:
+    """Set frontmatter fields and/or append to the body of one existing
+    record. Never rewrites or deletes existing body content — history is
+    appended to, never edited in place.
+
+    Only the record's `owner_principal` may modify it; being in its
+    `audience` grants read access only. An id claimed by more than one file
+    is refused rather than resolved by preference, so a duplicate cannot
+    quietly split a record's history across two files.
+    """
     set_fields = set_fields or {}
     if set_fields.get("sensitivity") == "restricted":
         _require_restricted_confirmation(config, config.acting_principal, "restricted", confirm_restricted)
@@ -181,10 +260,18 @@ def tool_queue_memory(config: Config, candidate_fact: str, entities: list | None
 
 
 def tool_list_projects(config: Config) -> dict:
+    """Every registered project this caller may see, with its id, name,
+    status and working-directory path. The registry is authoritative for
+    which projects exist; a project's own record and its latest handoff
+    carry the detail."""
     return {"projects": [e.__dict__ for e in load_visible_registry(config, config.acting_principal)]}
 
 
 def tool_get_project(config: Config, id: str) -> dict:
+    """One registered project's record by id or alias. A project record is a
+    summary written at a point in time — for "what is the state of X right
+    now", read the latest handoff too, and for code state check the actual
+    repository."""
     e = find_visible_project(config, config.acting_principal, id)
     if not e:
         raise KeyError(f"no registered project with id or alias '{id}'")
@@ -192,6 +279,10 @@ def tool_get_project(config: Config, id: str) -> dict:
 
 
 def tool_search_timeline(config: Config, query: str = "", limit: int = 50) -> dict:
+    """Dated timeline events, newest first, optionally narrowed by a
+    full-text `query` over their text. Like `search_memory` this is text
+    matching with a limit, not a metadata filter — use `list_notes` when the
+    question needs a complete enumeration."""
     entries = timeline_mod.list_timeline(config)
     if query:
         q = query.lower()
@@ -200,6 +291,11 @@ def tool_search_timeline(config: Config, query: str = "", limit: int = 50) -> di
 
 
 def tool_project_context(config: Config, id: str) -> dict:
+    """Everything needed to resume one project in a single call: its record,
+    its latest handoff, and (only when Brain runs on the same machine as the
+    project) live git/filesystem facts. `filesystem_facts` is null whenever
+    the project directory is not visible from where Brain itself runs —
+    null means "not checked from here", never "nothing there"."""
     e = find_visible_project(config, config.acting_principal, id)
     if not e:
         raise KeyError(f"no registered project with id or alias '{id}'")
@@ -271,27 +367,40 @@ def tool_create_project(config: Config, id: str, name: str, path: str, status: s
     return {"created_path": str(dest.relative_to(config.brain_root))}
 
 
-def tool_update_project_status(config: Config, id: str, status: str) -> dict:
-    """Thin wrapper over projectops.set_project_status() — the one thing
-    plain update_memory cannot do: moves the record between status folders
-    and syncs the registry entry, in the same call."""
-    result = projectops.set_project_status(config, id, status)
+def _status_change_payload(config: Config, result) -> dict:
+    """One shape for both status-change tools, so `index_updated` and the
+    handoff relocation cannot be reported by one and omitted by the other."""
     return {
         "id": result.id, "old_status": result.old_status, "new_status": result.new_status,
         "moved": result.moved, "registry_updated": result.registry_updated,
+        "index_updated": result.index_updated,
+        "handoff_moved": (str(result.handoff_new_path.relative_to(config.brain_root))
+                           if result.handoff_new_path else None),
         "updated_path": str(result.new_path.relative_to(config.brain_root)),
     }
+
+
+def tool_update_project_status(config: Config, id: str, status: str) -> dict:
+    """Move a project record between status folders and sync its registry
+    entry and its handoff document, in one call — the one thing plain
+    `update_memory` cannot do.
+
+    All-or-nothing: if any step fails, every step is rolled back and an
+    error is raised; it never reports success on a partially applied change.
+    Safe to re-run — it computes what to change from the actual state on
+    disk, so repeating it after a failure converges, and repeating it on an
+    already-correct project is a no-op. `index_updated: false` means the
+    record and registry are correct but the search-index cache is behind and
+    `brain index` should be run."""
+    result = projectops.set_project_status(config, id, status)
+    return _status_change_payload(config, result)
 
 
 def tool_close_project(config: Config, id: str, summary: str = "") -> dict:
     """Thin wrapper over projectops.close_project(). No new logic."""
     _scan_for_secrets(summary)
     result = projectops.close_project(config, id, summary=summary)
-    return {
-        "id": result.id, "old_status": result.old_status, "new_status": result.new_status,
-        "moved": result.moved, "registry_updated": result.registry_updated,
-        "updated_path": str(result.new_path.relative_to(config.brain_root)),
-    }
+    return _status_change_payload(config, result)
 
 
 def tool_update_project_section(config: Config, id: str, section: str, mode: str, content: str,
@@ -365,6 +474,17 @@ TOOLS = {
         "type": "object",
         "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
         "required": ["query"],
+    }),
+    "list_notes": (tool_list_notes, {
+        "type": "object",
+        "properties": {
+            "type": {"type": "string", "description": "note type, e.g. decision | project | document | knowledge"},
+            "status": {"type": "string", "description": "frontmatter status, e.g. proposed | decided | superseded (validated against this vault's vocabulary)"},
+            "project": {"type": "string", "description": "only notes whose `projects:` list contains this project id"},
+            "tag": {"type": "string", "description": "only notes whose `tags:` list contains this tag"},
+            "limit": {"type": "integer", "description": f"max entries per page (default {listing.DEFAULT_LIMIT}, max {listing.MAX_LIMIT}); the result always reports the full visible count regardless, and any limit that cuts the result sets page_complete=false"},
+            "offset": {"type": "integer", "description": "skip this many entries — pass `next_offset` from a previous page. Any offset above 0 makes the result a page, so page_complete and complete are false even on the last page"},
+        },
     }),
     "read_memory": (tool_read_memory, {
         "type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"],

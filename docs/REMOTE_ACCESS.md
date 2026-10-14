@@ -93,7 +93,7 @@ principal it's acting for — a `--acting-principal <id>` prefix the
 server-side dispatcher independently re-validates against the canonical
 principal registry before honoring (see `brain-dispatch.py`'s
 `resolve_effective_principal`). Only these two identities may make that
-assertion; every other SSH identity (desktop, TRON, capture) is refused
+assertion; every other SSH identity (desktop, example-service, capture) is refused
 outright if it tries.
 
 **This means possession of either gateway SSH private key is equivalent to
@@ -268,3 +268,12 @@ reading existing ones — if you don't want a connected AI reading your
 restricted notes at all, that's a broader Brain-side access decision
 (see the main README/`AGENTS.md`'s own sensitivity model), independent of
 this gateway.
+
+### Backend failure during tool discovery
+
+An authenticated `tools/list` JSON-RPC request whose capabilities backend
+is unavailable receives HTTP 200 with JSON-RPC error `-32603`, message
+`Brain backend unavailable`, and its original request ID. This is a failed
+request, not a successful empty tool list. Backend stderr and exception
+text are never included. Discovery is retried on the next request; a
+notification receives HTTP 202 with no body and does not query capabilities.

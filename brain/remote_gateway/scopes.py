@@ -32,7 +32,7 @@ ALL_SCOPES = (SCOPE_READ, SCOPE_WRITE, SCOPE_RESTRICTED)
 SCOPES_SUPPORTED = " ".join(ALL_SCOPES)
 
 READ_TOOLS = frozenset({
-    "search_memory", "read_memory", "get_context", "list_projects",
+    "search_memory", "list_notes", "read_memory", "get_context", "list_projects",
     "get_project", "search_timeline", "project_context", "get_operational_state",
 })
 

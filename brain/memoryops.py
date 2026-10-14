@@ -95,6 +95,8 @@ def create_memory(config: Config, type_: str, title: str, text: str = "",
     slug = slugify(title)
     note_id = f"{type_}-{slug}"
     dest = dest_dir / f"{note_id}.md"
+    if not frontmatter.is_memory_path(dest, config.brain_root):
+        raise MemoryWriteError("ordinary memory cannot target protected or outside-vault paths")
     if dest.exists():
         raise MemoryWriteError(f"{dest} already exists")
 

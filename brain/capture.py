@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 from . import audit
+from . import frontmatter
 from . import indexer
 from . import visibility
 from .paths import DEFAULT_NOTE_TYPES, Config
@@ -42,12 +43,17 @@ def capture(config: Config, type_: str, title: str, text: str = "", tags: list[s
     note_id = f"{type_}-{slug}"
 
     inbox = config.inbox_dir
+    if not frontmatter.is_memory_path(inbox, config.brain_root):
+        raise ValueError("ordinary memory cannot target protected or outside-vault paths")
     inbox.mkdir(parents=True, exist_ok=True)
     dest = inbox / f"{note_id}.md"
     n = 2
     while dest.exists():
         dest = inbox / f"{note_id}-{n}.md"
         n += 1
+
+    if not frontmatter.is_memory_path(dest, config.brain_root):
+        raise ValueError("ordinary memory cannot target protected or outside-vault paths")
 
     meta_lines = [
         "---",

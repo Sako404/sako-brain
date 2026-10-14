@@ -298,6 +298,33 @@ class TestScopeEnforcement(GatewayTestCase):
         self.assertIn("search_memory", names)
         self.assertNotIn("remember", names)
 
+    def test_list_notes_requires_brain_read(self):
+        """v0.14.6's metadata listing is a read tool, so a token that holds
+        only `brain.write` must not reach it. Pins the scope decision at the
+        gateway, not just in the mapping table."""
+        tok = self.get_token(scope="brain.write")
+        r = self.client.post("/mcp", headers={"Authorization": f"Bearer {tok['access_token']}"},
+                              json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                    "params": {"name": "list_notes",
+                                               "arguments": {"type": "decision",
+                                                             "status": "proposed"}}})
+        self.assertEqual(r.status_code, 403)
+        self.assertIn('error="insufficient_scope"', r.headers["WWW-Authenticate"])
+        self.assertIn("brain.read", r.headers["WWW-Authenticate"])
+
+    def test_a_read_token_reaches_list_notes(self):
+        tok = self.get_token(scope="brain.read")
+        with patch("brain.mcp_bridge.handle_request") as mock_handle:
+            mock_handle.return_value = {"jsonrpc": "2.0", "id": 1,
+                                         "result": {"content": [{"type": "text", "text": "{}"}]}}
+            r = self.client.post("/mcp", headers={"Authorization": f"Bearer {tok['access_token']}"},
+                                  json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                        "params": {"name": "list_notes",
+                                                   "arguments": {"type": "decision",
+                                                                 "status": "proposed"}}})
+        self.assertEqual(r.status_code, 200)
+        mock_handle.assert_called_once()
+
     def test_write_scope_without_restricted_cannot_confirm_restricted(self):
         tok = self.get_token(scope="brain.write")
         r = self.client.post("/mcp", headers={"Authorization": f"Bearer {tok['access_token']}"},
@@ -666,7 +693,11 @@ class TestRevocation(GatewayTestCase):
         r = self.client.post("/revoke", data={"token": "never-issued"})
         self.assertEqual(r.status_code, 200)
 
-    def test_revoke_all_for_client_cuts_off_that_client_only(self):
+    @patch("brain.mcp_bridge._tools_list_payload", return_value=[{
+        "name": "list_notes", "description": "Synthetic capabilities dependency",
+        "inputSchema": {"type": "object"},
+    }])
+    def test_revoke_all_for_client_cuts_off_that_client_only(self, capabilities):
         tok_a = self.get_token(redirect_uri="https://client-a.example.invalid/cb")
         tok_b = self.get_token(redirect_uri="https://client-b.example.invalid/cb")
         n = self.storage.revoke_all_for_client(self.storage.get_token(tok_a["access_token"])["client_id"])
@@ -777,7 +808,11 @@ class TestMultiPrincipal(GatewayTestCase):
         info = auth_server.validate_token(tok["access_token"])
         self.assertEqual(info.principal_id, self.PRINCIPAL)
 
-    def test_revoke_all_for_principal_cuts_off_only_that_principal(self):
+    @patch("brain.mcp_bridge._tools_list_payload", return_value=[{
+        "name": "list_notes", "description": "Synthetic capabilities dependency",
+        "inputSchema": {"type": "object"},
+    }])
+    def test_revoke_all_for_principal_cuts_off_only_that_principal(self, capabilities):
         tok_marcin = self.get_token(redirect_uri="https://client-marcin.example.invalid/cb")
         tok_ania = self._get_token_as(self.SECOND_PRINCIPAL, self.second_password,
                                        "https://client-ania.example.invalid/cb")

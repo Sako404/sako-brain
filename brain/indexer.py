@@ -94,6 +94,8 @@ def count_by_type(config: Config, principal_id: str | None = None) -> dict[str, 
     counts: dict[str, int] = {}
     for row in rows:
         note_path = config.brain_root / row["path"]
+        if not frontmatter.is_memory_path(note_path, config.brain_root):
+            continue
         try:
             note = frontmatter.parse_file(note_path)
         except (frontmatter.FrontmatterError, OSError):
@@ -123,10 +125,14 @@ def count_inbox_pending(config: Config, principal_id: str | None = None) -> int:
         return 0
     count = 0
     for path in inbox.glob("*.md"):
+        if not frontmatter.is_memory_path(path, config.brain_root):
+            continue
         try:
             meta = frontmatter.parse_file(path).meta
-        except frontmatter.FrontmatterError:
-            meta = {}
+        except (frontmatter.FrontmatterError, OSError):
+            meta = frontmatter.diagnostic_metadata(path)
+            if meta is None:
+                continue
         if visibility.can_view(config, principal_id, meta):
             count += 1
     return count
@@ -140,6 +146,8 @@ def _upsert_note(conn: sqlite3.Connection, config: Config, path: Path) -> str | 
     (one connection, one file, called right after a write) so there is
     exactly one place that knows how a note's frontmatter maps onto the
     `notes`/`notes_fts` schema — never two copies to drift apart."""
+    if not frontmatter.is_memory_path(path, config.brain_root):
+        return None
     try:
         note = frontmatter.parse_file(path)
     except frontmatter.FrontmatterError:

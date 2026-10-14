@@ -47,6 +47,13 @@ def migrate_owner_principal(config: Config, *, dry_run: bool = False) -> Migrati
     `dry_run=True` computes and reports the exact same thing without
     writing anything — what a caller should always run first against
     production."""
+    from .projectops import project_write_lock
+
+    with project_write_lock(config):
+        return _migrate_locked(config, dry_run=dry_run)
+
+
+def _migrate_locked(config: Config, *, dry_run: bool) -> MigrationReport:
     report = MigrationReport()
     for path in frontmatter.iter_markdown_files(config.brain_root, config.content_dirs):
         report.total_notes += 1
