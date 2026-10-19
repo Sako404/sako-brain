@@ -39,7 +39,7 @@ from .indexer import connect
 from .memoryqueue import PendingEntry, list_pending
 from .paths import Config
 from .registry import ProjectEntry, load_registry
-from .systemdstatus import TIMER_UNITS, TimerStatus, timer_status
+from .systemdstatus import TIMER_UNITS, TimerStatus, timer_status, user_manager_available
 from .timeline import TimelineEntry, list_timeline
 from .validate import Problem, is_admin_principal
 
@@ -90,6 +90,9 @@ class TimelineSection:
 
 @dataclass
 class SystemdSection:
+    # "available" | "unavailable" (no user manager on the host running this,
+    # so timers were not checked and the list is empty) | "unknown" (not collected)
+    manager: str = "unknown"
     timers: list = field(default_factory=list)  # list[TimerStatus]
 
 
@@ -234,7 +237,13 @@ def _collect_timeline(config: Config, window_days: int, include_restricted: bool
 
 
 def _collect_systemd() -> SystemdSection:
-    return SystemdSection(timers=[timer_status(unit) for unit in TIMER_UNITS])
+    # Not a source failure: the collector ran, the host just has nothing to
+    # ask. Reporting it as ok=False would flag every server-side snapshot as
+    # degraded; listing each unit as unknown reads like a broken timer.
+    if not user_manager_available():
+        return SystemdSection(manager="unavailable")
+    return SystemdSection(manager="available",
+                          timers=[timer_status(unit) for unit in TIMER_UNITS])
 
 
 def _collect_integrity_ref(config: Config) -> IntegrityRefSection:
