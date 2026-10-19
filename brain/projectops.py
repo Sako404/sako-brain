@@ -620,6 +620,134 @@ def close_project(config: Config, project_id: str, summary: str = "") -> StatusC
         return result
 
 
+PATH_WRITE_DENIED = "project path change is not permitted"
+
+
+@dataclass
+class PathChangeResult:
+    id: str
+    old_path: str
+    new_path: str
+    record_path: Path
+    # False when both the record and the registry already named new_path,
+    # so nothing was written.
+    changed: bool
+    registry_updated: bool
+    index_updated: bool = True
+
+
+def _normalize_project_path(config: Config, path: str) -> str:
+    """The working-directory reference a project record carries.
+
+    It is a reference only, never read or copied, and the host running this
+    usually cannot see it (the server holds the vault, the directory is on
+    a desktop), so existence is deliberately not checked — the same rule
+    `create_project` follows. What is checked is that it is an absolute,
+    plain path and that it does not point into the vault itself."""
+    if not isinstance(path, str) or not path.strip():
+        raise ProjectWriteError("path must be a non-empty absolute path")
+    candidate = Path(path.strip())
+    if not candidate.is_absolute():
+        raise ProjectWriteError("path must be an absolute path")
+    if ".." in candidate.parts:
+        raise ProjectWriteError("path must not contain '..'")
+    if any(ch in str(candidate) for ch in "\n\r\0"):
+        raise ProjectWriteError("path must be a single line")
+    brain_root = config.brain_root.resolve()
+    resolved = Path(os.path.realpath(candidate))
+    for p in (candidate, resolved):
+        if p == brain_root or brain_root in p.parents:
+            raise ProjectWriteError("path must not point into the vault")
+    return str(candidate)
+
+
+def set_project_path(config: Config, project_id: str, new_path: str) -> PathChangeResult:
+    """Change a project's working-directory reference in the record's
+    frontmatter AND its registry entry, together.
+
+    `update_memory` can set `path:` in the frontmatter, but nothing else
+    rewrites the registry, and `get_project`, `project sync` and `/resume`
+    read the registry — so a frontmatter-only edit leaves the two
+    disagreeing. This is the path counterpart of `set_project_status`:
+    same lock, same owner check, same journal, both written or neither.
+    Converging: re-running it when both already name new_path is a no-op."""
+    with project_write_lock(config):
+        return _set_project_path_locked(config, project_id, new_path)
+
+
+def _set_project_path_locked(config: Config, project_id: str, new_path: str) -> PathChangeResult:
+    requested_id = project_id
+    missing = f"no project record with id or alias '{requested_id}'"
+    entry = find_project(config, project_id)
+    if entry is None:
+        raise ProjectWriteError(missing)
+    project_id = entry.id
+    normalized = _normalize_project_path(config, new_path)
+
+    principal_id = config.acting_principal
+    try:
+        record_path = resolve_write_target(config, project_id, principal_id)
+    except FileNotFoundError:
+        raise ProjectWriteError(missing) from None
+    except (OSError, frontmatter.FrontmatterError):
+        raise ProjectWriteError(PATH_WRITE_DENIED) from None
+
+    note = frontmatter.parse_file(record_path)
+    if not visibility.is_owner(config, principal_id, note.meta):
+        current_owner, _ = visibility.owner_and_audience(note.meta)
+        audit.log_event(config, event="note.write.denied", principal_id=principal_id,
+                         **audit.caller_provenance(config),
+                         detail=f"id={project_id} owner={current_owner}")
+        raise ProjectWriteError(PATH_WRITE_DENIED)
+    _require_vault_paths(config, record_path, config.registry_path)
+
+    # Same rule create_project enforces: two registry entries never share
+    # one working directory.
+    if any(e.id != project_id and e.path and str(Path(e.path)) == normalized
+           for e in load_registry(config)):
+        raise ProjectWriteError(f"registry already has an entry with path '{normalized}'")
+
+    old_path = entry.path or ""
+    if old_path == normalized and note.meta.get("path") == normalized:
+        return PathChangeResult(id=project_id, old_path=old_path, new_path=normalized,
+                                record_path=record_path, changed=False,
+                                registry_updated=False)
+
+    journal = _Journal()
+    try:
+        journal.restore_text_of(record_path)
+        note.meta["path"] = normalized
+        note.meta["updated"] = dt.date.today().isoformat()
+        record_path.write_text(frontmatter.render(note), encoding="utf-8")
+
+        journal.restore_text_of(config.registry_path)
+        set_registry_fields(config, project_id, path=normalized, updated=note.meta["updated"])
+    except Exception as exc:  # noqa: BLE001 — every step's failure is handled identically
+        undo_failures = journal.rollback()
+        audit.log_event(config, event="project.path_change.failed", principal_id=principal_id,
+                         **audit.caller_provenance(config),
+                         detail=f"id={project_id} rolled_back={not undo_failures}")
+        outcome = "rollback incomplete" if undo_failures else "was rolled back"
+        suffix = (f" Not restored: {' '.join(undo_failures)} Re-run this exact command "
+                  "to converge, then `brain doctor`.") if undo_failures else ""
+        raise ProjectWriteError(
+            f"path change for '{project_id}' failed; {outcome} ({exc}).{suffix}"
+        ) from exc
+
+    index_updated = True
+    try:
+        indexer.index_note(config, record_path)
+    except Exception:  # noqa: BLE001 — a cache write, not the record
+        index_updated = False
+
+    audit.log_event(config, event="note.write", principal_id=principal_id,
+                     **audit.caller_provenance(config),
+                     detail=f"id={project_id} path={old_path}->{normalized}")
+    return PathChangeResult(id=project_id, old_path=old_path, new_path=normalized,
+                            record_path=record_path, changed=True,
+                            registry_updated=True, index_updated=index_updated)
+
+
 # Extracted from what /project-sync already does today via a direct Edit on
 # specific named body sections — never the whole body, never an arbitrary
 # one. Restricted to the sections that skill actually touches; "Decisions"

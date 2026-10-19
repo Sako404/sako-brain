@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import unittest
 from unittest.mock import patch
@@ -115,6 +116,28 @@ class TestCliProjectUpdate(unittest.TestCase):
     def test_nothing_to_do_is_a_clean_error(self):
         rc, out = run_cli(["project", "update", "project-widget"], self.vault)
         self.assertEqual(rc, 2)
+
+    def test_path_change_syncs_record_and_registry(self):
+        rc, out = run_cli(["project", "update", "project-widget", "--path", "/b", "--json"], self.vault)
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["path_change"]["old_path"], "/a")
+        self.assertEqual(payload["path_change"]["new_path"], "/b")
+        self.assertTrue(payload["path_change"]["changed"])
+        entries = {e.id: e for e in load_registry(self.config)}
+        self.assertEqual(entries["project-widget"].path, "/b")
+        record = self.config.projects_dir / "ACTIVE" / "project-widget.md"
+        self.assertEqual(frontmatter.parse_file(record).meta["path"], "/b")
+
+    def test_set_path_via_generic_set_is_refused(self):
+        rc, out = run_cli(["project", "update", "project-widget", "--set", "path=/b"], self.vault)
+        self.assertEqual(rc, 2)
+        entries = {e.id: e for e in load_registry(self.config)}
+        self.assertEqual(entries["project-widget"].path, "/a")
+
+    def test_relative_path_fails_cleanly(self):
+        rc, out = run_cli(["project", "update", "project-widget", "--path", "b"], self.vault)
+        self.assertEqual(rc, 1)
 
 
 class TestCliProjectClose(unittest.TestCase):

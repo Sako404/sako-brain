@@ -366,6 +366,11 @@ def cmd_project_update(config: Config, args) -> int:
               "status folder, and the registry entry in sync — --set status="
               "... would only touch frontmatter).", file=sys.stderr)
         return 2
+    if "path" in set_fields:
+        print("Error: use --path to change the project path (keeps the record "
+              "and the registry entry in sync — --set path=... would only touch "
+              "frontmatter).", file=sys.stderr)
+        return 2
 
     # Resolve once — args.id may be an alias; set_project_status resolves
     # internally, but update_mod.update_memory below does an exact id match,
@@ -379,10 +384,13 @@ def cmd_project_update(config: Config, args) -> int:
                                                      getattr(args, "confirm_restricted", False))
     if "audience" in set_fields:
         rolepolicy.require_audience_allowed(config, config.acting_principal, set_fields["audience"])
-    writepolicy.scan_for_secrets(args.append_text or "", *(str(v) for v in set_fields.values()))
+    new_path = getattr(args, "path", None)
+    writepolicy.scan_for_secrets(args.append_text or "", new_path or "",
+                                 *(str(v) for v in set_fields.values()))
 
     lines = []
     status_change = None
+    path_change = None
     updated_path = None
     if args.status:
         try:
@@ -413,6 +421,26 @@ def cmd_project_update(config: Config, args) -> int:
             lines.append("WARNING: the record and registry are correct, but the search "
                           "index could not be updated — run `brain index`.")
 
+    if new_path is not None:
+        try:
+            r = projectops.set_project_path(config, args.id, new_path)
+        except projectops.ProjectWriteError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        path_change = {
+            "old_path": r.old_path, "new_path": r.new_path, "changed": r.changed,
+            "registry_updated": r.registry_updated, "index_updated": r.index_updated,
+            "updated_path": str(r.record_path.relative_to(config.brain_root)),
+        }
+        if r.changed:
+            lines.append(f"Path: {r.old_path or '(none)'} -> {r.new_path}")
+            lines.append(f"Registry updated: {r.registry_updated}")
+        else:
+            lines.append(f"Path: already {r.new_path} — nothing to change")
+        if not r.index_updated:
+            lines.append("WARNING: the record and registry are correct, but the search "
+                          "index could not be updated — run `brain index`.")
+
     if set_fields or args.append_text:
         try:
             path = update_mod.update_memory(
@@ -425,11 +453,12 @@ def cmd_project_update(config: Config, args) -> int:
         lines.append(f"Updated: {path.relative_to(config.brain_root)}")
 
     if not lines:
-        print("Nothing to do — pass --status, --set, and/or --append-text.", file=sys.stderr)
+        print("Nothing to do — pass --status, --path, --set, and/or --append-text.", file=sys.stderr)
         return 2
     if getattr(args, "json", False):
         print(json.dumps({
-            "id": args.id, "status_change": status_change, "updated_path": updated_path,
+            "id": args.id, "status_change": status_change, "path_change": path_change,
+            "updated_path": updated_path,
         }, indent=2, ensure_ascii=False))
         return 0
     print("\n".join(lines))
@@ -1621,8 +1650,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_update.add_argument("--status", default=None,
                                   help="New status — moves the record between status folders and "
                                        "updates the registry entry in the same call")
+    p_project_update.add_argument("--path", default=None,
+                                  help="New absolute working-directory path — updates the record "
+                                       "and the registry entry in the same call")
     p_project_update.add_argument("--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE",
-                                  help="Other frontmatter field to set, repeatable (not 'status' — use --status)")
+                                  help="Other frontmatter field to set, repeatable (not 'status' or "
+                                       "'path' — use --status / --path)")
     p_project_update.add_argument("--append-text", default=None,
                                   help="Text appended as a new dated '## Update' section")
     p_project_update.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",

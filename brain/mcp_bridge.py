@@ -341,6 +341,10 @@ def _t_update_project_status(a: dict):
     return ["project", "update", a["id"], "--status", a["status"], "--json"], None
 
 
+def _t_update_project_path(a: dict):
+    return ["project", "update", a["id"], "--path", a["path"], "--json"], None
+
+
 def _t_write_handoff(a: dict):
     payload = {
         "attempted": a.get("attempted", ""), "changed": a.get("changed", ""),
@@ -478,6 +482,7 @@ TRANSLATORS = {
     "remember": _t_remember,
     "create_memory_note": _t_create_memory_note,
     "update_project_status": _t_update_project_status,
+    "update_project_path": _t_update_project_path,
     "write_handoff": _t_write_handoff,
     "get_project": _t_get_project,
     "search_timeline": _t_search_timeline,
@@ -587,6 +592,9 @@ def _execute_tool(name: str, arguments: dict) -> dict:
     if name == "update_project_status":
         status_change = result.get("status_change") or {}
         return {"id": result["id"], **status_change}
+    if name == "update_project_path":
+        path_change = result.get("path_change") or {}
+        return {"id": result["id"], **path_change}
     return result
 
 

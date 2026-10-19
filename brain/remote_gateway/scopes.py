@@ -39,7 +39,7 @@ READ_TOOLS = frozenset({
 WRITE_TOOLS = frozenset({
     "remember", "update_memory", "queue_memory", "write_handoff",
     "create_decision", "create_project", "update_project_status",
-    "close_project", "update_project_section", "create_memory_note",
+    "update_project_path", "close_project", "update_project_section", "create_memory_note",
     "create_timeline_event",
 })
 

@@ -205,6 +205,7 @@ class TestTranslatorsPreferJsonOverTextParsing(unittest.TestCase):
         "remember": {"type": "fact", "title": "x"},
         "create_memory_note": {"type": "fact", "title": "x"},
         "update_project_status": {"id": "x", "status": "active"},
+        "update_project_path": {"id": "x", "path": "/x"},
         "write_handoff": {"project_id": "x"},
         "get_project": {"id": "x"},
         "search_timeline": {},
@@ -276,6 +277,10 @@ class TestTranslators(unittest.TestCase):
     def test_update_project_status_argv(self):
         argv, _ = mcp_bridge._t_update_project_status({"id": "project-example", "status": "on-hold"})
         self.assertEqual(argv, ["project", "update", "project-example", "--status", "on-hold", "--json"])
+
+    def test_update_project_path_argv(self):
+        argv, _ = mcp_bridge._t_update_project_path({"id": "project-example", "path": "/new/dir"})
+        self.assertEqual(argv, ["project", "update", "project-example", "--path", "/new/dir", "--json"])
 
     def test_get_project_argv(self):
         argv, stdin = mcp_bridge._t_get_project({"id": "project-example"})
@@ -530,6 +535,20 @@ class TestExecuteTool(unittest.TestCase):
         self.assertEqual(result, {
             "id": "project-example", "old_status": "active", "new_status": "on-hold",
             "moved": True, "registry_updated": True, "updated_path": "x.md",
+        })
+
+    def test_update_project_path_reshapes_to_flat_mcp_tool_shape(self):
+        cli_payload = {
+            "id": "project-example", "status_change": None,
+            "path_change": {"old_path": "/a", "new_path": "/b", "changed": True,
+                            "registry_updated": True, "index_updated": True, "updated_path": "x.md"},
+            "updated_path": None,
+        }
+        with patch.object(mcp_bridge, "_run_brain", return_value=_completed(stdout=json.dumps(cli_payload))):
+            result = mcp_bridge._execute_tool("update_project_path", {"id": "project-example", "path": "/b"})
+        self.assertEqual(result, {
+            "id": "project-example", "old_path": "/a", "new_path": "/b", "changed": True,
+            "registry_updated": True, "index_updated": True, "updated_path": "x.md",
         })
 
     def test_non_json_output_raises_clear_bridge_error(self):

@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## Unreleased
+
+### Added
+
+- `brain project update --path <dir>` and the MCP tool `update_project_path`
+  change a project's working-directory path in its record and its registry
+  entry together, under the same write lock and rollback journal as a status
+  change. Previously only the record's frontmatter could be changed, which
+  left the registry (read by `get_project`, `project sync` and `/resume`)
+  naming the old path. The path must be absolute, without `..`, and outside
+  the vault; it is not checked for existence, because the host running Brain
+  usually cannot see the project's directory. Re-running it when both
+  already agree is a no-op.
+
+### Changed
+
+- `brain project update --set path=...` is refused with a pointer to
+  `--path`, the same way `--set status=...` already points to `--status`.
+
 ## 0.14.8 — Honest systemd state on hosts without a user manager
 
 ### Fixed
