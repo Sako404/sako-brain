@@ -46,6 +46,12 @@ class TestSystemdStatus(unittest.TestCase):
         with patch.object(systemdstatus, '_systemctl', side_effect=[response('loaded'), None, None]):
             self.assertEqual(systemdstatus.timer_status('').diagnostic, 'state-query-incomplete')
 
+    def test_user_manager_available_requires_successful_query(self):
+        for result, expected in ((response('256\n'), True), (None, False),
+                                 (response('', 1, '/private'), False)):
+            with self.subTest(result=result), patch.object(systemdstatus, '_systemctl', return_value=result):
+                self.assertIs(systemdstatus.user_manager_available(), expected)
+
     def test_list_timers_does_not_claim_absence_when_query_fails(self):
         with patch.object(systemdstatus, '_systemctl', return_value=response('', 1, '/private')):
             result = systemdstatus.list_timers_raw()

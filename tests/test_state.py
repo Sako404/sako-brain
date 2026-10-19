@@ -12,8 +12,10 @@ import inspect
 import json
 import unittest
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from brain import identity, indexer, memoryqueue, state
+from brain.systemdstatus import TimerStatus
 from brain.handoff import HandoffSections, write as write_handoff
 from tests.helpers import TempVault
 
@@ -306,6 +308,35 @@ class TestOperationalStatePartialFailure(unittest.TestCase):
         result = state.get_operational_state(self.config)
         self.assertTrue(result.sources["integrity_ref"].ok)
         self.assertIsNone(result.integrity_ref.total_notes)
+
+
+class TestOperationalStateSystemd(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_unavailable_user_manager_reports_not_checked_without_degrading(self):
+        with patch.object(state, "user_manager_available", return_value=False), \
+             patch.object(state, "timer_status") as timer_status:
+            result = state.get_operational_state(self.config)
+        self.assertEqual(result.systemd.manager, "unavailable")
+        self.assertEqual(result.systemd.timers, [])
+        timer_status.assert_not_called()
+        self.assertTrue(result.sources["systemd"].ok)
+
+    def test_available_user_manager_lists_each_timer(self):
+        fake = TimerStatus("synthetic.timer", "enabled", "active")
+        with patch.object(state, "user_manager_available", return_value=True), \
+             patch.object(state, "timer_status", return_value=fake):
+            result = state.get_operational_state(self.config)
+        self.assertEqual(result.systemd.manager, "available")
+        self.assertEqual(result.systemd.timers, [fake] * len(state.TIMER_UNITS))
+
+    def test_section_default_is_unknown_when_not_collected(self):
+        self.assertEqual(state.SystemdSection().manager, "unknown")
 
 
 class TestOperationalStateDeterminism(unittest.TestCase):

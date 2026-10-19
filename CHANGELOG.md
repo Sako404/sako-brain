@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.14.8 — Honest systemd state on hosts without a user manager
+
+### Fixed
+
+- `brain state` and MCP `get_operational_state` no longer list each backup
+  timer as `unknown/unknown` with `manager-query-failed` when the host has
+  no systemd user manager, such as a server container. The `systemd`
+  section gains a `manager` field (`available`, `unavailable` or
+  `unknown`); when it is `unavailable` the timer list is empty and the
+  text output says the timers were not checked. `sources.systemd.ok` stays
+  true, because the collector ran and nothing failed.
+
 ## 0.14.7 — Review follow-ups to 0.14.6
 
 ### Fixed

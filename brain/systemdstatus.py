@@ -36,6 +36,15 @@ class TimerStatus:
     diagnostic: str = ""  # fixed category; never raw stdout/stderr
 
 
+def user_manager_available() -> bool:
+    """True only when a `systemctl --user` query succeeds. A host without a
+    user manager (a container, a server without lingering) cannot report
+    timer state at all, so callers should say "not checked" rather than
+    list every unit as unknown."""
+    probe = _systemctl("show", "--property=Version", "--value")
+    return probe is not None and probe.returncode == 0
+
+
 def timer_status(unit: str) -> TimerStatus:
     """Normalize machine-readable states; stderr is never part of the API.
 

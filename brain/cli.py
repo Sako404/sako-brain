@@ -859,6 +859,8 @@ def cmd_state(config: Config, args) -> int:
     print(f"Projects with handoffs: {len(result.handoffs.project_ids)}")
     print(f"Doctor problems: {result.doctor.problem_count} ({result.doctor.blocking_count} blocking)")
     print(f"Timeline (last {result.timeline_recent.window_days}d): {len(result.timeline_recent.entries)} entries")
+    if result.systemd.manager == "unavailable":
+        print("Timers: not checked (no systemd user manager on this host)")
     for t in result.systemd.timers:
         print(f"  {t.unit}: {t.enabled}/{t.active}")
     return 0
