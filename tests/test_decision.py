@@ -121,3 +121,50 @@ class TestDecisionSetsOwnership(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSupersedeTakesTheWriteLock(unittest.TestCase):
+    """Marking the old decision superseded is a read-modify-write of that
+    record; without the shared write lock a concurrent update_memory append
+    to the same record could be overwritten and lost."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.old = decision.create_decision(self.config, title="Old choice", date="2026-09-01")
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_supersede_waits_for_a_lock_held_by_another_process(self):
+        import subprocess
+        import sys
+        import threading
+        from brain import projectops
+
+        lock_path = self.config.state_dir / projectops.LOCK_FILENAME
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        holder = subprocess.Popen(
+            [sys.executable, "-c",
+             "import fcntl, sys\n"
+             f"fh = open({str(lock_path)!r}, 'a+')\n"
+             "fcntl.flock(fh.fileno(), fcntl.LOCK_EX)\n"
+             "print('HELD', flush=True)\n"
+             "sys.stdin.readline()\n"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(holder.stdout.readline().strip(), "HELD")
+            old_id = frontmatter.parse_file(self.old).id
+            worker = threading.Thread(target=decision.create_decision, kwargs=dict(
+                config=self.config, title="New choice", supersedes=old_id, date="2026-09-02"))
+            worker.start()
+            worker.join(timeout=1.0)
+            self.assertTrue(worker.is_alive(), "supersede ran while another process held the lock")
+            self.assertNotEqual(frontmatter.parse_file(self.old).meta["status"], "superseded")
+        finally:
+            holder.stdin.write("\n")
+            holder.stdin.flush()
+            holder.wait(timeout=30)
+        worker.join(timeout=30)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(frontmatter.parse_file(self.old).meta["status"], "superseded")

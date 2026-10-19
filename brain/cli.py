@@ -85,11 +85,16 @@ def cmd_list(config: Config, args) -> int:
     if not result.page_complete:
         detail = (f"this is a page starting at offset {result.offset}, not the whole result"
                   if result.offset else "the limit cut the result")
-        hint = (f"re-run with --offset {result.next_offset} to continue, or --offset 0 "
-                f"--limit {max(result.total_visible, 1)} for the whole list"
-                if result.next_offset is not None
-                else f"re-run with --offset 0 --limit {max(result.total_visible, 1)} "
+        # One call can return at most MAX_LIMIT entries; past that, suggesting
+        # `--limit <total>` would be silently clamped into another partial page.
+        if result.total_visible <= listing.MAX_LIMIT:
+            whole = f"--offset 0 --limit {max(result.total_visible, 1)} for the whole list"
+        else:
+            whole = (f"page through with --limit {listing.MAX_LIMIT} from --offset 0 "
                      f"for the whole list")
+        hint = (f"re-run with --offset {result.next_offset} to continue, or {whole}"
+                if result.next_offset is not None
+                else f"re-run with {whole}")
         print(f"  page: {detail} — {hint}.", file=sys.stderr)
     if not result.source_complete:
         print(f"  source: completeness could not be verified; {result.unreadable} unreadable and "
