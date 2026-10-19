@@ -36,7 +36,15 @@ command line and configuration format may change between minor versions.
   are written as real YAML lists, not as their Python repr string.
 - Refuse ambiguous write targets, including orphaned handoffs, while allowing
   ACL-filtered reads of visible copies. Hidden aliases and missing records
-  receive neutral refusals.
+  receive neutral refusals. These refusals reach the CLI as an error message
+  rather than a traceback: `handoff write`, `project close`,
+  `project section-update` and `decision create --supersedes`.
+- `brain project close` reports `index_updated` and `handoff_moved` the same
+  way `project update --status` does, and warns when only the search index
+  is behind.
+- A status change that re-runs on a record already carrying the target
+  status, but missing `updated:`, now stamps the date instead of failing and
+  rolling the move back.
 - Coordinate project, registry, generic update, handoff and migration writes
   with one reentrant process lock. Status changes move handoffs with their
   projects and roll back recoverable failures without manufacturing copies.

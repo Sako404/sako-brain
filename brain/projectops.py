@@ -48,6 +48,7 @@ class ProjectWriteError(ValueError):
 
 
 STATUS_WRITE_DENIED = "project status change is not permitted"
+SECTION_WRITE_DENIED = "project section edit is not permitted"
 
 
 @dataclass
@@ -534,7 +535,10 @@ def _set_project_status_locked(config: Config, project_id: str,
             journal.reverse_rename(record_path, target_record)
             moved = True
 
-        if note.meta.get("status") != new_status:
+        # A record that already claims new_status but has no `updated` is
+        # still stamped: the registry write below needs a date, and the
+        # converge re-run must be able to repair exactly such legacy records.
+        if note.meta.get("status") != new_status or not note.meta.get("updated"):
             journal.restore_text_of(target_record)
             note.meta["status"] = new_status
             note.meta["updated"] = dt.date.today().isoformat()
@@ -688,6 +692,10 @@ def _update_section_locked(config: Config, project_id: str, section: str, mode: 
         path = resolve_write_target(config, project_id)
     except FileNotFoundError:
         raise SectionEditError(f"no project record with id or alias '{requested_id}'") from None
+    except (OSError, frontmatter.FrontmatterError):
+        # Same reason as in set_project_status: resolving scans other
+        # records, and an unreadable one must not leak its path.
+        raise SectionEditError(SECTION_WRITE_DENIED) from None
     note = frontmatter.parse_file(path)
     if note.type != "project":
         raise SectionEditError(f"'{project_id}' is not a project record (type={note.type!r})")

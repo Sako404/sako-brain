@@ -311,3 +311,91 @@ class TestMalformedListingMetadata(FixCase):
         self.assertTrue(result.complete)
         self.assertEqual(result.entries[0].tags, ['target'])
         self.assertEqual(result.entries[0].projects, ['project-example'])
+
+
+class TestReviewFollowUps(FixCase):
+    """Review of PR #49: refusals the new resolver raises must reach the CLI
+    user as a message, not a traceback, and `project close` must report what
+    `project update --status` reports."""
+
+    def run_cli(self, argv, stdin=''):
+        out, err = io.StringIO(), io.StringIO()
+        env = {'BRAIN_ROOT': str(self.vault.root), 'BRAIN_STATE_DIR': str(self.vault.state_dir)}
+        with patch.dict(os.environ, env), patch('sys.stdin', io.StringIO(stdin)), \
+                redirect_stdout(out), redirect_stderr(err):
+            rc = cli.main(argv)
+        return rc, out.getvalue(), err.getvalue()
+
+    def duplicate(self, path, folder):
+        copy = self.config.projects_dir / folder / path.name
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_bytes(path.read_bytes())
+        return copy
+
+    def test_stray_handoff_is_a_cli_refusal_not_a_traceback(self):
+        self.project()
+        self.duplicate(handoff.write(self.config, 'project-example',
+                                     handoff.HandoffSections(changed='original')), 'ON-HOLD')
+        handoff.handoff_path(self.config, 'project-example').unlink()
+        before = self.snapshot()
+        rc, _, err = self.run_cli(['handoff', 'write', '--project', 'project-example'],
+                                  stdin=json.dumps({'changed': 'new'}))
+        self.assertEqual(rc, 1)
+        self.assertIn('Nothing was written', err)
+        self.assertEqual(before, self.snapshot())
+
+    def test_stray_handoff_hidden_from_caller_is_a_handoff_error(self):
+        self.project()
+        self.duplicate(handoff.write(self.other, 'project-example',
+                                     handoff.HandoffSections(changed='original')), 'ON-HOLD')
+        handoff.handoff_path(self.config, 'project-example').unlink()
+        with self.assertRaises(handoff.HandoffError):
+            handoff.write(self.config, 'project-example', handoff.HandoffSections(changed='new'))
+
+    def test_duplicate_record_id_is_a_cli_refusal_for_close_and_section_update(self):
+        record = self.project()
+        self.duplicate(record, 'ON-HOLD')
+        before = self.snapshot()
+        for argv in (['project', 'close', 'project-example'],
+                     ['project', 'section-update', 'project-example', '--section',
+                      'Next actions', '--mode', 'append', '--content', 'x']):
+            rc, _, err = self.run_cli(argv)
+            self.assertEqual(rc, 1, argv)
+            self.assertIn('does not resolve to a single record', err)
+        self.assertEqual(before, self.snapshot())
+
+    def test_unreadable_scan_during_section_update_reveals_no_path(self):
+        self.project()
+        with patch.object(projectops, 'resolve_write_target',
+                          side_effect=OSError(f'{self.vault.root}/secret.md')):
+            with self.assertRaises(projectops.SectionEditError) as caught:
+                projectops.update_section(self.config, 'project-example', 'Next actions',
+                                          'append', 'x')
+        self.assertEqual(str(caught.exception), projectops.SECTION_WRITE_DENIED)
+
+    def test_converge_repairs_a_record_without_updated(self):
+        record = self.project()
+        text = record.read_text()
+        text = text.replace('status: active', 'status: archived')
+        text = '\n'.join(l for l in text.splitlines() if not l.startswith('updated:')) + '\n'
+        record.write_text(text)
+        result = projectops.set_project_status(self.config, 'project-example', 'archived')
+        self.assertTrue(result.moved)
+        self.assertTrue(frontmatter.parse_file(result.new_path).meta.get('updated'))
+
+    def test_close_reports_index_and_handoff_like_update(self):
+        self.project()
+        handoff.write(self.config, 'project-example', handoff.HandoffSections(changed='original'))
+        with patch.object(projectops.indexer, 'index_note', side_effect=RuntimeError('simulated')):
+            rc, out, _ = self.run_cli(['project', 'close', 'project-example', '--json'])
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertFalse(payload['index_updated'])
+        self.assertTrue(payload['handoff_moved'].endswith('project-example-handoff.md'))
+
+    def test_close_text_output_warns_when_only_the_index_is_behind(self):
+        self.project()
+        with patch.object(projectops.indexer, 'index_note', side_effect=RuntimeError('simulated')):
+            rc, out, _ = self.run_cli(['project', 'close', 'project-example'])
+        self.assertEqual(rc, 0)
+        self.assertIn('run `brain index`', out)

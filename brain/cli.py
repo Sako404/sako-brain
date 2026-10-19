@@ -442,13 +442,22 @@ def cmd_project_close(config: Config, args) -> int:
         print(json.dumps({
             "id": r.id, "old_status": r.old_status, "new_status": r.new_status,
             "moved": r.moved, "registry_updated": r.registry_updated,
+            "index_updated": r.index_updated,
+            "handoff_moved": (str(r.handoff_new_path.relative_to(config.brain_root))
+                               if r.handoff_new_path else None),
             "updated_path": str(r.new_path.relative_to(config.brain_root)),
         }, indent=2, ensure_ascii=False))
         return 0
     print(f"Closed {args.id}: {r.old_status} -> {r.new_status}")
     if r.moved:
         print(f"Moved to {r.new_path.relative_to(config.brain_root)}")
+    if r.handoff_new_path is not None:
+        print(f"Handoff moved with it: {r.handoff_old_path.relative_to(config.brain_root)} "
+              f"-> {r.handoff_new_path.relative_to(config.brain_root)}")
     print(f"Registry updated: {r.registry_updated}")
+    if not r.index_updated:
+        print("WARNING: the record and registry are correct, but the search "
+              "index could not be updated — run `brain index`.")
     return 0
 
 
@@ -2023,6 +2032,9 @@ USER_FACING_ERRORS = (
     projectops.ProjectWriteError,
     projectops.SectionEditError,
     memoryops.MemoryWriteError,
+    # Includes AmbiguousNoteIdError, which every write-by-id path (handoff,
+    # project close/section-update, decision --supersedes) can now raise.
+    update_mod.UpdateError,
     timeline.TimelineWriteError,
     writepolicy.WritePolicyError,
     rolepolicy.RolePolicyError,

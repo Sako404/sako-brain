@@ -167,8 +167,7 @@ def _write_locked(config: Config, project_id: str, sections: HandoffSections,
         audit_ambiguous_id(config, handoff_id, stray + [path] if path.exists() else stray,
                             config.acting_principal)
         if not visibility.visible_note_paths(config, config.acting_principal, handoff_id):
-            raise FileNotFoundError(MISSING_ID_MESSAGE.format(
-                note_id=handoff_id, root=config.brain_root))
+            raise HandoffError(MISSING_ID_MESSAGE.format(note_id=handoff_id))
         raise AmbiguousNoteIdError(
             f"the handoff for '{entry.id}' already exists somewhere other than the "
             "location its current project status resolves to, so writing here would "
