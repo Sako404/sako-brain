@@ -11,7 +11,7 @@ Never expose this over a network socket — stdio only, local use only.
 
 Write-policy note: every write tool here (`remember`, `update_memory`,
 `write_handoff`, `create_decision`, `create_project`, `update_project_status`,
-`close_project`, `update_project_section`, `create_memory_note`,
+`update_project_path`, `close_project`, `update_project_section`, `create_memory_note`,
 `create_timeline_event`) is a thin wrapper over the same business-logic
 function the CLI calls — no tool
 duplicates logic the CLI doesn't also have. None bypasses
@@ -408,6 +408,22 @@ def tool_update_project_status(config: Config, id: str, status: str) -> dict:
     return _status_change_payload(config, result)
 
 
+def tool_update_project_path(config: Config, id: str, path: str) -> dict:
+    """Change a project's working-directory path in its record AND its
+    registry entry, together — `update_memory` with `path` would change
+    only the record. The path is a reference only and is not checked for
+    existence (the server usually cannot see it); it must be absolute and
+    must not point into the vault. Safe to re-run: `changed: false` means
+    both already named this path."""
+    _scan_for_secrets(path)
+    r = projectops.set_project_path(config, id, path)
+    return {
+        "id": r.id, "old_path": r.old_path, "new_path": r.new_path, "changed": r.changed,
+        "registry_updated": r.registry_updated, "index_updated": r.index_updated,
+        "updated_path": str(r.record_path.relative_to(config.brain_root)),
+    }
+
+
 def tool_close_project(config: Config, id: str, summary: str = "") -> dict:
     """Thin wrapper over projectops.close_project(). No new logic."""
     _scan_for_secrets(summary)
@@ -606,6 +622,14 @@ TOOLS = {
         "type": "object",
         "properties": {"id": {"type": "string"}, "status": {"type": "string"}},
         "required": ["id", "status"],
+    }),
+    "update_project_path": (tool_update_project_path, {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "path": {"type": "string", "description": "New absolute working-directory path — reference only, never read or copied"},
+        },
+        "required": ["id", "path"],
     }),
     "close_project": (tool_close_project, {
         "type": "object",

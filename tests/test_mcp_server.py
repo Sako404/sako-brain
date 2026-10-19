@@ -391,7 +391,7 @@ class TestMcpProjectWriteTools(unittest.TestCase):
     def test_all_listed_in_tools(self):
         resp = mcp_server.handle_request(self.config, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         names = {t["name"] for t in resp["result"]["tools"]}
-        for expected in ("create_project", "update_project_status", "close_project"):
+        for expected in ("create_project", "update_project_status", "update_project_path", "close_project"):
             self.assertIn(expected, names)
 
     def test_create_project(self):
@@ -410,6 +410,21 @@ class TestMcpProjectWriteTools(unittest.TestCase):
         self.assertEqual(payload["new_status"], "on-hold")
         self.assertTrue(payload["moved"])
         self.assertTrue(payload["registry_updated"])
+
+    def test_update_project_path_syncs_record_and_registry(self):
+        _call(self.config, "create_project", {"id": "project-widget", "name": "Widget", "path": "/a"})
+        resp = _call(self.config, "update_project_path", {"id": "project-widget", "path": "/b"})
+        self.assertNotIn("error", resp)
+        payload = json.loads(resp["result"]["content"][0]["text"])
+        self.assertEqual(payload["old_path"], "/a")
+        self.assertEqual(payload["new_path"], "/b")
+        self.assertTrue(payload["changed"])
+        self.assertTrue(payload["registry_updated"])
+
+    def test_update_project_path_refuses_relative_path(self):
+        _call(self.config, "create_project", {"id": "project-widget", "name": "Widget", "path": "/a"})
+        resp = _call(self.config, "update_project_path", {"id": "project-widget", "path": "b"})
+        self.assertTrue("error" in resp or resp["result"].get("isError"))
 
     def test_close_project(self):
         _call(self.config, "create_project", {"id": "project-widget", "name": "Widget", "path": "/a"})

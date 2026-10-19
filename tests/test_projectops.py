@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import dataclasses
 import unittest
+from unittest.mock import patch
 
 from brain import frontmatter, projectops
 from brain.registry import load_registry
@@ -148,6 +149,104 @@ class TestCloseProject(unittest.TestCase):
     def test_no_summary_is_fine(self):
         result = projectops.close_project(self.config, "project-widget")
         self.assertEqual(result.new_status, "archived")
+
+
+class TestSetProjectPath(unittest.TestCase):
+    """The record's `path:` and the registry's `path:` must change together,
+    or not at all."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        projectops.create_project(
+            self.config, id="project-widget", name="Widget", path="/old/widget",
+            status="active", aliases=["widget"], created="2026-01-01",
+        )
+        projectops.create_project(
+            self.config, id="project-other", name="Other", path="/old/other",
+            status="active", created="2026-01-01",
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _record(self):
+        return frontmatter.parse_file(self.config.projects_dir / "ACTIVE" / "project-widget.md")
+
+    def _entries(self):
+        return {e.id: e for e in load_registry(self.config)}
+
+    def test_updates_record_and_registry_together(self):
+        result = projectops.set_project_path(self.config, "project-widget", "/new/widget")
+        self.assertTrue(result.changed)
+        self.assertTrue(result.registry_updated)
+        self.assertEqual(result.old_path, "/old/widget")
+        self.assertEqual(result.new_path, "/new/widget")
+        self.assertEqual(self._record().meta["path"], "/new/widget")
+        self.assertEqual(self._entries()["project-widget"].path, "/new/widget")
+
+    def test_other_registry_entries_untouched(self):
+        before = self.config.registry_path.read_text(encoding="utf-8")
+        other_block = before[before.index("  - id: project-other"):]
+        projectops.set_project_path(self.config, "project-widget", "/new/widget")
+        self.assertTrue(self.config.registry_path.read_text(encoding="utf-8").endswith(other_block))
+
+    def test_alias_resolves_to_canonical_id(self):
+        result = projectops.set_project_path(self.config, "widget", "/new/widget")
+        self.assertEqual(result.id, "project-widget")
+        self.assertEqual(self._entries()["project-widget"].path, "/new/widget")
+
+    def test_same_path_is_a_no_op(self):
+        before = self.config.registry_path.read_text(encoding="utf-8")
+        result = projectops.set_project_path(self.config, "project-widget", "/old/widget")
+        self.assertFalse(result.changed)
+        self.assertEqual(self.config.registry_path.read_text(encoding="utf-8"), before)
+
+    def test_converges_when_only_the_registry_is_stale(self):
+        # The state a frontmatter-only edit leaves behind.
+        record = self.config.projects_dir / "ACTIVE" / "project-widget.md"
+        note = frontmatter.parse_file(record)
+        note.meta["path"] = "/new/widget"
+        record.write_text(frontmatter.render(note), encoding="utf-8")
+        result = projectops.set_project_path(self.config, "project-widget", "/new/widget")
+        self.assertTrue(result.changed)
+        self.assertEqual(self._entries()["project-widget"].path, "/new/widget")
+
+    def test_invalid_paths_refused_without_writing(self):
+        before = self.config.registry_path.read_text(encoding="utf-8")
+        for bad in ("", "   ", "relative/dir", "/a/../b", "/a/b\nc",
+                    str(self.config.brain_root), str(self.config.brain_root / "30_PROJECTS")):
+            with self.subTest(path=bad):
+                with self.assertRaises(projectops.ProjectWriteError):
+                    projectops.set_project_path(self.config, "project-widget", bad)
+        self.assertEqual(self.config.registry_path.read_text(encoding="utf-8"), before)
+        self.assertEqual(self._record().meta["path"], "/old/widget")
+
+    def test_path_of_another_project_refused(self):
+        with self.assertRaises(projectops.ProjectWriteError):
+            projectops.set_project_path(self.config, "project-widget", "/old/other")
+
+    def test_unknown_project_id_fails_cleanly(self):
+        with self.assertRaises(projectops.ProjectWriteError):
+            projectops.set_project_path(self.config, "project-nope", "/new")
+
+    def test_non_owner_refused(self):
+        other = dataclasses.replace(self.config, acting_principal="principal-other")
+        with self.assertRaises(projectops.ProjectWriteError):
+            projectops.set_project_path(other, "project-widget", "/new/widget")
+        self.assertEqual(self._record().meta["path"], "/old/widget")
+        self.assertEqual(self._entries()["project-widget"].path, "/old/widget")
+
+    def test_registry_failure_rolls_back_the_record(self):
+        record_before = (self.config.projects_dir / "ACTIVE" / "project-widget.md").read_bytes()
+        registry_before = self.config.registry_path.read_bytes()
+        with patch.object(projectops, "set_registry_fields", side_effect=OSError("disk full")):
+            with self.assertRaises(projectops.ProjectWriteError) as ctx:
+                projectops.set_project_path(self.config, "project-widget", "/new/widget")
+        self.assertIn("was rolled back", str(ctx.exception))
+        self.assertEqual((self.config.projects_dir / "ACTIVE" / "project-widget.md").read_bytes(),
+                         record_before)
+        self.assertEqual(self.config.registry_path.read_bytes(), registry_before)
 
 
 class TestUpdateSection(unittest.TestCase):
