@@ -16,6 +16,8 @@ class TestHandoff(unittest.TestCase):
             "    path: /tmp/does-not-need-to-exist-for-this-test\n"
             "    status: active\n"
         )
+        self.vault.write_note('30_PROJECTS/ACTIVE', 'project-example.md',
+                              id='project-example', type='project', status='active')
 
     def tearDown(self):
         self.vault.cleanup()
@@ -114,6 +116,8 @@ class TestEmptyHandoffIsRefused(unittest.TestCase):
         registry = self.vault.root / "30_PROJECTS" / "_registry.yaml"
         registry.write_text(
             "projects:\n  - id: project-x\n    name: X\n    path: /tmp/x\n    status: active\n")
+        self.vault.write_note('30_PROJECTS/ACTIVE', 'project-x.md',
+                              id='project-x', type='project', status='active')
 
     def tearDown(self):
         self.vault.cleanup()
@@ -139,9 +143,8 @@ class TestEmptyHandoffIsRefused(unittest.TestCase):
 class TestHandoffVisibility(unittest.TestCase):
     """Stage 2 (multi-user visibility): a handoff's visibility comes from
     its OWN frontmatter, read live — not inherited from its parent
-    project. `write()` and `handoff_path()`/`_registry_entry()` stay
-    unfiltered (write-path project resolution is out of Stage 2's scope);
-    only read_latest/has_handoff/list_projects_with_handoffs enforce it."""
+    project. Reads use the handoff ACL independently. Writes additionally require a
+    visible project before deriving the canonical handoff location."""
 
     def setUp(self):
         self.vault = TempVault()
@@ -153,6 +156,8 @@ class TestHandoffVisibility(unittest.TestCase):
             "    path: /tmp/does-not-need-to-exist-for-this-test\n"
             "    status: active\n"
         )
+        self.vault.write_note('30_PROJECTS/ACTIVE', 'project-example.md',
+                              id='project-example', type='project', status='active')
         sections = handoff.HandoffSections(attempted="x", changed="y")
         self.path = handoff.write(self.config, "project-example", sections, session_date="2026-07-01")
 
@@ -207,6 +212,8 @@ class TestWriteSetsOwnership(unittest.TestCase):
             "    path: /tmp/does-not-need-to-exist-for-this-test\n"
             "    status: active\n"
         )
+        self.vault.write_note('30_PROJECTS/ACTIVE', 'project-example.md',
+                              id='project-example', type='project', status='active', audience=['principal:ania'])
 
     def tearDown(self):
         self.vault.cleanup()

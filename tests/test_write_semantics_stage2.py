@@ -131,6 +131,8 @@ class TestOwnerOnlyHoldsAcrossEveryModifyPath(WriteSemanticsTestCase):
             "projects:\n  - id: project-x\n    name: X\n"
             "    path: /tmp/x\n    status: active\n"
         )
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-x.md", id="project-x",
+                              type="project", status="active", audience=["principal:ania"])
         handoff.write(self._as("principal-marcin"), "project-x",
                       handoff.HandoffSections(attempted="first"))
         with self.assertRaises(handoff.HandoffError):

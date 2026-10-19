@@ -92,7 +92,16 @@ def handle_mcp_request(req: dict, granted_scopes: frozenset[str]) -> dict | None
     if method == "tools/list":
         if is_notification:
             return None
-        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": _annotated_tools_list(granted_scopes)}}
+        try:
+            tools = _annotated_tools_list(granted_scopes)
+        except mcp_bridge.BridgeError:
+            # A JSON-RPC request gets a JSON-RPC error over HTTP 200. Never
+            # expose subprocess stderr (which may include credentials/paths),
+            # or advertise an empty capability surface on a failed lookup.
+            return {"jsonrpc": "2.0", "id": req_id, "error": {
+                "code": -32603, "message": "Brain backend unavailable",
+            }}
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": tools}}
 
     response = mcp_bridge.handle_request(req)
     if method == "initialize" and response is not None and "result" in response:

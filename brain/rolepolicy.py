@@ -66,7 +66,14 @@ class RolePolicyError(ValueError):
     """A write refused by role policy — distinct from VisibilityError
     (which is about who can see what) and UpdateError/ProjectWriteError/etc.
     (which are about ownership) — this is specifically "your role doesn't
-    permit this operation"."""
+    permit this operation".
+
+    `reason` is a short, content-free code for the audit log, as on
+    writepolicy.WritePolicyError."""
+
+    def __init__(self, message: str, reason: str = "role_policy"):
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclasses.dataclass(frozen=True)
@@ -285,7 +292,8 @@ def require_restricted_write_allowed(config: Config, principal_id: str, sensitiv
     policy = policy_for_principal(config, principal_id)
     if not policy.can_write_restricted:
         raise RolePolicyError(
-            f"'{principal_id}'s role does not permit writing sensitivity='restricted' content"
+            f"'{principal_id}'s role does not permit writing sensitivity='restricted' content",
+            reason="role_restricted_denied",
         )
 
 
@@ -310,5 +318,6 @@ def require_audience_allowed(config: Config, principal_id: str, audience: list[s
     if disallowed:
         raise RolePolicyError(
             f"'{principal_id}'s role may not share with {disallowed} — "
-            f"allowed targets: {sorted(allowed) or '(none)'}"
+            f"allowed targets: {sorted(allowed) or '(none)'}",
+            reason="role_audience_denied",
         )

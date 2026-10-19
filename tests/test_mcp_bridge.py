@@ -197,6 +197,7 @@ class TestTranslatorsPreferJsonOverTextParsing(unittest.TestCase):
 
     MINIMAL_ARGS = {
         "search_memory": {"query": "x"},
+        "list_notes": {},
         "get_context": {"query": "x"},
         "read_memory": {"id": "x"},
         "list_projects": {},
@@ -383,6 +384,15 @@ class TestConfirmRestrictedForwarding(unittest.TestCase):
             "sensitivity": "restricted", "confirm_restricted": True,
         })
         self.assertIn("--confirm-restricted", argv)
+
+    def test_update_memory_sends_lists_as_json_not_python_repr(self):
+        argv, _ = mcp_bridge._t_update_memory({
+            "id": "x", "set_fields": {"people": ["person-a", "person-b"], "status": "current"},
+        })
+        self.assertIn("--set-json", argv)
+        self.assertIn('people=["person-a", "person-b"]', argv)
+        self.assertIn("status=current", argv)
+        self.assertFalse(any("['person-a'" in part for part in argv))
 
     def test_update_memory_forwards_confirm_restricted(self):
         argv, _ = mcp_bridge._t_update_memory({

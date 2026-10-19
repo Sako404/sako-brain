@@ -27,6 +27,18 @@ noise.
    phrasing first (e.g. the project's actual name), then broaden if
    nothing useful comes back. Multiple targeted searches beat one vague
    one.
+
+   `brain search` is ranked **full-text** search with a limit, and it has
+   no filter syntax — it is the right tool for "which notes mention this?"
+   and the wrong one for "list everything that is still open". For that,
+   use `brain list --type decision --status proposed` (a complete listing
+   by metadata, which reports its own `total_visible` and `complete` — and
+   `complete` is false for any page, the last one included, and false when
+   a file claiming to be a note could not be read), or
+   `brain state` for the whole operational snapshot. A query like
+   `"status: proposed"` typed into `search` matches the *words*, so it
+   returns decided records and misses proposed ones — this has produced a
+   wrong state report before.
 3. **Retrieve only relevant records** — `brain get <id>` for the specific
    notes that matter. Do not dump the whole Brain into context; a
    handful of targeted notes is the goal, not exhaustive recall.
@@ -41,7 +53,16 @@ noise.
 6. **Prefer strong/newer evidence** when sources disagree — see AGENTS.md
    "Source priority." A dated, explicit statement beats an undated
    inference; current project files beat an old Brain snapshot.
-7. **Answer using the retrieved context** — cite what you found naturally
+7. **Before reporting on Brain's own state** (counts of open items,
+   whether work is finished, what is left to do), follow
+   the shared state-audit procedure
+   (https://github.com/Sako404/sako-brain/blob/main/docs/STATE_AUDIT_PROCEDURE.md): fresh
+   snapshot → complete metadata listing → full record → latest handoff →
+   later closures → production check if available and needed. Label each
+   claim as metadata status, content state, production-verified, or
+   unverified — and never treat an old "closed" mention inside a long
+   record as a ruling on the record itself.
+8. **Answer using the retrieved context** — cite what you found naturally
    (e.g. "per the Brain record, as of 2026-07-19..."), and say plainly
    when nothing relevant was found rather than guessing.
 

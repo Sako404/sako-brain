@@ -339,7 +339,7 @@ class Test23AuditAttributionCorrectAndSafe(SecurityAcceptanceTestCase):
     def test_item_23_sharing_denial_is_attributed_to_the_real_actor_not_the_owner(self):
         from brain import capture
         capture.capture(self._as("principal-marcin"), type_="fact", title="A fact")
-        with self.assertRaises(update_mod.UpdateError):
+        with self.assertRaises(FileNotFoundError):
             update_mod.update_memory(self._as("principal-ania"), "fact-a-fact",
                                       set_fields={"audience": ["group:x"]})
         log_files = list(self.config.logs_dir.glob("brain-audit-*.log"))
@@ -391,7 +391,7 @@ class Test26AdminRoleGrantsNoContentBypass(SecurityAcceptanceTestCase):
         path = self.vault.write_note("60_KNOWLEDGE", "secret.md", id="knowledge-secret",
                                       type="knowledge", title="Ania's note",
                                       owner_principal="principal:ania", audience=[])
-        with self.assertRaises(update_mod.UpdateError):
+        with self.assertRaises(FileNotFoundError):
             update_mod.update_memory(self._as("principal-marcin"), "knowledge-secret",
                                       set_fields={"status": "current"})
         note = frontmatter.parse_file(path)

@@ -73,7 +73,7 @@ def caller_provenance(config: Config) -> dict:
     present, and the SSH identity that actually connected
     (`remote-gateway-read`/`-write`) moves to `delegator` so it is never
     silently lost. Every other caller (desktop, Claude Code, Codex, local
-    SSH, TRON) has no OAuth client at all, so `client_id` falls back to
+    SSH, example-service) has no OAuth client at all, so `client_id` falls back to
     exactly what it always was — the connecting SSH identity — and
     `delegator` stays empty: zero behavior change for them.
 

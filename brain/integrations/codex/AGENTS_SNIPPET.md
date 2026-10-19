@@ -23,7 +23,33 @@ preferences, projects, prior decisions, or history:
    and its search index as a rebuildable cache.
 4. For project work, verify the actual project repository and working-tree
    state. A Brain record or handoff is context, not proof of current state.
-5. If no supporting information is found, say so instead of guessing.
+5. If no supporting information is found, say so instead of guessing. A read
+   denied by visibility is indistinguishable from a missing record by design,
+   so "nothing visible to this principal" is never "nothing exists".
+
+When you report on Brain state (how many decisions are open, whether
+something is finished), pick the instrument deliberately:
+
+- `brain state` / `get_operational_state` — the deterministic, complete
+  operational snapshot. Start there.
+- `brain list` / `list_notes` — the complete listing **by metadata**
+  (`type`/`status`/`project`/`tag`), read from canonical Markdown, not the
+  search index. Check `complete` before quoting a number: it is false for
+  any page (including the last) and false when a file claiming to be a note
+  could not be read as one.
+- `brain search` / `search_memory` — ranked **full-text** search with a
+  limit, and no filter syntax. `status: proposed` is matched as the words
+  "status" and "proposed", so it returns `decided` records and misses
+  `proposed` ones. It cannot answer "how many are open".
+- `brain get` / `read_memory` for a full record (closure sections and later
+  corrections live at the *bottom* of long records), and `brain handoff show`
+  for the detail a deliberately-thin record omits.
+
+Keep apart, and label, the metadata `status`, what the content says, what was
+verified in production, and what is unverified. Metadata and content
+disagreeing is a finding to report, not a licence to change a status. The
+full procedure is at
+https://github.com/Sako404/sako-brain/blob/main/docs/STATE_AUDIT_PROCEDURE.md
 
 Follow the Brain's own memory and write policy — secret-pattern scanning
 and restricted-sensitivity confirmation apply to every write path

@@ -178,6 +178,8 @@ class TestOperationalStateHandoffs(unittest.TestCase):
             "    path: /tmp/does-not-need-to-exist\n"
             "    status: active\n"
         )
+        self.vault.write_note('30_PROJECTS/ACTIVE', 'project-alpha.md',
+                              id='project-alpha', type='project', status='active')
 
     def tearDown(self):
         self.vault.cleanup()
@@ -333,8 +335,7 @@ class TestOperationalStateDeterminism(unittest.TestCase):
 
 
 class TestOperationalStateScopeGuards(unittest.TestCase):
-    """No AI, no network side effects — enforced statically, the same way
-    TRON's test_no_special_cased_modules.py enforces its own boundary."""
+    """Enforce the aggregate's no-network/no-AI boundary statically."""
 
     def test_module_never_references_ai_or_slow_network_calls(self):
         source = inspect.getsource(state)

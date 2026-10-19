@@ -7,12 +7,12 @@ import json
 import sys
 from pathlib import Path
 
-from . import assistant, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, memoryops, memoryqueue, migrate_stage2, projectops, projectsync, rolepolicy, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, visibility, writepolicy
+from . import assistant, audit, backup, capture, context as context_mod, decision as decision_mod, discover, gitops, handoff, identity, indexer, integrity, listing, memoryops, memoryqueue, migrate_stage2, projectops, projectsync, rolepolicy, search, state as state_mod, systemdstatus, timeline, update as update_mod, validate, visibility, writepolicy
 from . import paths
 from . import __version__
 from . import init as init_mod
 from .gateway_client import BrainGatewayError
-from .frontmatter import parse_file
+from .frontmatter import FrontmatterError, parse_file
 from . import paths as paths_mod
 from .paths import Config, default_config
 from .registry import find_project, find_visible_project, load_registry, load_visible_registry
@@ -43,6 +43,61 @@ def cmd_search(config: Config, args) -> int:
         print(f"    {r.path}")
         if r.snippet:
             print(f"    {r.snippet}")
+    return 0
+
+
+
+def cmd_list(config: Config, args) -> int:
+    """Complete metadata listing — the deliberate counterpart to `cmd_search`.
+
+    `brain search` ranks note TEXT and stops at a limit; it can never answer
+    "list every proposed decision" correctly, because the word "proposed"
+    appears in the body of nearly every decision record's own template. The
+    human-readable output below always prints a completeness line, including
+    when the answer IS complete, so a reader never has to infer completeness
+    from the absence of a warning.
+    """
+    try:
+        result = listing.list_notes(
+            config, type=args.type, status=args.status, project=args.project,
+            tag=args.tag, limit=args.limit, offset=args.offset,
+        )
+    except listing.ListingError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+
+    if getattr(args, "json", False):
+        print(json.dumps(listing.result_to_dict(result), indent=2, ensure_ascii=False))
+        return 0
+
+    for e in result.entries:
+        print(f"{e.id}  [{e.type}/{e.status}]  updated {e.updated or '(none)'}")
+        print(f"    {e.title}")
+
+    shown = f"{result.returned} of {result.total_visible} visible"
+    if result.complete:
+        print(f"\n{shown} — complete. Sorted by {result.sort}. Scope: {result.scope}.")
+    else:
+        print(f"\n{shown} — NOT THE FULL LIST. Sorted by {result.sort}. "
+              f"Scope: {result.scope}.")
+    # Each reason is printed on its own, because they are independent and a
+    # caller fixes them differently: paginate, or repair the vault.
+    if not result.page_complete:
+        detail = (f"this is a page starting at offset {result.offset}, not the whole result"
+                  if result.offset else "the limit cut the result")
+        hint = (f"re-run with --offset {result.next_offset} to continue, or --offset 0 "
+                f"--limit {max(result.total_visible, 1)} for the whole list"
+                if result.next_offset is not None
+                else f"re-run with --offset 0 --limit {max(result.total_visible, 1)} "
+                     f"for the whole list")
+        print(f"  page: {detail} — {hint}.", file=sys.stderr)
+    if not result.source_complete:
+        print(f"  source: completeness could not be verified; {result.unreadable} unreadable and "
+              f"{result.unstructured_skipped} unstructured file(s) visible to you could "
+              f"not be classified by metadata. Unknown-visibility and traversal "
+              f"failures are not counted. Ask an administrator to run `brain doctor` "
+              f"and verify source access before trusting a count.",
+              file=sys.stderr)
     return 0
 
 
@@ -103,6 +158,19 @@ def cmd_get(config: Config, args) -> int:
     except FileNotFoundError:
         print(f"No note with id '{args.id}' found under {config.brain_root}.", file=sys.stderr)
         return 1
+    # A duplicated id used to mean this command silently printed whichever
+    # copy sorted first, with no hint that a second one existed and might
+    # hold newer history.
+    # Reads stay permissive on purpose — but never silent. Only
+    # copies this caller may actually see are named, so the warning cannot
+    # become a way to learn that someone else holds a record under this id.
+    visible_copies = visibility.visible_note_paths(config, config.acting_principal, args.id)
+    if len(visible_copies) > 1:
+        print(f"WARNING: id '{args.id}' is claimed by {len(visible_copies)} files; "
+              f"printed {visible_copies[0]}. The others may hold different content: "
+              + ", ".join(str(p) for p in visible_copies[1:])
+              + ". Run `brain doctor` (duplicate_ids) and reconcile before relying on this.",
+              file=sys.stderr)
     print(text)
     return 0
 
@@ -130,13 +198,26 @@ def cmd_remember(config: Config, args) -> int:
     return 0
 
 
-def _parse_set_fields(pairs: list[str]) -> dict:
+def _parse_set_fields(pairs: list[str], json_pairs: list[str] | None = None) -> dict:
+    """`--set KEY=VALUE` always stores VALUE as a string. `--set-json
+    KEY=JSON` stores the decoded value, which is how a list (people, tags,
+    projects...) or a non-string scalar reaches frontmatter as real YAML
+    rather than Python's str(list) — the MCP bridge sends every non-string
+    set_fields value this way."""
     fields = {}
     for pair in pairs:
         if "=" not in pair:
             raise ValueError(f"--set expects key=value, got '{pair}'")
         key, _, value = pair.partition("=")
         fields[key] = value
+    for pair in json_pairs or []:
+        if "=" not in pair:
+            raise ValueError(f"--set-json expects key=json, got '{pair}'")
+        key, _, raw = pair.partition("=")
+        try:
+            fields[key] = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"--set-json value for '{key}' is not valid JSON: {exc}") from None
     return fields
 
 
@@ -149,7 +230,7 @@ def cmd_update(config: Config, args) -> int:
     implicit confirmation, since this same command is also how the MCP
     bridge performs a write on an automated caller's behalf."""
     try:
-        set_fields = _parse_set_fields(args.set or [])
+        set_fields = _parse_set_fields(args.set or [], getattr(args, "set_json", None) or [])
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
@@ -307,13 +388,25 @@ def cmd_project_update(config: Config, args) -> int:
         status_change = {
             "old_status": r.old_status, "new_status": r.new_status,
             "moved": r.moved, "registry_updated": r.registry_updated,
+            "index_updated": r.index_updated,
+            "handoff_moved": (str(r.handoff_new_path.relative_to(config.brain_root))
+                               if r.handoff_new_path else None),
             "updated_path": str(r.new_path.relative_to(config.brain_root)),
         }
         lines.append(f"Status: {r.old_status} -> {r.new_status}")
         if r.moved:
             lines.append(f"Moved: {r.old_path.relative_to(config.brain_root)} "
                           f"-> {r.new_path.relative_to(config.brain_root)}")
+        if r.handoff_new_path is not None:
+            lines.append(f"Handoff moved with it: "
+                          f"{r.handoff_old_path.relative_to(config.brain_root)} "
+                          f"-> {r.handoff_new_path.relative_to(config.brain_root)}")
         lines.append(f"Registry updated: {r.registry_updated}")
+        if not r.index_updated:
+            # The vault is correct; only the cache is behind. Say so rather
+            # than letting a later search quietly disagree with the record.
+            lines.append("WARNING: the record and registry are correct, but the search "
+                          "index could not be updated — run `brain index`.")
 
     if set_fields or args.append_text:
         try:
@@ -349,13 +442,22 @@ def cmd_project_close(config: Config, args) -> int:
         print(json.dumps({
             "id": r.id, "old_status": r.old_status, "new_status": r.new_status,
             "moved": r.moved, "registry_updated": r.registry_updated,
+            "index_updated": r.index_updated,
+            "handoff_moved": (str(r.handoff_new_path.relative_to(config.brain_root))
+                               if r.handoff_new_path else None),
             "updated_path": str(r.new_path.relative_to(config.brain_root)),
         }, indent=2, ensure_ascii=False))
         return 0
     print(f"Closed {args.id}: {r.old_status} -> {r.new_status}")
     if r.moved:
         print(f"Moved to {r.new_path.relative_to(config.brain_root)}")
+    if r.handoff_new_path is not None:
+        print(f"Handoff moved with it: {r.handoff_old_path.relative_to(config.brain_root)} "
+              f"-> {r.handoff_new_path.relative_to(config.brain_root)}")
     print(f"Registry updated: {r.registry_updated}")
+    if not r.index_updated:
+        print("WARNING: the record and registry are correct, but the search "
+              "index could not be updated — run `brain index`.")
     return 0
 
 
@@ -1284,7 +1386,7 @@ def _describe_parser(parser: argparse.ArgumentParser, prefix: str = "", own_help
 
 def cmd_capabilities(config: Config, args) -> int:
     """Self-description for any client (Claude Code, Codex, a phone quick-
-    capture flow, a future TRON-side agent) so it can discover what this
+    capture flow, a future example-service-side agent) so it can discover what this
     Brain can do without prior knowledge of its deployment, version, or
     command surface — the point being usability without knowing
     infrastructure. Read-only, no network calls, no secrets."""
@@ -1393,10 +1495,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("index", help="Rebuild the SQLite FTS5 search index from Markdown")
 
-    p_search = sub.add_parser("search", help="Full-text search across the vault")
+    p_search = sub.add_parser(
+        "search",
+        help="Ranked FULL-TEXT search over note text, capped by --limit. Not a metadata "
+             "filter and not a complete listing — 'status: proposed' here matches the WORDS, "
+             "so it returns decided records too and misses proposed ones that never say it. "
+             "Use `brain list --type decision --status proposed` for that.",
+    )
     p_search.add_argument("query")
     p_search.add_argument("--limit", type=int, default=20)
     p_search.add_argument("--json", action="store_true", help="Emit JSON on stdout")
+
+    p_list = sub.add_parser(
+        "list",
+        help="Complete listing by METADATA (type/status/project/tag), deterministically "
+             "sorted, with a visible-match count and an explicit completeness flag. The "
+             "right tool for 'every open decision' — never `search`.",
+    )
+    p_list.add_argument("--type", help="note type, e.g. decision | project | document")
+    p_list.add_argument("--status", help="frontmatter status, validated against this vault's vocabulary")
+    p_list.add_argument("--project", help="only notes whose `projects:` list contains this project id")
+    p_list.add_argument("--tag", help="only notes whose `tags:` list contains this tag")
+    p_list.add_argument("--limit", type=int, default=listing.DEFAULT_LIMIT,
+                        help=f"max entries per page (default {listing.DEFAULT_LIMIT}, "
+                             f"max {listing.MAX_LIMIT}); the result still reports the full count")
+    p_list.add_argument("--offset", type=int, default=0, help="skip this many entries (pagination)")
+    p_list.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_context = sub.add_parser(
         "context",
@@ -1436,8 +1560,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_update = sub.add_parser("update", help="Update fields and/or append text on an existing note by id")
     p_update.add_argument("id")
-    p_update.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE",
-                          help="Frontmatter field to set, repeatable (id/created are never mutated)")
+    # action="extend": every --set occurrence accumulates. The plain default
+    # ("store") silently kept only the LAST --set, dropping the rest — a
+    # multi-field MCP update_memory call lost all but one field.
+    p_update.add_argument("--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE",
+                          help="Frontmatter field to set as a string, repeatable (id/created are never mutated)")
+    p_update.add_argument("--set-json", nargs="*", action="extend", default=[], metavar="KEY=JSON",
+                          dest="set_json",
+                          help="Frontmatter field to set from a JSON value (e.g. a list), repeatable")
     p_update.add_argument("--append-text", default=None, help="Text appended as a new dated '## Update' section")
     p_update.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
                           help="Required when --set sensitivity=restricted. Never set this on a "
@@ -1484,7 +1614,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_update.add_argument("--status", default=None,
                                   help="New status — moves the record between status folders and "
                                        "updates the registry entry in the same call")
-    p_project_update.add_argument("--set", nargs="*", default=[], metavar="KEY=VALUE",
+    p_project_update.add_argument("--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE",
                                   help="Other frontmatter field to set, repeatable (not 'status' — use --status)")
     p_project_update.add_argument("--append-text", default=None,
                                   help="Text appended as a new dated '## Update' section")
@@ -1902,6 +2032,9 @@ USER_FACING_ERRORS = (
     projectops.ProjectWriteError,
     projectops.SectionEditError,
     memoryops.MemoryWriteError,
+    # Includes AmbiguousNoteIdError, which every write-by-id path (handoff,
+    # project close/section-update, decision --supersedes) can now raise.
+    update_mod.UpdateError,
     timeline.TimelineWriteError,
     writepolicy.WritePolicyError,
     rolepolicy.RolePolicyError,
@@ -1965,8 +2098,33 @@ def main(argv=None) -> int:
     try:
         return _dispatch(config, args, parser)
     except USER_FACING_ERRORS as exc:
+        if isinstance(exc, (writepolicy.WritePolicyError, rolepolicy.RolePolicyError)):
+            _audit_write_refusal(config, args, exc)
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+
+def _audit_write_refusal(config: Config, args, exc: Exception) -> None:
+    """Every write path (MCP bridge, remote gateway, SSH, local CLI) ends in
+    this process, so a policy refusal is recorded here once, as
+    `write.refused`. Before this, only ACL denials were audited: a refused
+    secret-shaped or unconfirmed restricted write left no trace, so a
+    client that reported "blocked" could not be checked afterwards. The
+    detail is the command and a short reason code — never the refused text."""
+    reason = getattr(exc, "reason", type(exc).__name__)
+    command = args.command
+    for key, value in vars(args).items():
+        if key.endswith("_command") and isinstance(value, str):
+            command = f"{command} {value}"
+            break
+    target = getattr(args, "id", None)
+    detail = f"command={command} reason={reason}"
+    if isinstance(target, str) and target:
+        detail += f" id={target}"
+    audit.log_event(
+        config, event="write.refused", principal_id=config.acting_principal,
+        **audit.caller_provenance(config), detail=detail,
+    )
 
 
 def _dispatch_remote_gateway(args) -> int:
@@ -1994,6 +2152,8 @@ def _dispatch(config: Config, args, parser) -> int:
         return cmd_index(config, args)
     if args.command == "search":
         return cmd_search(config, args)
+    if args.command == "list":
+        return cmd_list(config, args)
     if args.command == "context":
         return cmd_context(config, args)
     if args.command == "get":

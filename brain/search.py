@@ -162,6 +162,8 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
         if len(results) >= limit:
             break
         note_path = config.brain_root / r["path"]
+        if not frontmatter.is_memory_path(note_path, config.brain_root):
+            continue
         try:
             note = frontmatter.parse_file(note_path)
         except (frontmatter.FrontmatterError, OSError):

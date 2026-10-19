@@ -27,7 +27,14 @@ from .paths import Config
 class WritePolicyError(RuntimeError):
     """A write refused by shared policy — secret-shaped text, or a
     restricted-sensitivity write missing its required confirmation. Always
-    surfaced to the caller as a clear, specific refusal, never swallowed."""
+    surfaced to the caller as a clear, specific refusal, never swallowed.
+
+    `reason` is a short, content-free code for the audit log (cli.py logs
+    every refusal as `write.refused`) — never the refused text itself."""
+
+    def __init__(self, message: str, reason: str = "write_policy"):
+        super().__init__(message)
+        self.reason = reason
 
 
 def scan_for_secrets(*texts: str) -> None:
@@ -42,7 +49,8 @@ def scan_for_secrets(*texts: str) -> None:
                 if pattern.search(line):
                     raise WritePolicyError(
                         f"refusing to write: possible {label} found in the provided text. "
-                        "Remove/rotate the credential — secrets must never be stored in the Brain."
+                        "Remove/rotate the credential — secrets must never be stored in the Brain.",
+                        reason=f"secret_pattern:{label}",
                     )
 
 
@@ -64,6 +72,7 @@ def require_restricted_confirmation(config: Config, principal_id: str, sensitivi
         raise WritePolicyError(
             "sensitivity='restricted' requires confirm_restricted=true (MCP) or "
             "--confirm-restricted (CLI) — this is a deliberate friction point so a "
-            "restricted write can never happen as an unnoticed side effect."
+            "restricted write can never happen as an unnoticed side effect.",
+            reason="restricted_unconfirmed",
         )
     rolepolicy.require_restricted_write_allowed(config, principal_id, sensitivity)

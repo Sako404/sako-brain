@@ -5,6 +5,82 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.14.6 — State reporting and record integrity
+
+### Added
+
+- `brain list` and MCP `list_notes`: deterministic metadata filtering over
+  canonical Markdown, independent of the search index. Filters cover type,
+  status, project and tag; results report visible totals and pagination.
+- Separate `source_complete` and `page_complete` fields. `complete` is true
+  only when the verified source and the returned entries are both complete.
+- A shared state-audit procedure with synthetic examples, loaded through
+  tool descriptions, packaged client instructions and the AGENTS template.
+- Admin diagnostics for misplaced handoffs, invalid ACLs and excluded links.
+  Status/body conflicts remain advisory and never modify records or block
+  snapshots automatically.
+
+- Write-policy refusals are audited as `write.refused`, with the command,
+  target id and a short reason code (`secret_pattern:<label>`,
+  `restricted_unconfirmed`, `role_restricted_denied`, `role_audience_denied`)
+  and never the refused text. Previously only ACL denials left an audit
+  trace.
+
+### Fixed
+
+- `update_memory` through the MCP bridge and remote gateway no longer loses
+  fields. Repeated `--set` flags now accumulate instead of keeping only the
+  last one, which had silently dropped every other field of a multi-field
+  update, including `sensitivity=restricted`. List and other non-string
+  values travel through the new `brain update --set-json KEY=JSON` flag and
+  are written as real YAML lists, not as their Python repr string.
+- Refuse ambiguous write targets, including orphaned handoffs, while allowing
+  ACL-filtered reads of visible copies. Hidden aliases and missing records
+  receive neutral refusals. These refusals reach the CLI as an error message
+  rather than a traceback: `handoff write`, `project close`,
+  `project section-update` and `decision create --supersedes`.
+- `brain project close` reports `index_updated` and `handoff_moved` the same
+  way `project update --status` does, and warns when only the search index
+  is behind.
+- A status change that re-runs on a record already carrying the target
+  status, but missing `updated:`, now stamps the date instead of failing and
+  rolling the move back.
+- Coordinate project, registry, generic update, handoff and migration writes
+  with one reentrant process lock. Status changes move handoffs with their
+  projects and roll back recoverable failures without manufacturing copies.
+- Check ownership of every document a status change will modify before the
+  first write. A project's owner cannot move another principal's handoff.
+- Require project visibility before creating or updating a handoff; never
+  copy hidden registry metadata into a caller-owned document.
+- Handle directory access errors without claiming complete discovery.
+  Unknown visibility makes the source unverified but exposes no document
+  paths or counts. Known ACL denials remain invisible to aggregates.
+- Validate listing metadata after authorization. Invalid tags, projects or
+  scalar field types mark a visible record unreadable without stopping the
+  remaining listing or expanding visibility.
+- Protect the identity tree against resolved aliases in ordinary memory
+  reads, writes and cached search. Outside, broken and looping links remain
+  excluded, and directory symlinks are not traversed.
+- Decode UTF-8 BOM notes and preserve header ACL evidence when a body cannot
+  be decoded. Raw captures prevent a claim of metadata completeness.
+- Return a sanitized JSON-RPC error when gateway capability discovery fails;
+  retry discovery on the next request. Normalize systemd diagnostics without
+  treating an unavailable manager as proof that a unit is absent.
+
+### Validation and compatibility
+
+- CI installs the optional gateway dependencies and reports environmental
+  skips from the same test run. Gateway coverage is required in CI.
+- Documentation and code examples describe fictional data, not deployment
+  records. Previously published history and artifacts require separate
+  handling; changing current source does not erase earlier publication.
+- A malformed or unavailable parent project record now prevents handoff
+  writes. Source completeness is not a transactional snapshot or proof that
+  excluded/denied records do not exist.
+- Writers must share a state directory. File locks are advisory; external
+  edits and power loss are outside the exception-recovery guarantee.
+
+
 ## 0.14.5 — 2026-10-07 — Fresh-note-visibility investigation: observability fix, no freshness bug found
 
 An operator session reported fresh Matrix-captured notes sometimes appearing
@@ -78,7 +154,7 @@ with a narrow propagation fix, not a new auth system.
 ### Unaffected
 
 - Every non-Remote-MCP caller (desktop, Claude Code, Codex, local SSH,
-  TRON) — these new fields are simply absent for them, exactly as before.
+  example-service) — these new fields are simply absent for them, exactly as before.
 - Scope/principal/ACL enforcement, token refresh, and revocation — all
   untouched; this release only adds provenance fields to what was already
   logged.
@@ -521,7 +597,7 @@ safety. Full write-up: canonical Brain decision
 ### Notes
 
 - Out of scope, deliberately untouched: Hermes, People, Tasks, Planner,
-  Calendar, family multi-user, Matrix/TRON redesign, E2EE, mobile app, a
+  Calendar, family multi-user, Matrix/example-service redesign, E2EE, mobile app, a
   general plugin/marketplace framework.
 - 873 tests passing (was 836 at v0.11.1).
 
@@ -605,7 +681,7 @@ canonical Brain decision `decision-2026-09-30-sako-brain-v0-11-0-public-agent-in
 - Skills are versioned with the Brain release that ships them — there is
   no separate skills repository or compatibility matrix.
 - Out of scope, deliberately untouched: `queue_memory`, People, Tasks,
-  Planner, Calendar, Hermes integration, TRON/Matrix redesign, E2EE,
+  Planner, Calendar, Hermes integration, example-service/Matrix redesign, E2EE,
   Remote/Web MCP, a general plugin framework.
 
 ## 0.10.1 — 2026-09-30 — CORE HARDENING / FINAL CLIENT ACCEPTANCE
@@ -847,7 +923,7 @@ actually execute).
 ### Added
 
 - **`brain capabilities`** (JSON) — self-description for any client (Claude
-  Code, Codex, a phone quick-capture flow, a future TRON-side agent):
+  Code, Codex, a phone quick-capture flow, a future example-service-side agent):
   version, every CLI command (derived from the real parser, never a second
   hand-kept list), every MCP tool and its input schema (from the real
   `mcp_server.TOOLS`). Deliberately does not predict read-vs-write
@@ -861,7 +937,7 @@ actually execute).
   change, no migration, no history rewritten. `ContextItem` gains `updated`
   and `snippet_from_latest_section`; `brain context` (text mode) now shows
   `[historical/superseded]` and `(updated <date>)` inline. Found during a
-  cross-project Brain/TRON reconciliation: a plain search could surface an
+  cross-project Brain/example-service reconciliation: a plain search could surface an
   old handoff session's text over a newer, contradicting one purely because
   it scored better textually.
 

@@ -22,7 +22,7 @@ from . import frontmatter
 from . import indexer
 from . import visibility
 from .paths import Config
-from .registry import find_project, load_registry
+from .registry import find_project, find_visible_project, load_registry
 
 HANDOFF_TAG = "handoff"
 
@@ -102,6 +102,15 @@ PROSE_FIELDS = ("attempted", "changed", "working_state", "unresolved", "next_act
 def write(config: Config, project_id: str, sections: HandoffSections,
           session_date: str | None = None, source: str = "cli",
           audience: list[str] | None = None) -> Path:
+    from .projectops import project_write_lock
+
+    with project_write_lock(config):
+        return _write_locked(config, project_id, sections, session_date, source, audience)
+
+
+def _write_locked(config: Config, project_id: str, sections: HandoffSections,
+                   session_date: str | None, source: str,
+                   audience: list[str] | None) -> Path:
     # A handoff whose every prose field is blank renders as five "(not noted)"
     # headings — it looks like a written handoff and carries nothing, which is
     # worse than no handoff at all because the next session trusts it. Refuse
@@ -112,11 +121,61 @@ def write(config: Config, project_id: str, sections: HandoffSections,
             f"{', '.join(PROSE_FIELDS)} must have content"
         )
 
-    entry = _registry_entry(config, project_id)
+    # Resolve through the caller's view before deriving a canonical ID/path
+    # or copying any registry metadata into a new document. Handoff ownership
+    # remains independent: visibility of the project permits creation, not
+    # modification of an existing handoff owned by somebody else.
+    try:
+        entry = find_visible_project(config, config.acting_principal, project_id)
+    except (OSError, frontmatter.FrontmatterError):
+        entry = None  # inaccessible metadata must not leak through diagnostics
+    if entry is None:
+        raise HandoffError(f"no registered project with id or alias '{project_id}'")
     today = session_date or date.today().isoformat()
     # Resolve once, then use the canonical id everywhere below — project_id
     # itself may have been an alias.
     path = handoff_path(config, entry.id)
+    if not frontmatter.is_memory_path(path, config.brain_root):
+        raise HandoffError("handoff location is outside the vault or is an unusable link")
+
+    # The duplicate gate. `update.resolve_write_target` protects every write
+    # addressed BY ID; this one is addressed by project + status folder, so
+    # it slipped past that guard entirely — an independent review reproduced
+    # a third session being appended to one of two existing copies, splitting
+    # the history further.
+    #
+    # The condition is "does any file already claim this id somewhere other
+    # than where I am about to write", NOT "are there several files". A
+    # second review found the difference: with the project's ONLY handoff
+    # stranded in the wrong status folder there was exactly one claimant, so
+    # a count-based gate let this write create a fresh file at the canonical
+    # path — manufacturing the duplicate it exists to prevent. Checking the
+    # id those files claim, rather than the path this call computed, is also
+    # the only way to see a copy stranded in another status folder at all.
+    #
+    # Local import: update.py has no reason to import this module back, so
+    # this cannot become a cycle.
+    from .update import (AmbiguousNoteIdError, MISSING_ID_MESSAGE,
+                         audit_ambiguous_id, find_note_paths)
+
+    handoff_id = f"handoff-{entry.id}"
+    stray = [p for p in find_note_paths(config, handoff_id) if p != path]
+    if stray:
+        # Same split as everywhere else: the caller is told nothing about the
+        # files (one of them can belong to another principal), the operator's
+        # 0600 audit log gets the detail.
+        audit_ambiguous_id(config, handoff_id, stray + [path] if path.exists() else stray,
+                            config.acting_principal)
+        if not visibility.visible_note_paths(config, config.acting_principal, handoff_id):
+            raise HandoffError(MISSING_ID_MESSAGE.format(note_id=handoff_id))
+        raise AmbiguousNoteIdError(
+            f"the handoff for '{entry.id}' already exists somewhere other than the "
+            "location its current project status resolves to, so writing here would "
+            "create a second copy under one id and split its history. Nothing was "
+            "written. `brain project update-status` moves a handoff with its record, "
+            "and `brain doctor` (handoff_in_wrong_status_folder, duplicate_ids) reports "
+            "what needs reconciling; the details are in the server's own audit log."
+        )
 
     new_section = _render_session(sections, today)
 
@@ -130,6 +189,8 @@ def write(config: Config, project_id: str, sections: HandoffSections,
 
             principal_id = config.acting_principal
             existing_meta = frontmatter.parse_text(fm + "\n(body omitted)\n", path).meta
+            if not visibility.can_view(config, principal_id, existing_meta):
+                raise HandoffError(MISSING_ID_MESSAGE.format(note_id=handoff_id))
             if not visibility.is_owner(config, principal_id, existing_meta):
                 current_owner, _ = visibility.owner_and_audience(existing_meta)
                 audit.log_event(config, event="note.write.denied", principal_id=principal_id,
@@ -174,7 +235,7 @@ def _handoff_visible(config: Config, principal_id: str, path: Path) -> bool:
     any handoff missing the field) falls back to the same default as
     every other record, via visibility.can_view's own missing-owner
     handling."""
-    if not path.exists():
+    if not frontmatter.is_memory_path(path, config.brain_root) or not path.exists():
         return False
     try:
         note = frontmatter.parse_file(path)

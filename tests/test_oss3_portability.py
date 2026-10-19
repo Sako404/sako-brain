@@ -655,9 +655,11 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
         remote.RemoteConfigError — a broken/incomplete client.toml for a
         configured remote canonical Brain — and by one more (pre-onboarding
         hardening, 2026-10-02) for rolepolicy.RolePolicyError — a role-policy
-        refusal (restricted-write capability, audience allowlist).
+        refusal (restricted-write capability, audience allowlist) — and by
+        one more (v0.14.6, PR #49 review) for update.UpdateError, whose
+        AmbiguousNoteIdError every write-by-id path can now raise.
         """
-        from brain import backup, cli, decision, gitops, handoff, memoryops, projectops, rolepolicy, timeline, writepolicy
+        from brain import backup, cli, decision, gitops, handoff, memoryops, projectops, rolepolicy, timeline, update, writepolicy
         from brain import init as init_mod
         from brain import paths as paths_mod
         from brain import remote
@@ -671,7 +673,7 @@ class TestFirstRunErrorsAreReportedNotCrashed(SyntheticVaultTestCase):
              projectops.SectionEditError,
              memoryops.MemoryWriteError, timeline.TimelineWriteError,
              writepolicy.WritePolicyError, remote.RemoteConfigError,
-             rolepolicy.RolePolicyError},
+             rolepolicy.RolePolicyError, update.UpdateError},
         )
 
 

@@ -17,7 +17,7 @@ from . import indexer
 from . import visibility
 from .capture import slugify
 from .paths import Config
-from .update import find_note_path
+from .update import resolve_write_target
 
 SUPERSEDED_MARKER = "## Superseded by"
 
@@ -39,11 +39,17 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
 
     old_path = None
     if supersedes:
-        old_path = find_note_path(config, supersedes)
-        if old_path is None:
-            raise DecisionError(f"supersedes target '{supersedes}' not found")
+        # Marking the superseded record is a WRITE to it, so it goes through
+        # the strict resolver: an ambiguous id must not have one of its
+        # copies silently stamped `superseded` while the other stays open.
+        try:
+            old_path = resolve_write_target(config, supersedes)
+        except FileNotFoundError:
+            raise DecisionError(f"supersedes target '{supersedes}' not found") from None
         principal_id = config.acting_principal
         old_note = frontmatter.parse_file(old_path)
+        if old_note.type != "decision":
+            raise DecisionError("supersedes target must be a decision record")
         if not visibility.is_owner(config, principal_id, old_note.meta):
             current_owner, _ = visibility.owner_and_audience(old_note.meta)
             audit.log_event(config, event="note.write.denied", principal_id=principal_id,
@@ -58,6 +64,8 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
     slug = slugify(title)
     note_id = f"decision-{today}-{slug}"
     dest = config.dir_for("decisions") / f"{note_id}.md"
+    if not frontmatter.is_memory_path(dest, config.brain_root):
+        raise DecisionError("ordinary memory cannot target protected or outside-vault paths")
     if dest.exists():
         raise DecisionError(f"{dest} already exists")
 

@@ -39,6 +39,8 @@ def list_timeline(config: Config, reverse: bool = True,
     if not base.exists():
         return entries
     for path in sorted(base.rglob("*.md")):
+        if not frontmatter.is_memory_path(path, config.brain_root):
+            continue
         try:
             note = frontmatter.parse_file(path)
         except frontmatter.FrontmatterError:
@@ -66,6 +68,8 @@ def create_event(config: Config, title: str, valid_from: str, what_happened: str
     slug = slugify(title)
     note_id = f"event-{valid_from}-{slug}"
     dest = config.timeline_dir / f"{note_id}.md"
+    if not frontmatter.is_memory_path(dest, config.brain_root):
+        raise TimelineWriteError("ordinary memory cannot target protected or outside-vault paths")
     if dest.exists():
         raise TimelineWriteError(f"{dest} already exists")
 

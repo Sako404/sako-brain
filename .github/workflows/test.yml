@@ -45,8 +45,10 @@ jobs:
       - name: Show interpreter
         run: python -VV
 
-      - name: Install runtime dependency
-        run: python -m pip install --quiet PyYAML
+      - name: Install runtime and required gateway test dependencies
+        run: |
+          python -m pip install --quiet '.[remote-gateway]'
+          python -c 'from brain.remote_gateway.app import create_app; import flask, waitress'
 
       - name: Configure a throwaway git identity for the test runner
         # gitops.py's own tests (test_gitops.py, test_integrity.py,
@@ -80,8 +82,7 @@ jobs:
         # but an UNEXPLAINED skip is a defect, so they are always printed.
         if: always()
         run: |
-          python -m unittest discover -s tests -t . --verbose 2>&1 \
-            | grep -io "skipped '.*'" | sort | uniq -c || true
+          grep -io "skipped '.*'" /tmp/test-output.log | sort | uniq -c || true
 
   package:
     name: package (build, install, first run)

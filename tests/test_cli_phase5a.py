@@ -87,6 +87,8 @@ class TestHandoffCliDispatch(unittest.TestCase):
             "    path: /tmp/does-not-need-to-exist\n"
             "    status: active\n"
         )
+        self.vault.write_note('30_PROJECTS/ACTIVE', 'project-example.md',
+                              id='project-example', type='project', status='active')
 
     def tearDown(self):
         self.vault.cleanup()

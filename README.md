@@ -20,7 +20,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.14.4.** Pre-1.0 means the command line and configuration
+**Current release: 0.14.6.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -87,7 +87,7 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.14.4-py3-none-any.whl
+pipx install ./sako_brain-0.14.6-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
@@ -173,11 +173,26 @@ intend to keep.
 ```sh
 brain remember --type fact --title "Postgres upgrade window is Sunday 02:00"
 brain index                 # rebuild the search index
-brain search postgres
+brain search postgres       # ranked full-text, limited
+brain list --type decision --status proposed   # complete listing, by metadata
 brain status                # counts, inbox, projects
 brain doctor                # health checks: links, duplicates, secrets, layout
 brain integrity             # point-in-time report with a file manifest
 ```
+
+`brain search` and `brain list` answer different questions, and mixing them
+up has produced a wrong state report before. `search` ranks note **text** and
+stops at a limit — right for "which notes mention this?", and structurally
+unable to answer "how many are open": it has no filter syntax, so
+`status: proposed` is matched as the words "status" and "proposed", which
+appear in nearly every decision record's own template headings. `list`
+filters **frontmatter** (`--type`, `--status`, `--project`, `--tag`), reads
+canonical Markdown rather than the index (so a note written a second ago is
+listed now, with no reindex), sorts deterministically, and separates the two
+ways an answer can be partial: `page_complete` is false for any page — the
+last one included — and `source_complete` is false when a visible file could not be read as a note or has no metadata. `complete` is both together, and is the
+only field that means "this is the whole list". Use `list` (or `state`)
+whenever the answer is a count or an exhaustive enumeration.
 
 Also: `brain projects` / `brain project` for project records, `brain timeline`
 for dated events, `brain handoff` for session notes, `brain agents-doc` to

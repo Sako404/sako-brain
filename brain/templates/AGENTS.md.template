@@ -147,10 +147,57 @@ walking up from the current directory → `vault_path:` in
 `$XDG_CONFIG_HOME/{{APP_DIRNAME}}/config.yaml` → an error. It refuses rather than
 guesses, because guessing is how a tool ends up writing to the wrong vault.
 
+## Reporting state
+
+When you report what this Brain *says* — how many decisions are open, what a
+project's status is, whether something is finished — use the right instrument
+and name it:
+
+- `brain state --json` is the deterministic, complete operational snapshot.
+  Start there.
+- `brain list --type <t> --status <s>` is the complete listing **by
+  metadata**, read from canonical Markdown rather than the search index.
+  Check `complete` before quoting a number: it is false for any page (the
+  last one included — see `page_complete`) and false when a visible file could not be read as a note or lacks metadata
+  (see `source_complete`, `unreadable`, `unstructured_skipped`).
+  Those counters are scoped to you, like the result count itself, so
+  `source_complete: true` means "nothing you can see is missing" rather than
+  "the vault is clean" — and a file that resolves outside the vault (a
+  symlink leaving it) is deliberately not vault content at all, reported by
+  `brain doctor` as `symlink_escapes_vault`.
+- `brain search` is ranked **full-text** search with a limit. It has no filter
+  syntax: `status: proposed` is matched as the words "status" and "proposed",
+  so it returns decided records and misses proposed ones. It cannot answer
+  "how many are open".
+- `brain get <id>` for a full record (a snippet is not a record — closure
+  sections and later corrections live at the bottom), and
+  `brain handoff show <project>` for the detail a deliberately-thin record
+  omits.
+
+Keep four kinds of claim apart and label which one you are making: the
+metadata `status`, what the record's content says, what was verified in
+production, and what is simply unverified. "Unverified" is a legitimate
+answer. A read denied by visibility is indistinguishable from a missing
+record by design — so "not visible to this principal" is never "does not
+exist".
+
+Metadata and content disagreeing is a finding to report, not a licence to
+change a status: see `brain doctor`'s advisory `status_content_conflict`.
+
+The full procedure, including the confusions that have actually caused wrong
+reports, is in `docs/STATE_AUDIT_PROCEDURE.md`:
+https://github.com/Sako404/sako-brain/blob/main/docs/STATE_AUDIT_PROCEDURE.md
+
 ## Validation
 
 Run `brain doctor` before relying on the Brain after bulk edits. It checks for
 duplicate IDs, broken internal links, missing project directories, invalid
-YAML/status values, duplicate registry entries, the backup dir being treated
-as canonical, and accidental secret-like patterns. It reports problems; it
-never deletes or auto-fixes content.
+YAML/status values, duplicate registry entries, a handoff left in the wrong
+status folder, the backup dir being treated as canonical, and accidental
+secret-like patterns. It reports problems; it never deletes or auto-fixes
+content.
+
+One check is explicitly advisory rather than an error:
+`status_content_conflict` reports a `proposed` record whose own body already
+reads as closed, as "TO RECONCILE". It changes nothing, and it can never
+block a snapshot or a backup.

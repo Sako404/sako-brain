@@ -290,6 +290,8 @@ class TestMcpWriteHandoff(unittest.TestCase):
             "    path: /tmp/does-not-need-to-exist\n"
             "    status: active\n"
         )
+        self.vault.write_note('30_PROJECTS/ACTIVE', 'project-alpha.md',
+                              id='project-alpha', type='project', status='active')
 
     def tearDown(self):
         self.vault.cleanup()
