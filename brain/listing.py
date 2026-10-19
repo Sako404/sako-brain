@@ -285,7 +285,9 @@ def list_notes(config: Config, *, type: str | None = None, status: str | None = 
         source_complete=source_complete,
         unreadable=unreadable,
         unstructured_skipped=unstructured,
-        next_offset=consumed if consumed < total else None,
+        # limit=0 is a count-only call: its page never advances, so offering
+        # a next_offset would send a paging client round the same offset forever.
+        next_offset=consumed if limit and consumed < total else None,
         filters=filters, scope=scope,
     )
 

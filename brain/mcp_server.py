@@ -38,7 +38,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import capture, context as context_mod, discover as discover_mod, memoryops, memoryqueue, projectops, projectsync
+from . import audit, capture, context as context_mod, discover as discover_mod, memoryops, memoryqueue, projectops, projectsync
 from . import decision as decision_mod
 from . import handoff as handoff_mod
 from . import listing
@@ -77,6 +77,18 @@ _SAFE_DETAIL_KEYS = ("id", "created_path", "updated_path", "queued_id", "path")
 # module-level alias so any code still catching McpWriteRefused by name
 # keeps working.
 McpWriteRefused = writepolicy.WritePolicyError
+
+
+def _audit_write_refusal(config: Config, tool: str, arguments: dict, exc: Exception) -> None:
+    """This server applies writepolicy/rolepolicy in-process, so its refusals
+    never reach cli.main()'s `write.refused` audit. Same event and detail
+    shape as there — the tool name and a reason code, never the refused text."""
+    detail = f"command=mcp {tool} reason={getattr(exc, 'reason', type(exc).__name__)}"
+    target = arguments.get("id")
+    if isinstance(target, str) and target:
+        detail += f" id={target}"
+    audit.log_event(config, event="write.refused", principal_id=config.acting_principal,
+                    **audit.caller_provenance(config), detail=detail)
 
 
 def _log_call(config: Config, tool: str, success: bool, result=None, error: str = "") -> None:
@@ -703,6 +715,8 @@ def handle_request(config: Config, req: dict) -> dict | None:
                 result = fn(config, **arguments)
             except Exception as exc:  # noqa: BLE001 — log then re-raise to the outer handler
                 _log_call(config, name, success=False, error=str(exc))
+                if isinstance(exc, (writepolicy.WritePolicyError, rolepolicy.RolePolicyError)):
+                    _audit_write_refusal(config, name, arguments, exc)
                 raise
             _log_call(config, name, success=True, result=result)
             return ok({"content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}]})

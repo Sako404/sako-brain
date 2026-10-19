@@ -5,6 +5,28 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.14.7 — Review follow-ups to 0.14.6
+
+### Fixed
+
+- The stdio MCP server (`brain mcp`) now audits write-policy and role-policy
+  refusals as `write.refused`, like the CLI does. It applies those policies
+  in-process, so its refusals previously left no audit trace. The detail is
+  the tool name, a reason code and the target id, never the refused text.
+- `brain decision create --supersedes` takes the shared write lock. Marking
+  the old decision superseded rewrites that record, and a concurrent append
+  to it could otherwise be lost.
+- `list_notes` with `limit=0` (a count-only call) no longer returns a
+  `next_offset` equal to its own offset, which sent a client paging by
+  `next_offset` into an endless loop. The CLI no longer suggests
+  `--limit <total>` for the whole list when the total exceeds the per-call
+  maximum; it suggests paging instead.
+- A directory symlink to in-vault content that the scan does not otherwise
+  reach makes `brain list` and `list_notes` report `source_complete: false`.
+  Directory links are still never traversed. Links to already-scanned
+  content, to outside the vault, or to protected identity state change
+  nothing.
+
 ## 0.14.6 — State reporting and record integrity
 
 ### Added

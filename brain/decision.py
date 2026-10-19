@@ -33,6 +33,24 @@ def create_decision(config: Config, title: str, context: str = "", options: str 
                      sensitivity: str = "normal", source: str = "", source_date: str = "",
                      confidence: str = "fact", supersedes: str | None = None,
                      date: str | None = None, audience: list[str] | None = None) -> Path:
+    # Same lock as update_memory: marking the old decision superseded is a
+    # read-modify-write of an existing record, and a concurrent append to it
+    # would otherwise be overwritten.
+    from .projectops import project_write_lock
+
+    with project_write_lock(config):
+        return _create_decision_locked(
+            config, title, context, options, decision, reasoning, consequences, status,
+            people, projects, tags, sensitivity, source, source_date, confidence,
+            supersedes, date, audience,
+        )
+
+
+def _create_decision_locked(config: Config, title, context, options, decision, reasoning,
+                            consequences, status, people, projects, tags, sensitivity,
+                            source, source_date, confidence, supersedes, date,
+                            audience) -> Path:
+    """`create_decision`'s body, under the write lock. Never call directly."""
     allowed = config.vocabulary.statuses_for("decision")
     if allowed and status not in allowed:
         raise DecisionError(f"status must be one of {allowed}")

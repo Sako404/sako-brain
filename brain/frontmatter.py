@@ -215,6 +215,31 @@ def is_memory_path(path: Path, root: Path, *, on_error=None) -> bool:
         return False
 
 
+def _report_uncovered_dir_link(link: Path, root: Path, content_dirs: tuple[str, ...],
+                               on_error) -> None:
+    """A directory link is never traversed. That loses nothing when its target
+    is already scanned under its real path, and is policy when the target is
+    outside the vault, protected identity state, broken or looping. Any other
+    in-vault target holds notes this scan does not reach, so the caller must
+    not report the source as complete."""
+    if on_error is None or not is_memory_path(link, root):
+        return
+    try:
+        target = link.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return
+    for dirname in content_dirs:
+        base = root / dirname
+        if base.is_symlink():
+            continue
+        try:
+            if target.is_relative_to(base.resolve()):
+                return
+        except (OSError, RuntimeError):
+            continue
+    on_error(OSError(errno.ENOTDIR, "directory link to unscanned vault content not traversed"))
+
+
 def iter_markdown_files(root: Path, content_dirs: tuple[str, ...], *, on_error=None):
     """Every Markdown file the vault itself contains, in a deterministic
     order. Files outside the vault or resolving into protected identity
@@ -234,11 +259,17 @@ def iter_markdown_files(root: Path, content_dirs: tuple[str, ...], *, on_error=N
             if on_error is not None:
                 on_error(exc)
             continue
-        if stat.S_ISLNK(mode) or not is_memory_path(base, root, on_error=on_error):
+        if stat.S_ISLNK(mode):
+            _report_uncovered_dir_link(base, root, content_dirs, on_error)
+            continue
+        if not is_memory_path(base, root, on_error=on_error):
             continue
         candidates = []
         for current, dirs, files in os.walk(base, onerror=on_error, followlinks=False):
             parent = Path(current)
+            for d in dirs:
+                if (parent / d).is_symlink():
+                    _report_uncovered_dir_link(parent / d, root, content_dirs, on_error)
             dirs[:] = sorted(d for d in dirs
                              if not (parent / d).is_symlink()
                              and is_memory_path(parent / d, root, on_error=on_error))

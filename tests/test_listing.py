@@ -158,6 +158,32 @@ class TestCompletenessIsNeverImplied(unittest.TestCase):
         self.assertIn("2 of 5 visible", out.getvalue())
         self.assertIn("--offset 2", err.getvalue())
 
+    def test_a_count_only_call_offers_no_next_offset(self):
+        """limit=0 returns no entries, so following next_offset could never
+        make progress — a client that pages by it would loop forever."""
+        result = listing.list_notes(self.config, type="decision", status="proposed", limit=0)
+        self.assertEqual(result.returned, 0)
+        self.assertEqual(result.total_visible, 5)
+        self.assertIsNone(result.next_offset)
+
+    def test_cli_never_suggests_a_limit_above_the_maximum(self):
+        from unittest.mock import patch
+        from brain import cli
+
+        class Args:
+            type, status, project, tag = "decision", "proposed", None, None
+            limit, offset, json = 2, 0, False
+
+        import io
+        import contextlib
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(listing, "MAX_LIMIT", 3), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.cmd_list(self.config, Args())
+        self.assertEqual(rc, 0)
+        self.assertNotIn("--limit 5", err.getvalue())
+        self.assertIn("--limit 3", err.getvalue())
+
     def test_no_index_at_all_still_lists_everything(self):
         """Discovery is a Markdown scan, so the index's state is irrelevant —
         this is the property the first version of the module did not have."""

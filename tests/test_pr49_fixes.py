@@ -399,3 +399,45 @@ class TestReviewFollowUps(FixCase):
             rc, out, _ = self.run_cli(['project', 'close', 'project-example'])
         self.assertEqual(rc, 0)
         self.assertIn('run `brain index`', out)
+
+
+class TestDirectoryLinksAndCompleteness(FixCase):
+    """Directory symlinks are never traversed. When the target is content the
+    scan reaches anyway, nothing is lost; when it is in-vault content the scan
+    does not cover, those notes vanish, and the listing must not claim to be
+    complete."""
+
+    def link(self, name, target):
+        link = self.config.brain_root / '60_KNOWLEDGE' / name
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(target, target_is_directory=True)
+        return link
+
+    def test_link_to_uncovered_in_vault_content_is_unverified(self):
+        self.note()
+        hidden = self.config.brain_root / 'ARCHIVE_OUTSIDE_SCAN'
+        hidden.mkdir()
+        (hidden / 'old.md').write_text('---\nid: knowledge-old\ntype: knowledge\n---\nold\n')
+        self.link('archive', hidden)
+        result = listing.list_notes(self.config)
+        self.assertEqual(result.total_visible, 1)
+        self.assertFalse(result.source_complete)
+        self.assertNotIn('ARCHIVE_OUTSIDE_SCAN', json.dumps(mcp_server.tool_list_notes(self.config)))
+
+    def test_link_to_already_scanned_content_stays_complete(self):
+        self.vault.write_note('60_KNOWLEDGE/real', 'example.md',
+                              id='knowledge-example', type='knowledge')
+        self.link('alias', self.config.brain_root / '60_KNOWLEDGE' / 'real')
+        result = listing.list_notes(self.config)
+        self.assertEqual(result.total_visible, 1)
+        self.assertTrue(result.source_complete)
+
+    def test_link_outside_the_vault_is_excluded_by_policy_not_unverified(self):
+        import tempfile
+        self.note()
+        outside = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__('shutil').rmtree(outside))
+        self.link('outside', outside)
+        result = listing.list_notes(self.config)
+        self.assertEqual(result.total_visible, 1)
+        self.assertTrue(result.source_complete)

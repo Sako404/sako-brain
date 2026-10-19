@@ -554,3 +554,49 @@ class TestMcpCreateTimelineEvent(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMcpWriteRefusalsAreAudited(unittest.TestCase):
+    """The stdio MCP server applies writepolicy/rolepolicy in-process, so its
+    refusals never pass through cli.main() and must be audited here."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.vault.write_note(
+            "60_KNOWLEDGE", "widget.md", id="knowledge-widget", type="knowledge",
+            title="Widget notes", body="Original body.",
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _refusals(self):
+        lines = []
+        for log in self.config.logs_dir.glob("brain-audit-*.log"):
+            lines += log.read_text(encoding="utf-8").splitlines()
+        return [l for l in lines if "event=write.refused" in l]
+
+    def test_secret_refusal_is_audited_without_the_secret(self):
+        resp = _call(self.config, "update_memory",
+                     {"id": "knowledge-widget", "append_text": "password: hunter2-zz9"})
+        self.assertIn("error", resp)
+        refusals = self._refusals()
+        self.assertEqual(len(refusals), 1, refusals)
+        self.assertIn("command=mcp update_memory reason=secret_pattern:password assignment "
+                      "id=knowledge-widget", refusals[0])
+        self.assertNotIn("hunter2", refusals[0])
+
+    def test_unconfirmed_restricted_write_is_audited(self):
+        resp = _call(self.config, "update_memory",
+                     {"id": "knowledge-widget", "set_fields": {"sensitivity": "restricted"}})
+        self.assertIn("error", resp)
+        refusals = self._refusals()
+        self.assertEqual(len(refusals), 1, refusals)
+        self.assertIn("reason=restricted_unconfirmed", refusals[0])
+
+    def test_other_failures_are_not_reported_as_policy_refusals(self):
+        resp = _call(self.config, "update_memory",
+                     {"id": "knowledge-missing", "append_text": "x"})
+        self.assertIn("error", resp)
+        self.assertEqual(self._refusals(), [])
