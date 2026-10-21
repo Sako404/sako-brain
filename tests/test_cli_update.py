@@ -212,3 +212,57 @@ class TestWriteRefusalsAreAudited(unittest.TestCase):
         rc, _ = run_cli(["update", "knowledge-widget", "--set", "status=current"], self.vault)
         self.assertEqual(rc, 0)
         self.assertEqual(self._refusals(), [])
+
+
+class TestUpdateRefusesProjectSyncedFields(unittest.TestCase):
+    """A project's status and path also live in the registry (status also
+    picks the record's folder). Generic `update` would only touch the
+    frontmatter, so a real change is refused and pointed at the dedicated
+    command; every other field still goes through."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-widget\n"
+            "    name: Widget\n"
+            "    path: /a\n"
+            "    status: active\n"
+        )
+        self.path = self.vault.write_note(
+            "30_PROJECTS/ACTIVE", "project-widget.md", id="project-widget",
+            type="project", status="active", body="Original body.",
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_status_change_is_refused(self):
+        rc, _ = run_cli(["update", "project-widget", "--set", "status=on-hold"], self.vault)
+        self.assertEqual(rc, 1)
+        self.assertEqual(frontmatter.parse_file(self.path).meta["status"], "active")
+
+    def test_path_change_is_refused(self):
+        rc, _ = run_cli(["update", "project-widget", "--set", "path=/b"], self.vault)
+        self.assertEqual(rc, 1)
+        self.assertNotIn("path", frontmatter.parse_file(self.path).meta)
+
+    def test_refusal_names_the_dedicated_command_and_writes_nothing(self):
+        before = self.path.read_text(encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, _ = run_cli(["update", "project-widget", "--set", "status=on-hold",
+                             "--append-text", "Should not land."], self.vault)
+        self.assertEqual(rc, 1)
+        self.assertIn("brain project update --status", err.getvalue())
+        self.assertEqual(self.path.read_text(encoding="utf-8"), before)
+
+    def test_resetting_the_current_status_is_allowed(self):
+        rc, _ = run_cli(["update", "project-widget", "--set", "status=active"], self.vault)
+        self.assertEqual(rc, 0)
+
+    def test_other_fields_still_update(self):
+        rc, _ = run_cli(["update", "project-widget", "--set", "category=infra"], self.vault)
+        self.assertEqual(rc, 0)
+        self.assertEqual(frontmatter.parse_file(self.path).meta["category"], "infra")

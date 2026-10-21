@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## Unreleased
+
+### Changed
+
+- `brain update` and the MCP tool `update_memory` refuse to change `status`
+  or `path` on a project record, with a pointer to `brain project update
+  --status` / `--path` (MCP: `update_project_status` / `update_project_path`).
+  Changing them there touched only the record's frontmatter and left the
+  registry, and for status the record's folder, out of sync. Setting the
+  current value again is still accepted, and other fields are unaffected.
+
 ## 0.14.9 — Change a project path in the record and registry together
 
 ### Added
