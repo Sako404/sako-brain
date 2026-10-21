@@ -245,6 +245,10 @@ def tool_update_memory(config: Config, id: str, set_fields: dict | None = None,
     `audience` grants read access only. An id claimed by more than one file
     is refused rather than resolved by preference, so a duplicate cannot
     quietly split a record's history across two files.
+
+    On a project record, `status` and `path` cannot be changed here — use
+    update_project_status / update_project_path, which keep the registry in
+    sync.
     """
     set_fields = set_fields or {}
     if set_fields.get("sensitivity") == "restricted":

@@ -115,6 +115,15 @@ class TestMcpWriteSafety(unittest.TestCase):
         self.assertIn("error", resp)
         self.assertIn("confirm_restricted", resp["error"]["message"])
 
+    def test_update_memory_refuses_project_status_change(self):
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-widget.md", id="project-widget",
+                              type="project", status="active")
+        resp = _call(self.config, "update_memory", {
+            "id": "project-widget", "set_fields": {"status": "on-hold"},
+        })
+        self.assertIn("error", resp)
+        self.assertIn("update_project_status", resp["error"]["message"])
+
     def test_queue_memory_refuses_secret_pattern(self):
         resp = _call(self.config, "queue_memory", {
             "candidate_fact": "my password: hunter2hunter2plaintext",

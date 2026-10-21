@@ -31,6 +31,16 @@ class UpdateError(ValueError):
 # note.write.denied) — both are refused the same way.
 _SHARING_FIELDS = {"owner_principal", "audience"}
 
+# On a project record these two fields are mirrored in the registry (and
+# status also decides the record's folder), so a frontmatter-only edit here
+# leaves the record and the registry disagreeing. Changing them must go
+# through projectops.set_project_status / set_project_path, which keep both
+# in sync. Re-setting the current value is a harmless no-op and is allowed.
+_PROJECT_SYNCED_FIELDS = {
+    "status": "`brain project update --status` (MCP: update_project_status)",
+    "path": "`brain project update --path` (MCP: update_project_path)",
+}
+
 
 class AmbiguousNoteIdError(UpdateError):
     """Two or more notes on disk claim the same id, so a write addressed by
@@ -190,6 +200,14 @@ def _update_memory_locked(config: Config, note_id: str, set_fields: dict | None,
             f"only '{current_owner}' (this record's current owner) may modify it "
             f"— '{principal_id}' is not permitted"
         )
+
+    if note.meta.get("type") == "project":
+        for key, how in _PROJECT_SYNCED_FIELDS.items():
+            if key in set_fields and set_fields[key] != note.meta.get(key):
+                raise UpdateError(
+                    f"'{key}' of a project record is kept in sync with the registry; "
+                    f"change it with {how}. Nothing was modified."
+                )
 
     for key, value in set_fields.items():
         if key in {"id", "created"}:
