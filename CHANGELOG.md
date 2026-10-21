@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
-## Unreleased
+## 0.14.10 — Project status and path change only through the project commands
 
 ### Changed
 
