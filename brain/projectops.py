@@ -661,6 +661,15 @@ def _normalize_project_path(config: Config, path: str) -> str:
     return str(candidate)
 
 
+def project_path_exists(config: Config, path: str | None) -> bool | None:
+    """Whether a project's working directory exists, as far as this host
+    can tell: None where it cannot (config.remote_project_paths, the
+    canonical server), never a False the host has no grounds for."""
+    if config.remote_project_paths:
+        return None
+    return bool(path) and Path(path).exists()
+
+
 def set_project_path(config: Config, project_id: str, new_path: str) -> PathChangeResult:
     """Change a project's working-directory reference in the record's
     frontmatter AND its registry entry, together.

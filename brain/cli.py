@@ -285,15 +285,18 @@ def cmd_project_show(config: Config, project_id: str, as_json: bool = False) -> 
         else:
             print(f"No registered project with id or alias '{project_id}'.", file=sys.stderr)
         return 1
-    p = Path(e.path)
-    path_exists = p.exists()
+    path_exists = projectops.project_path_exists(config, e.path)
     state = projectops.read_current_state(config, e.id)
     if as_json:
         print(json.dumps({"registry": e.__dict__, "path_exists": path_exists, "current_state": state},
                           indent=2, ensure_ascii=False, default=str))
         return 0
     print(f"id: {e.id}\nname: {e.name}\nstatus: {e.status}\npath: {e.path}\ncategory: {e.category}")
-    print(f"path exists: {path_exists}")
+    if path_exists is None:
+        print("path exists: not checked on this host (the path lives on the client; "
+              "`brain integration doctor` checks it there)")
+    else:
+        print(f"path exists: {path_exists}")
     if state is not None:
         print(f"\nCurrent state (updated {state['updated'] or 'never'}):")
         print(state["text"] or "(empty)")
