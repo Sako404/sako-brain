@@ -337,6 +337,13 @@ def _t_create_memory_note(a: dict):
     return argv, None
 
 
+def _t_file_inbox_note(a: dict):
+    argv = ["note", "file", a["id"], "--json"]
+    if a.get("area"):
+        argv += ["--area", a["area"]]
+    return argv, None
+
+
 def _t_update_project_status(a: dict):
     return ["project", "update", a["id"], "--status", a["status"], "--json"], None
 
@@ -481,6 +488,7 @@ TRANSLATORS = {
     "get_operational_state": _t_get_operational_state,
     "remember": _t_remember,
     "create_memory_note": _t_create_memory_note,
+    "file_inbox_note": _t_file_inbox_note,
     "update_project_status": _t_update_project_status,
     "update_project_path": _t_update_project_path,
     "write_handoff": _t_write_handoff,

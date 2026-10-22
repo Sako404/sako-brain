@@ -817,6 +817,21 @@ def cmd_note_create(config: Config, args) -> int:
     return 0
 
 
+def cmd_note_file(config: Config, args) -> int:
+    try:
+        src, dest = memoryops.file_note(config, args.id, area=args.area)
+    except (memoryops.MemoryWriteError, update_mod.UpdateError, FileNotFoundError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    rel_src, rel_dest = src.relative_to(config.brain_root), dest.relative_to(config.brain_root)
+    if getattr(args, "json", False):
+        print(json.dumps({"moved_from": str(rel_src), "filed_path": str(rel_dest)},
+                         indent=2, ensure_ascii=False))
+        return 0
+    print(f"Filed {rel_src} -> {rel_dest}")
+    return 0
+
+
 def cmd_status(config: Config, args) -> int:
     print(f"Brain root:     {config.brain_root}")
     roots = ", ".join(str(r) for r in config.projects_roots) or "(not configured)"
@@ -1842,7 +1857,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_timeline_add.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_note = sub.add_parser(
-        "note", help="Create a memory note at its canonical destination (person/knowledge/document/fact)")
+        "note", help="Create a memory note at its canonical destination, or file an inbox note there")
     note_sub = p_note.add_subparsers(dest="note_command", required=True)
     p_note_create = note_sub.add_parser(
         "create", help="person/knowledge/document go to their fixed bucket; fact needs --area")
@@ -1868,6 +1883,13 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
                                      "(Stage 2) — omit for private (default: owner only)")
     p_note_create.add_argument("--json", action="store_true", help="Emit JSON on stdout")
+    p_note_file = note_sub.add_parser(
+        "file", help="Move an inbox note to where its type belongs (event: timeline; "
+                     "person/knowledge/document: fixed bucket; fact: needs --area). Owner only.")
+    p_note_file.add_argument("id")
+    p_note_file.add_argument("--area", default=None,
+                             help="Required for a fact: an existing 20_AREAS/ subdirectory name")
+    p_note_file.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     sub.add_parser("status", help="Vault overview: counts, inbox, projects")
     sub.add_parser("doctor", help="Run health checks")
@@ -2262,6 +2284,8 @@ def _dispatch(config: Config, args, parser) -> int:
     if args.command == "note":
         if args.note_command == "create":
             return cmd_note_create(config, args)
+        if args.note_command == "file":
+            return cmd_note_file(config, args)
     if args.command == "status":
         return cmd_status(config, args)
     if args.command == "state":

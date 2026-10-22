@@ -213,7 +213,10 @@ knowledge|document|fact> --title ...` creates a note at its canonical
 destination (a fixed bucket for person/knowledge/document; `--area <name>`
 for fact, validated against real existing areas); `brain timeline add
 --title ... --date ...` creates a dated event from the event template.
-Neither ever takes a client-supplied filesystem path. `brain project
+`brain note file <id> [--area <name>]` moves an inbox capture to the same
+canonical destination its type would get from `note create` (events go to
+the timeline), unchanged; only the note's owner may move it, and only out
+of the inbox. None of them ever takes a client-supplied filesystem path. `brain project
 section-update <id> --section <name> --mode replace|append --content
 "..."` edits one allowlisted section of a project record (`Current
 state`, `Milestones`, `Problems / limitations`, `Next actions`) without

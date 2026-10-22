@@ -204,6 +204,7 @@ class TestTranslatorsPreferJsonOverTextParsing(unittest.TestCase):
         "get_operational_state": {},
         "remember": {"type": "fact", "title": "x"},
         "create_memory_note": {"type": "fact", "title": "x"},
+        "file_inbox_note": {"id": "x"},
         "update_project_status": {"id": "x", "status": "active"},
         "update_project_path": {"id": "x", "path": "/x"},
         "write_handoff": {"project_id": "x"},

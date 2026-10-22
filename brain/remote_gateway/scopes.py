@@ -40,7 +40,7 @@ WRITE_TOOLS = frozenset({
     "remember", "update_memory", "queue_memory", "write_handoff",
     "create_decision", "create_project", "update_project_status",
     "update_project_path", "close_project", "update_project_section", "create_memory_note",
-    "create_timeline_event",
+    "file_inbox_note", "create_timeline_event",
 })
 
 
