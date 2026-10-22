@@ -8,7 +8,10 @@ description: Resume work on a registered project using its latest handoff, Brain
 ## Workflow
 
 1. **Resolve the project** via the registry — `brain project show <id>`, or
-   `/project-find` if you only have a name/alias.
+   `/project-find` if you only have a name/alias. It also prints the
+   record's `Current state` and its date: that section is where the
+   project stands. If the date is older than the latest handoff (step 2),
+   the handoff is newer; say so.
 2. **Read the latest handoff**, if one exists: `brain handoff show <id>`.
    This gives you what was attempted, what changed, unresolved issues, and
    the next logical action from the last session — treat "next logical
@@ -16,8 +19,10 @@ description: Resume work on a registered project using its latest handoff, Brain
 3. **Read the full Brain project record** — `brain get <id>` — for the
    broader picture the handoff doesn't repeat (purpose, architecture,
    milestones, relationships). `brain project show <id>` from step 1 is
-   registry metadata only (status, path, category) — it is not this
-   record's actual content. Always via `brain get`, never by opening
+   registry metadata plus `Current state` — not the rest of the record.
+   Everything outside `Current state` is history; never report a line from
+   it as current without checking `Current state` and the handoff. Always
+   via `brain get`, never by opening
    `30_PROJECTS/<STATUS>/<id>.md` directly — that path names where the
    record lives inside the vault, not a local file to open; there is no
    local fallback.

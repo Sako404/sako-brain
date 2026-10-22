@@ -452,6 +452,55 @@ def check_handoff_in_wrong_status_folder(config: Config) -> list[Problem]:
     return problems
 
 
+# Projects whose state is expected to move; a completed/archived project's
+# record legitimately stops changing.
+_CURRENT_STATE_STATUSES = ("active", "planned", "on-hold")
+
+
+def check_project_current_state(config: Config, notes) -> list[Problem]:
+    """Advisory: where a project stands must live in its record's `Current
+    state` section (see projectops.CURRENT_STATE_SECTION). Flags an
+    active/planned/on-hold project whose section is missing or empty
+    (`project_current_state_missing`), and one whose section was last
+    written before its latest handoff (`project_current_state_stale`) —
+    the case where a session recorded new state in the handoff only.
+    Deterministic: dates from frontmatter, no reading of prose."""
+    from . import handoff as handoff_mod
+    from .projectops import current_state
+
+    problems = []
+    for n in notes:
+        if n.type != "project" or (n.status or "") not in _CURRENT_STATE_STATUSES:
+            continue
+        state = current_state(n)
+        if not state["text"]:
+            problems.append(Problem(
+                "project_current_state_missing",
+                f"{n.path}: no '## Current state' content — write it with "
+                f"`brain project section-update {n.id} --section 'Current state' --mode replace`",
+            ))
+            continue
+        try:
+            handoff_path = handoff_mod.handoff_path(config, n.id)
+        except Exception:
+            continue
+        if not handoff_path.exists():
+            continue
+        try:
+            handoff_updated = _parse_date(frontmatter.parse_file(handoff_path).meta.get("updated"))
+        except frontmatter.FrontmatterError:
+            continue
+        state_updated = _parse_date(state["updated"])
+        if handoff_updated and (state_updated is None or state_updated < handoff_updated):
+            problems.append(Problem(
+                "project_current_state_stale",
+                f"{n.path}: Current state last written {state['updated'] or 'never (by section-update)'} "
+                f"but the handoff was updated {handoff_updated} — replace Current state with "
+                f"where the project stands now",
+            ))
+    return problems
+
+
 def check_status_content_conflict(config: Config, notes) -> list[Problem]:
     """Advisory mismatch detection; never changes or blocks a record.
 
@@ -520,6 +569,7 @@ def run_all(config: Config, principal_id: str | None = None) -> list[Problem]:
     problems += check_password_file_not_backed_up(config)
     problems += check_handoff_in_wrong_status_folder(config)
     problems += check_symlink_escapes_vault(config)
+    problems += check_project_current_state(config, notes)
     # Advisory, last: a heuristic belongs after every deterministic check,
     # and must never be added to gitops.BLOCKING_CHECKS.
     problems += check_status_content_conflict(config, notes)

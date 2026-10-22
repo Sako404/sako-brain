@@ -21,6 +21,15 @@ back to editing the vault directly.**
    the id). Read the existing record before editing — don't overwrite
    sections you haven't been told to change.
 2. Apply the update:
+   - **Where the project stands changed** (something now works, broke,
+     got fixed, deployed, blocked; the next step moved): `brain project
+     section-update <id> --section "Current state" --mode replace
+     --content "..."`. Write the whole current picture, not a delta:
+     what works, what is deployed, open problems, next step, each with
+     its date. The previous text moves to `## Archive` automatically and
+     `current_state_updated` gets today's date. Never record state with
+     `--append-text` or as a dated block in another section: a reader
+     cannot tell which of several appended blocks is still true.
    - **Status change** (e.g. active → on-hold): `brain project update <id>
      --status <new-status>` — moves the record between
      `30_PROJECTS/<STATUS>/` folders and updates the registry entry in the

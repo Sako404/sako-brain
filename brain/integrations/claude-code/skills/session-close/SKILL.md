@@ -43,7 +43,14 @@ direct file edit, never a new `brain` capability:
 
 - **New or changed decision** → `/decision` (`brain decision create`, or
   `--supersedes` for one that reverses an earlier call).
-- **Project status/current-state/next-actions changed** → `/project-update`
+- **Where a touched project stands changed** → replace its `Current
+  state` with the full current picture: `brain project section-update
+  <id> --section "Current state" --mode replace --content "..."` (see
+  `/project-update`). Every project with meaningful work this session
+  gets this, in addition to the handoff: the handoff is the session log,
+  `Current state` is what readers take as the truth. A problem found and
+  fixed in the same session must not appear in it as open.
+- **Project status/next-actions changed** → `/project-update`
   (`brain project update --status ...` for a status move, `--set` /
   `--append-text` for frontmatter or a dated note, `brain project
   section-update` for a specific section like "Next actions").

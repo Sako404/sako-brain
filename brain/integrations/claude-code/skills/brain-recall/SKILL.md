@@ -42,7 +42,13 @@ noise.
 3. **Retrieve only relevant records** — `brain get <id>` for the specific
    notes that matter. Do not dump the whole Brain into context; a
    handful of targeted notes is the goal, not exhaustive recall.
-4. **If the request involves a registered project**, also inspect the
+4. **For a registered project, start from `Current state`** — `brain
+   project show <id>` prints it with its date. The rest of the record is
+   history: never report an older line from it (a "PILNE", a "broken", a
+   "TODO") as current without checking `Current state` and the latest
+   handoff. A negative answer ("Brain has no record of X") needs a search
+   of the whole record and handoff, not of a fragment.
+   Also, if the request involves a registered project, inspect the
    actual project directory on disk (see the `/project-sync`-style
    pattern) — the Brain record is a summary, not a substitute for current
    filesystem/git truth when the user is asking "what's the state of X."

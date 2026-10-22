@@ -349,5 +349,58 @@ class TestDoctorAdminGate(unittest.TestCase):
         self.assertEqual(problems[0].check, "admin_required")
 
 
+class TestProjectCurrentStateCheck(unittest.TestCase):
+    """Advisory: an active project must say where it stands in `Current
+    state`, and that section must not be older than the latest handoff."""
+
+    def setUp(self):
+        from brain import projectops
+        self.projectops = projectops
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.path = projectops.create_project(
+            self.config, id="project-widget", name="Widget", path="/a", status="active",
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _checks(self):
+        return [p for p in validate.check_project_current_state(
+            self.config, validate.load_all_notes(self.config)[0])]
+
+    def _set_handoff_updated(self, date):
+        from brain import frontmatter, handoff
+        handoff.write(self.config, "project-widget", handoff.HandoffSections(changed="Did things."))
+        path = handoff.handoff_path(self.config, "project-widget")
+        text = path.read_text(encoding="utf-8")
+        note = frontmatter.parse_text(text, path)
+        old = str(note.meta["updated"])
+        path.write_text(text.replace(f"updated: '{old}'", f"updated: '{date}'")
+                        .replace(f"updated: {old}", f"updated: '{date}'"), encoding="utf-8")
+        self.assertEqual(str(frontmatter.parse_file(path).meta["updated"]), date)
+
+    def test_empty_current_state_is_flagged(self):
+        self.assertEqual([p.check for p in self._checks()], ["project_current_state_missing"])
+
+    def test_written_current_state_without_handoff_is_clean(self):
+        self.projectops.update_section(self.config, "project-widget", "Current state", "replace", "Running.")
+        self.assertEqual(self._checks(), [])
+
+    def test_completed_project_is_not_checked(self):
+        self.projectops.set_project_status(self.config, "project-widget", "completed")
+        self.assertEqual(self._checks(), [])
+
+    def test_handoff_newer_than_current_state_is_stale(self):
+        self.projectops.update_section(self.config, "project-widget", "Current state", "replace", "Running.")
+        self._set_handoff_updated("2999-01-01")
+        self.assertEqual([p.check for p in self._checks()], ["project_current_state_stale"])
+
+    def test_handoff_older_than_current_state_is_clean(self):
+        self.projectops.update_section(self.config, "project-widget", "Current state", "replace", "Running.")
+        self._set_handoff_updated("2000-01-01")
+        self.assertEqual(self._checks(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

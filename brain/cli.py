@@ -287,12 +287,16 @@ def cmd_project_show(config: Config, project_id: str, as_json: bool = False) -> 
         return 1
     p = Path(e.path)
     path_exists = p.exists()
+    state = projectops.read_current_state(config, e.id)
     if as_json:
-        print(json.dumps({"registry": e.__dict__, "path_exists": path_exists},
+        print(json.dumps({"registry": e.__dict__, "path_exists": path_exists, "current_state": state},
                           indent=2, ensure_ascii=False, default=str))
         return 0
     print(f"id: {e.id}\nname: {e.name}\nstatus: {e.status}\npath: {e.path}\ncategory: {e.category}")
     print(f"path exists: {path_exists}")
+    if state is not None:
+        print(f"\nCurrent state (updated {state['updated'] or 'never'}):")
+        print(state["text"] or "(empty)")
     return 0
 
 
@@ -896,6 +900,9 @@ def cmd_state(config: Config, args) -> int:
     print(f"\nProjects: {sum(result.projects.by_status.values())}")
     for status_, count in sorted(result.projects.by_status.items()):
         print(f"  {status_}: {count}")
+    never = sorted(pid for pid, d in result.projects.current_state_updated.items() if d == "")
+    if never:
+        print(f"  Current state never written via section-update: {len(never)}")
 
     print(f"\nOpen decisions: {len(result.decisions.open)}")
     for d in result.decisions.open:

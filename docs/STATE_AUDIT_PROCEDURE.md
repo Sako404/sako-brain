@@ -91,6 +91,13 @@ current meaning. A fictional incident might have a closure section appended
 after its original description while metadata still says `proposed`. Report
 the disagreement instead of silently deciding which field to change.
 
+For a project, its `## Current state` section (with `current_state_updated`,
+also returned by `brain project show` / `get_project`) is where it stands;
+the rest of the record is history. An empty section, or one dated before the
+latest handoff, is a finding (`brain doctor` reports
+`project_current_state_missing` / `project_current_state_stale`), not a
+licence to promote an older line from elsewhere in the record to current.
+
 If there is a duplicate-ID warning, reconcile the visible copies before
 relying on a single history. Entirely hidden IDs and absent IDs have neutral
 not-found responses; no visible result does not prove no record exists.

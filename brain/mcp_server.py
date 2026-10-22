@@ -284,14 +284,17 @@ def tool_list_projects(config: Config) -> dict:
 
 
 def tool_get_project(config: Config, id: str) -> dict:
-    """One registered project's record by id or alias. A project record is a
-    summary written at a point in time — for "what is the state of X right
-    now", read the latest handoff too, and for code state check the actual
-    repository."""
+    """One registered project's registry entry plus its `current_state`: the
+    record's `Current state` section and the date it was last written. That
+    section is where the project stands; the rest of the record is history.
+    An empty or old `current_state.updated` means it may not reflect the
+    latest work — read the latest handoff too, and for code state check the
+    actual repository."""
     e = find_visible_project(config, config.acting_principal, id)
     if not e:
         raise KeyError(f"no registered project with id or alias '{id}'")
-    return {"registry": e.__dict__, "path_exists": Path(e.path).exists()}
+    return {"registry": e.__dict__, "path_exists": Path(e.path).exists(),
+            "current_state": projectops.read_current_state(config, e.id)}
 
 
 def tool_search_timeline(config: Config, query: str = "", limit: int = 50) -> dict:
@@ -307,7 +310,9 @@ def tool_search_timeline(config: Config, query: str = "", limit: int = 50) -> di
 
 
 def tool_project_context(config: Config, id: str) -> dict:
-    """Everything needed to resume one project in a single call: its record,
+    """Everything needed to resume one project in a single call:
+    `current_state` (the record's `Current state` section and its date —
+    where the project stands; the rest of the record is history), its record,
     its latest handoff, and (only when Brain runs on the same machine as the
     project) live git/filesystem facts. `filesystem_facts` is null whenever
     the project directory is not visible from where Brain itself runs —
@@ -321,7 +326,8 @@ def tool_project_context(config: Config, id: str) -> dict:
         record_text = _read_note_text(config, e.id)
     except FileNotFoundError:
         pass
-    return {"registry": e.__dict__, "record": record_text, "filesystem_facts": facts.__dict__}
+    return {"registry": e.__dict__, "current_state": projectops.read_current_state(config, e.id),
+            "record": record_text, "filesystem_facts": facts.__dict__}
 
 
 def tool_write_handoff(config: Config, project_id: str, attempted: str = "", changed: str = "",
