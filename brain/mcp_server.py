@@ -12,7 +12,7 @@ Never expose this over a network socket — stdio only, local use only.
 Write-policy note: every write tool here (`remember`, `update_memory`,
 `write_handoff`, `create_decision`, `create_project`, `update_project_status`,
 `update_project_path`, `close_project`, `update_project_section`, `create_memory_note`,
-`create_timeline_event`) is a thin wrapper over the same business-logic
+`file_inbox_note`, `create_timeline_event`) is a thin wrapper over the same business-logic
 function the CLI calls — no tool
 duplicates logic the CLI doesn't also have. None bypasses
 what a human typing the equivalent `brain` command would be subject to —
@@ -468,6 +468,18 @@ def tool_create_memory_note(config: Config, type: str, title: str, text: str = "
     return {"created_path": str(path.relative_to(config.brain_root))}
 
 
+def tool_file_inbox_note(config: Config, id: str, area: str | None = None) -> dict:
+    """Thin wrapper over memoryops.file_note() — the exact function
+    `brain note file` already calls. No new logic. Moves one note out of
+    the inbox to where its type belongs (event: timeline; person/knowledge/
+    document: fixed bucket; fact: needs `area`). Never accepts a path,
+    never touches content, refuses anything outside the inbox, and only the
+    note's owner may move it."""
+    src, dest = memoryops.file_note(config, id, area=area)
+    return {"moved_from": str(src.relative_to(config.brain_root)),
+            "filed_path": str(dest.relative_to(config.brain_root))}
+
+
 def tool_create_timeline_event(config: Config, title: str, valid_from: str,
                                 what_happened: str = "", why_it_matters: str = "",
                                 people: list | None = None, projects: list | None = None,
@@ -670,6 +682,14 @@ TOOLS = {
                          "description": "Explicit sharing (Stage 2), e.g. ['group:household'] or ['principal:ania'] -- omit for private (default: owner only)"},
         },
         "required": ["type", "title"],
+    }),
+    "file_inbox_note": (tool_file_inbox_note, {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "id of a note currently in the inbox"},
+            "area": {"type": "string", "description": "Required for type='fact': an existing 20_AREAS/ subdirectory name"},
+        },
+        "required": ["id"],
     }),
     "create_timeline_event": (tool_create_timeline_event, {
         "type": "object",

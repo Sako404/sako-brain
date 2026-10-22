@@ -120,7 +120,7 @@ ordinary credential leak:
 | Scope | Covers |
 |---|---|
 | `brain.read` | `search_memory`, `read_memory`, `get_context`, `list_projects`, `get_project`, `search_timeline`, `project_context`, `get_operational_state` |
-| `brain.write` | `remember`, `update_memory`, `queue_memory`, `write_handoff`, `create_decision`, `create_project`, `update_project_status`, `update_project_path`, `close_project`, `update_project_section`, `create_memory_note`, `create_timeline_event` |
+| `brain.write` | `remember`, `update_memory`, `queue_memory`, `write_handoff`, `create_decision`, `create_project`, `update_project_status`, `update_project_path`, `close_project`, `update_project_section`, `create_memory_note`, `file_inbox_note`, `create_timeline_event` |
 | `brain.restricted` | Required **in addition to** `brain.write` for any write whose effective sensitivity is `restricted` — mirrors the existing `confirm_restricted` mechanism one-for-one |
 
 A token missing a required scope gets a clean `403` with

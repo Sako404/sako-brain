@@ -25,6 +25,7 @@ from . import frontmatter
 from . import indexer
 from . import visibility
 from .capture import slugify
+from .update import resolve_write_target
 from .paths import Config
 
 # Types with exactly one destination directory, independent of content.
@@ -61,6 +62,29 @@ def _body_for(type_: str, title: str, text: str) -> str:
     raise AssertionError(f"no body template for type {type_!r}")  # unreachable — caller validates first
 
 
+def _destination_dir(config: Config, type_: str, area: str | None) -> Path:
+    """Where a note of this type belongs. Derived from the type (plus a
+    validated `area` for facts), never taken from the caller as a path."""
+    if type_ in FIXED_DESTINATION_TYPES:
+        if area is not None:
+            raise MemoryWriteError(f"type '{type_}' has a fixed destination — 'area' is not accepted")
+        return config.dir_for(FIXED_DESTINATION_TYPES[type_])
+    if type_ == "fact":
+        if area is None:
+            raise MemoryWriteError(
+                "type 'fact' has no single destination — pass 'area' (an existing 20_AREAS/ "
+                "subdirectory), or use 'brain remember' for undifferentiated inbox capture instead"
+            )
+        valid = existing_areas(config)
+        if area not in valid:
+            raise MemoryWriteError(f"unknown area '{area}' — must be one of {valid}")
+        return config.dir_for("areas") / area
+    raise MemoryWriteError(
+        f"type '{type_}' has no final-destination primitive yet — use 'brain remember' for "
+        "inbox capture, or the dedicated 'brain project create'/'brain decision create'"
+    )
+
+
 def create_memory(config: Config, type_: str, title: str, text: str = "",
                    tags: list[str] | None = None, people: list[str] | None = None,
                    projects: list[str] | None = None, sensitivity: str = "normal",
@@ -71,25 +95,7 @@ def create_memory(config: Config, type_: str, title: str, text: str = "",
     if type_ not in allowed:
         raise MemoryWriteError(f"unknown type '{type_}', must be one of {sorted(allowed)}")
 
-    if type_ in FIXED_DESTINATION_TYPES:
-        if area is not None:
-            raise MemoryWriteError(f"type '{type_}' has a fixed destination — 'area' is not accepted")
-        dest_dir = config.dir_for(FIXED_DESTINATION_TYPES[type_])
-    elif type_ == "fact":
-        if area is None:
-            raise MemoryWriteError(
-                "type 'fact' has no single destination — pass 'area' (an existing 20_AREAS/ "
-                "subdirectory), or use 'brain remember' for undifferentiated inbox capture instead"
-            )
-        valid = existing_areas(config)
-        if area not in valid:
-            raise MemoryWriteError(f"unknown area '{area}' — must be one of {valid}")
-        dest_dir = config.dir_for("areas") / area
-    else:
-        raise MemoryWriteError(
-            f"type '{type_}' has no final-destination primitive yet — use 'brain remember' for "
-            "inbox capture, or the dedicated 'brain project create'/'brain decision create'"
-        )
+    dest_dir = _destination_dir(config, type_, area)
 
     today = dt.date.today().isoformat()
     slug = slugify(title)
@@ -124,3 +130,59 @@ def create_memory(config: Config, type_: str, title: str, text: str = "",
                      **audit.caller_provenance(config),
                      detail=f"id={note_id}")
     return dest
+
+
+def file_note(config: Config, note_id: str, area: str | None = None,
+              principal_id: str | None = None) -> tuple[Path, Path]:
+    """Move one note out of the inbox to where its type belongs: the
+    triage step after `remember`/`memory accept`, which only ever write to
+    the inbox. Returns (old path, new path).
+
+    Deliberately narrow. The source must sit directly in the inbox, so this
+    files captures and never reorganises the rest of the vault. The
+    destination comes from the note's own type, as in `create_memory`,
+    plus events go to the timeline; decisions and projects keep their own
+    commands (a project is also in the registry). Only the note's owner may
+    move it. Content, id and frontmatter are left exactly as they are.
+    """
+    from .projectops import project_write_lock
+
+    if principal_id is None:
+        principal_id = config.acting_principal
+    with project_write_lock(config):
+        src = resolve_write_target(config, note_id, principal_id)
+        if src.parent.resolve() != config.inbox_dir.resolve():
+            raise MemoryWriteError(
+                f"'{note_id}' is not in {config.inbox_dir.name}/ — only inbox captures are "
+                "filed this way. Nothing was moved."
+            )
+        note = frontmatter.parse_file(src)
+        if not visibility.is_owner(config, principal_id, note.meta):
+            owner, _ = visibility.owner_and_audience(note.meta)
+            audit.log_event(config, event="note.move.denied", principal_id=principal_id,
+                            **audit.caller_provenance(config),
+                            detail=f"id={note_id} owner={owner}")
+            raise MemoryWriteError(
+                f"only '{owner}' (this record's current owner) may move it "
+                f"— '{principal_id}' is not permitted"
+            )
+        type_ = note.meta.get("type") or ""
+        if type_ == "event":
+            if area is not None:
+                raise MemoryWriteError("type 'event' has a fixed destination — 'area' is not accepted")
+            dest_dir = config.dir_for("timeline")
+        else:
+            dest_dir = _destination_dir(config, type_, area)
+        dest = dest_dir / src.name
+        if not frontmatter.is_memory_path(dest, config.brain_root):
+            raise MemoryWriteError("ordinary memory cannot target protected or outside-vault paths")
+        if dest.exists():
+            raise MemoryWriteError(f"{dest.relative_to(config.brain_root)} already exists. Nothing was moved.")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dest)
+        indexer.index_note(config, dest)
+        audit.log_event(config, event="note.move", principal_id=principal_id,
+                        **audit.caller_provenance(config),
+                        detail=f"id={note_id} from={src.relative_to(config.brain_root)} "
+                               f"to={dest.relative_to(config.brain_root)}")
+    return src, dest

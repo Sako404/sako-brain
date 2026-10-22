@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.16.0 — File an inbox capture where its type belongs
+
+### Added
+
+- `brain note file <id> [--area <name>]` and the MCP tool `file_inbox_note`.
+  They move a note out of the inbox to where its type belongs, the same
+  destination `note create` would pick: person, knowledge and document to
+  their fixed directories, a fact to an existing area, an event to the
+  timeline. Content, id and frontmatter are not changed. The note must sit
+  directly in the inbox, only its owner may move it, an existing file at
+  the destination is never overwritten, decisions and projects are refused
+  (they have their own commands), and every move is written to the audit
+  log as `note.move`. Over SSH it needs the write identity; the remote
+  gateway puts it under `brain.write`.
+
 ## 0.15.2 — `--version` and `--help` answer locally on a remote client
 
 ### Fixed
