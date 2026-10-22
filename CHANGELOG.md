@@ -5,6 +5,22 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.15.1 — Doctor no longer checks a separate dispatcher script
+
+### Removed
+
+- The `dispatcher_deployment_info` doctor check. It reported the hash of a
+  separately deployed dispatcher script so a deploy could spot an outdated
+  copy. The dispatcher now ships in the package, so `brain_version` already
+  identifies it.
+
+### Changed
+
+- docs/SERVER_SETUP.md and the README show the forced command as
+  `python3 -I -m brain.dispatch`. `-I` keeps Python from importing out of
+  the directory the command starts in and from reading `PYTHON*`
+  environment variables.
+
 ## 0.15.0 — The SSH dispatcher ships in the package
 
 ### Added

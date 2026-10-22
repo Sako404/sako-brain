@@ -5,8 +5,9 @@ an AI agent, the [remote gateway](REMOTE_ACCESS.md)) reach it over SSH.
 If you only use Brain on one computer, you need none of this.
 
 Clients connect with keys that can do one thing only: run the dispatcher
-that ships in this package (`python -m brain.dispatch`). Each key's `authorized_keys` line fixes what
-that key may run and as whom. A client never gets a shell.
+that ships in this package (`python3 -I -m brain.dispatch`). Each key's
+`authorized_keys` line fixes what that key may run and as whom. A client
+never gets a shell.
 
 ## What runs where
 
@@ -22,7 +23,7 @@ that key may run and as whom. A client never gets a shell.
 2. Install the package for that user in a virtualenv, for example
    `python3 -m venv /home/brain/venv` then
    `/home/brain/venv/bin/pip install sako-brain`. The forced commands below
-   run that venv's own interpreter (`/home/brain/venv/bin/python3 -m
+   run that venv's own interpreter (`/home/brain/venv/bin/python3 -I -m
    brain.dispatch`), and the dispatcher always runs the `brain` from the
    same venv, so the two can never come from different versions.
 3. Create or adopt the vault and run `brain init` / `brain index` locally
@@ -38,8 +39,8 @@ Each client key gets its own line. A laptop with a read key and a write
 key needs two lines:
 
 ```
-restrict,from="192.0.2.10",command="/home/brain/venv/bin/python3 -m brain.dispatch --mode read --vault /srv/brain/vault --state-dir /home/brain/.local/state/sako-brain --principal principal-alex --client laptop-read" ssh-ed25519 AAAA... laptop-read
-restrict,from="192.0.2.10",command="/home/brain/venv/bin/python3 -m brain.dispatch --mode write --vault /srv/brain/vault --state-dir /home/brain/.local/state/sako-brain --principal principal-alex --client laptop-write" ssh-ed25519 AAAA... laptop-write
+restrict,from="192.0.2.10",command="/home/brain/venv/bin/python3 -I -m brain.dispatch --mode read --vault /srv/brain/vault --state-dir /home/brain/.local/state/sako-brain --principal principal-alex --client laptop-read" ssh-ed25519 AAAA... laptop-read
+restrict,from="192.0.2.10",command="/home/brain/venv/bin/python3 -I -m brain.dispatch --mode write --vault /srv/brain/vault --state-dir /home/brain/.local/state/sako-brain --principal principal-alex --client laptop-write" ssh-ed25519 AAAA... laptop-write
 ```
 
 - `restrict` turns off port, agent and X11 forwarding and PTY allocation.
@@ -48,6 +49,9 @@ restrict,from="192.0.2.10",command="/home/brain/venv/bin/python3 -m brain.dispat
   client has a stable address.
 - `command=` is where every flag below is set. The connecting client can't
   change any of them, because it only supplies the `brain` subcommand.
+- `-I` runs Python isolated: it ignores `PYTHON*` environment variables and
+  never imports from the directory the command starts in (the user's
+  home), so nothing there can stand in for the `brain` package.
 
 ### Flags
 
@@ -133,7 +137,7 @@ vault path, state path, default principal and delegating client names
 written into it. To move a key, edit its line:
 
 1. Replace the script path: `.../python3 .../brain-dispatch.py` becomes
-   `.../python3 -m brain.dispatch`, using the same venv's `python3`.
+   `.../python3 -I -m brain.dispatch`, using the same venv's `python3`.
 2. Add `--vault`, `--state-dir` and, if the old script set it,
    `--remote-project-paths`.
 3. Keep the same `--mode`, `--principal` and `--client`. Spell out

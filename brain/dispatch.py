@@ -5,7 +5,7 @@ docs/SERVER_SETUP.md).
 Each SSH key is installed in authorized_keys with a forced command that
 runs this module, with flags fixed at install time:
 
-    restrict,command="/path/to/venv/bin/python3 -m brain.dispatch
+    restrict,command="/path/to/venv/bin/python3 -I -m brain.dispatch
       --mode read --vault /srv/brain/vault --state-dir /srv/brain/state
       --principal principal-alex --client laptop" ssh-ed25519 AAAA...
 
@@ -151,7 +151,7 @@ def _refuse(reason: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m brain.dispatch",
+        prog="python3 -I -m brain.dispatch",
         description="SSH forced-command dispatcher for a server-hosted canonical Brain. "
                     "Install as the command= of an authorized_keys line; never run interactively.",
     )
