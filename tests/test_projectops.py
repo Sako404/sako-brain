@@ -438,6 +438,26 @@ class TestCurrentStateAndArchive(unittest.TestCase):
         self.assertIn("## Status\n\nOld status text.", note.body)
         self.assertNotIn("## Archive", note.body)
 
+    def test_missing_current_state_keeps_intro_text_out_of_the_section(self):
+        # Regression (v0.18.0, found on the first live record): an intro
+        # line between the title and the first section became the new
+        # section's content and a replace archived it as "Current state".
+        self.vault.write_note(str(self.path.parent.relative_to(self.vault.root)), self.path.name,
+                               id="project-widget", type="project", status="active", title="Widget",
+                               body="*A one-line motto.*\n\n## Status\n\nOld status text.\n")
+        note = frontmatter.parse_file(self._replace("Now running."))
+        body = note.body.lstrip("\n")
+        self.assertTrue(body.startswith("# Widget\n\n*A one-line motto.*\n\n## Current state\nNow running."))
+        self.assertNotIn("## Archive", note.body)
+
+    def test_missing_current_state_without_any_section_goes_at_the_end(self):
+        self.vault.write_note(str(self.path.parent.relative_to(self.vault.root)), self.path.name,
+                               id="project-widget", type="project", status="active", title="Widget",
+                               body="Just an intro.")
+        note = frontmatter.parse_file(self._replace("Now running."))
+        self.assertIn("Just an intro.\n\n## Current state\nNow running.", note.body)
+        self.assertNotIn("## Archive", note.body)
+
     def test_other_missing_sections_still_refused(self):
         self.vault.write_note(str(self.path.parent.relative_to(self.vault.root)), self.path.name,
                                id="project-widget",
