@@ -79,9 +79,12 @@ def load_visible_registry(config: Config, principal_id: str | None = None) -> li
     write-path duplicate-id/path checks (brain/projectops.py) and
     `brain doctor`'s integrity scan, both of which need the complete
     picture to do their job correctly regardless of who's asking."""
+    from .update import note_paths_snapshot  # local import: avoids a cycle risk
+
     if principal_id is None:
         principal_id = config.acting_principal
-    return [e for e in load_registry(config) if _project_note_visible(config, principal_id, e)]
+    with note_paths_snapshot(config):
+        return [e for e in load_registry(config) if _project_note_visible(config, principal_id, e)]
 
 
 def find_visible_project(config: Config, principal_id: str, id_or_alias: str) -> ProjectEntry | None:

@@ -538,3 +538,66 @@ class TestCurrentStateAndArchive(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNotePathsSnapshot(unittest.TestCase):
+    """Registry visibility and `brain state` look a record up per project;
+    each lookup used to rescan the whole vault. Inside note_paths_snapshot
+    the vault is scanned once and the answers are the same."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        for i in range(5):
+            projectops.create_project(
+                self.config, id=f"project-p{i}", name=f"P{i}", path=f"/nonexistent/p{i}",
+                status="active", created="2026-01-01",
+            )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _counting_scans(self):
+        from brain import update
+        calls = []
+        real = update._scan_paths_by_id
+
+        def counting(config):
+            calls.append(1)
+            return real(config)
+        return calls, patch.object(update, "_scan_paths_by_id", side_effect=counting)
+
+    def test_visible_registry_scans_the_vault_once_with_the_same_answer(self):
+        from brain import registry, update
+        expected = {e.id: update.find_note_paths(self.config, e.id) for e in load_registry(self.config)}
+        calls, patcher = self._counting_scans()
+        with patcher:
+            visible = registry.load_visible_registry(self.config)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(sorted(e.id for e in visible), sorted(expected))
+        with update.note_paths_snapshot(self.config):
+            for note_id, paths in expected.items():
+                self.assertEqual(update.find_note_paths(self.config, note_id), paths)
+            self.assertEqual(update.find_note_paths(self.config, "project-missing"), [])
+
+    def test_state_projects_section_scans_once(self):
+        from brain import state
+        calls, patcher = self._counting_scans()
+        with patcher:
+            with patch.object(state, "_collect_decisions", return_value=(state.DecisionsSection(), 0)):
+                result = state.get_operational_state(self.config)
+        self.assertTrue(result.sources["projects"].ok)
+        self.assertEqual(len(result.projects.entries), 5)
+        # projects: one scan; nothing else in state looks records up by id.
+        self.assertEqual(len(calls), 1)
+
+    def test_snapshot_is_reused_when_nested_and_dropped_after(self):
+        from brain import update
+        calls, patcher = self._counting_scans()
+        with patcher:
+            with update.note_paths_snapshot(self.config):
+                with update.note_paths_snapshot(self.config):
+                    update.find_note_paths(self.config, "project-p0")
+            self.assertEqual(len(calls), 1)
+            self.vault.write_note("60_KNOWLEDGE", "late.md", id="knowledge-late", type="knowledge")
+            self.assertEqual(len(update.find_note_paths(self.config, "knowledge-late")), 1)
