@@ -22,6 +22,13 @@ class TestCapture(unittest.TestCase):
         self.assertEqual(note.type, "fact")
         self.assertEqual(note.id, "fact-test-fact")
 
+    def test_captured_idea_starts_open_and_other_types_stay_unreviewed(self):
+        idea = parse_file(capture.capture(self.config, type_="idea", title="Family calendar"))
+        self.assertEqual(idea.type, "idea")
+        self.assertEqual(idea.status, "open")
+        fact = parse_file(capture.capture(self.config, type_="fact", title="Plain fact"))
+        self.assertFalse(fact.status)
+
     def test_capture_rejects_unknown_type(self):
         with self.assertRaises(ValueError):
             capture.capture(self.config, type_="bogus", title="X")

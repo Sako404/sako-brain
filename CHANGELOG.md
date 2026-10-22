@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.20.3 — A captured idea starts `open`
+
+### Changed
+
+- `brain remember --type idea` (MCP `remember`, inbox capture) writes the
+  note with `status: open`, as `brain note create --type idea` already
+  did. Ideas captured from chat (e.g. Matrix) now land on the owner's
+  review list (`brain list --status open`, `/session-close`) without a
+  separate triage step. Captures of every other type still start with no
+  status.
+
 ## 0.20.2 — `/session-close` reports notes waiting for the user
 
 ### Changed
