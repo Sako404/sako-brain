@@ -76,13 +76,18 @@ class TestValidate(unittest.TestCase):
         checks = {p.check for p in problems}
         self.assertIn("missing_project_dirs", checks)
 
-    def test_missing_project_dir_reported_as_unverifiable_when_remote(self):
+    def test_project_paths_not_reported_when_remote(self):
         """A restricted-SSH server dispatcher (config.remote_project_paths)
-        can never see desktop project paths — the same gap must be reported
-        as project_path_unverifiable, never as missing_project_dirs, so it
-        is never mistaken for actual data drift."""
+        can never see desktop project paths, so it reports nothing about
+        them: neither missing_project_dirs nor any per-path noise. It only
+        counts what it skipped; the client checks the paths."""
         import dataclasses
 
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-ghost\n    name: Ghost\n    path: /nonexistent/ghost/path\n    status: active\n"
+            "  - id: project-nopath\n    name: No path\n    status: active\n"
+        )
         path = self.vault.root / "30_PROJECTS" / "ACTIVE" / "p.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -95,19 +100,19 @@ class TestValidate(unittest.TestCase):
             "# Ghost project\n"
         )
         remote_config = dataclasses.replace(self.config, remote_project_paths=True)
-        problems = validate.run_all(remote_config)
-        checks = {p.check for p in problems}
-        self.assertIn("project_path_unverifiable", checks)
+        checks = {p.check for p in validate.run_all(remote_config)}
         self.assertNotIn("missing_project_dirs", checks)
-        unverifiable = [p for p in problems if p.check == "project_path_unverifiable"]
-        self.assertTrue(any("cannot verify from this host" in p.message for p in unverifiable))
+        self.assertNotIn("project_path_unverifiable", checks)
+        self.assertEqual(validate.unchecked_project_path_count(remote_config), 1)
+        # Locally the same ghost path is still a real finding.
+        self.assertIn("missing_project_dirs", {p.check for p in validate.run_all(self.config)})
+        self.assertEqual(validate.unchecked_project_path_count(self.config), 0)
 
     def test_missing_project_dir_is_not_a_blocking_check_in_either_mode(self):
         import dataclasses
 
         from brain import gitops
         self.assertNotIn("missing_project_dirs", gitops.BLOCKING_CHECKS)
-        self.assertNotIn("project_path_unverifiable", gitops.BLOCKING_CHECKS)
 
     def test_detects_registry_duplicate(self):
         self.config.registry_path.write_text(
@@ -347,6 +352,41 @@ class TestDoctorAdminGate(unittest.TestCase):
                                    principal_id="principal-marcin")
         problems = validate.run_all(self._as("principal-does-not-exist"))
         self.assertEqual(problems[0].check, "admin_required")
+
+    def _doctor_output(self, config) -> str:
+        import contextlib
+        import io
+
+        from brain import cli
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.cmd_doctor(config, None)
+        return out.getvalue()
+
+    def test_doctor_says_how_many_project_paths_it_left_to_the_client(self):
+        self.config.registry_path.write_text(
+            "projects:\n"
+            "  - id: project-a\n    name: A\n    path: /nonexistent/a\n    status: active\n"
+            "  - id: project-b\n    name: B\n    path: /nonexistent/b\n    status: archived\n"
+        )
+        remote = dataclasses.replace(self.config, remote_project_paths=True)
+        out = self._doctor_output(remote)
+        self.assertIn("Not checked on this host: 2 project path(s)", out)
+        self.assertNotIn("/nonexistent/a", out)
+        self.assertNotIn("Not checked on this host", self._doctor_output(self.config))
+
+    def test_doctor_does_not_tell_a_non_admin_the_registry_size(self):
+        identity.create_principal(self.config, display_name="Marcin", role="admin",
+                                   principal_id="principal-marcin")
+        identity.create_principal(self.config, display_name="Ania", role="",
+                                   principal_id="principal-ania")
+        self.config.registry_path.write_text(
+            "projects:\n  - id: project-a\n    name: A\n    path: /nonexistent/a\n    status: active\n"
+        )
+        remote = dataclasses.replace(self._as("principal-ania"), remote_project_paths=True)
+        out = self._doctor_output(remote)
+        self.assertIn("admin_required", out)
+        self.assertNotIn("Not checked on this host", out)
 
 
 class TestProjectCurrentStateCheck(unittest.TestCase):

@@ -534,6 +534,23 @@ def _run_brain_capture(argv: list[str], timeout: float = 20.0):
         return exc
 
 
+# A finished or archived project's directory may legitimately be gone.
+_PATH_CHECKED_STATUSES = ("active", "planned", "on-hold")
+
+
+def _check_project_paths_present(state: dict) -> dict:
+    entries = (state.get("projects") or {}).get("entries") or []
+    checked = [e for e in entries if e.get("path") and e.get("status") in _PATH_CHECKED_STATUSES]
+    missing = [e for e in checked if not Path(e["path"]).exists()]
+    if missing:
+        listed = "; ".join(f"{e.get('id')}: {e['path']}" for e in missing)
+        return _check("project_paths_present", False,
+                      f"{len(missing)} of {len(checked)} active/planned/on-hold project path(s) "
+                      f"missing on this host — {listed}")
+    return _check("project_paths_present", True,
+                  f"{len(checked)} active/planned/on-hold project path(s) present on this host")
+
+
 def run_doctor(target: str | None = None) -> dict:
     checks: list[dict] = []
 
@@ -573,6 +590,7 @@ def run_doctor(target: str | None = None) -> dict:
                           "not set" if not brain_local else f"BRAIN_LOCAL={brain_local} is set"))
 
     proc = _run_brain_capture(["state", "--json"])
+    state = None
     if isinstance(proc, Exception):
         checks.append(_check("canonical_brain_connectivity", False, str(proc)))
     else:
@@ -585,6 +603,11 @@ def run_doctor(target: str | None = None) -> dict:
             except json.JSONDecodeError:
                 detail = "reachable (non-JSON response)"
         checks.append(_check("canonical_brain_connectivity", ok, detail))
+
+    # The canonical server cannot see project paths (its `brain doctor`
+    # skips them), so this client is where they get checked.
+    if client_cfg is not None and isinstance(state, dict):
+        checks.append(_check_project_paths_present(state))
 
     bridge_proc = subprocess.run(
         [sys.executable, "-m", "brain.mcp_bridge"],

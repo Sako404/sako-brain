@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.19.0 — Project paths are checked on the client, not reported as server noise
+
+### Changed
+
+- On the canonical server (`BRAIN_REMOTE_PROJECT_PATHS=1`), `brain doctor`
+  no longer reports `project_path_unverifiable`. The server can never see
+  desktop project paths, so every registered project produced two
+  findings (registry entry and record) that said nothing about the vault:
+  60 of 72 problems on a real Brain. Doctor now prints one line instead,
+  `Not checked on this host: N project path(s) …`, and does not count it
+  as a problem. A non-admin caller does not get that line. The check name
+  `project_path_unverifiable` is gone; `missing_project_dirs` in a local
+  vault is unchanged.
+
+### Added
+
+- `brain integration doctor` has a new check, `project_paths_present`,
+  run when a remote Brain is configured: every active, planned or on-hold
+  project's registered path must exist on this client, and a missing one
+  is named. Archived and completed projects are not checked, since their
+  directory may be gone on purpose. Server and client both need this
+  release: the server for the doctor change, the client for the new check.
+
 ## 0.18.2 — `integration doctor` sees skill links left on an old version
 
 ### Fixed
