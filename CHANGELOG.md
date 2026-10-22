@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.20.2 — `/session-close` reports notes waiting for the user
+
+### Changed
+
+- The `/session-close` skill runs `brain list --status open` and adds an
+  `OPEN NOTES` line to its closing report: how many notes wait for the
+  user, with their titles when there are five or fewer. It only reports;
+  it never changes or triages them. Client-only; the server does not need
+  this release.
+
 ## 0.20.1 — Project listing and `brain state` no longer rescan the vault per project
 
 ### Fixed
