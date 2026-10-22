@@ -199,7 +199,8 @@ class TestVocabularyIsConfiguration(unittest.TestCase):
             config = self._config_from(tmp, "status_by_type:\n  project:\n    - live\n    - dead\n")
             self.assertEqual(config.vocabulary.statuses_for("project"), ("live", "dead"))
             # Untouched types keep their shipped vocabulary.
-            self.assertEqual(config.vocabulary.statuses_for("fact"), ("current", "superseded"))
+            self.assertEqual(config.vocabulary.statuses_for("fact"),
+                             ("open", "current", "promoted", "superseded", "archived"))
 
     def test_empty_status_list_means_unconstrained(self):
         with tempfile.TemporaryDirectory() as tmp:

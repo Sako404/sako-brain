@@ -76,7 +76,11 @@ already captured, routine git commits, minor code edits.
      (`--set status=superseded --set valid_to=<date>`) and create the new
      fact as a separate note (see Create below), per rule 5/6 in AGENTS.md
      ("preserve historical information").
-   - Create: for `person`/`knowledge`/`document`, or `fact` with a known
+   - An idea, proposal or "maybe later" (not a decision, not a fact) is
+     `--type idea`; it is created with `status: open`, which puts it on its
+     owner's review list (`brain list --status open`). Anything else the
+     owner still has to confirm or answer also gets `--set status=open`.
+   - Create: for `person`/`knowledge`/`document`/`idea`, or `fact` with a known
      `20_AREAS/<area>` home: `brain note create --type <type> --title "..."
      --text "..." [--area <name>] [--doc-path <path>]` — picks the
      template and final directory for you (never write these directly).

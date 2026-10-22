@@ -435,7 +435,7 @@ def default_config(brain_root: Path | None = None) -> Config:
 # ---------------------------------------------------------------------------
 
 DEFAULT_NOTE_TYPES = (
-    "person", "project", "area", "event", "decision", "fact", "document", "knowledge",
+    "person", "project", "area", "event", "decision", "fact", "document", "knowledge", "idea",
 )
 
 # Dedicated CLI commands (`brain projects`, `brain project ...`, `brain
@@ -443,10 +443,21 @@ DEFAULT_NOTE_TYPES = (
 # that drops them would break commands rather than customise them.
 REQUIRED_NOTE_TYPES = ("project", "decision")
 
+# The lifecycle of a note that is neither a project nor a decision. No status
+# means a fresh capture nobody has looked at yet; `open` means it waits for its
+# owner (to answer, decide, confirm); `current` means reviewed and kept;
+# `promoted` means it became a project or decision, linked from the note;
+# `superseded`/`archived` keep it as history. `brain list --status open` is
+# the owner's review list.
+NOTE_LIFECYCLE_STATUSES = ("open", "current", "promoted", "superseded", "archived")
+
 DEFAULT_STATUS_BY_TYPE = {
     "project": ("active", "planned", "on-hold", "completed", "archived", "abandoned", "unknown"),
     "decision": ("proposed", "decided", "superseded"),
-    "fact": ("current", "superseded"),
+    "fact": NOTE_LIFECYCLE_STATUSES,
+    "knowledge": NOTE_LIFECYCLE_STATUSES,
+    "document": NOTE_LIFECYCLE_STATUSES,
+    "idea": NOTE_LIFECYCLE_STATUSES,
 }
 
 

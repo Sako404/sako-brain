@@ -39,6 +39,16 @@ class TestCreateMemoryFixedDestinations(unittest.TestCase):
         note = frontmatter.parse_file(path)
         self.assertEqual(note.meta["path"], "/tmp/example-contract.pdf")
 
+    def test_idea_goes_to_knowledge_dir_and_starts_open(self):
+        path = memoryops.create_memory(self.config, "idea", "Family calendar on Nextcloud", text="Maybe.")
+        self.assertIn("60_KNOWLEDGE", str(path))
+        note = frontmatter.parse_file(path)
+        self.assertEqual(note.id, "idea-family-calendar-on-nextcloud")
+        self.assertEqual(note.type, "idea")
+        self.assertEqual(note.status, "open")
+        self.assertIn("## Idea", note.body)
+        self.assertIn("Maybe.", note.body)
+
     def test_fixed_destination_type_rejects_area(self):
         with self.assertRaises(memoryops.MemoryWriteError):
             memoryops.create_memory(self.config, "person", "Jane Doe", area="Finance")

@@ -5,6 +5,31 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.20.0 — A review lifecycle for notes, and an `idea` type
+
+### Added
+
+- A note type `idea`, for proposals and "maybe later" that are neither a
+  decision nor a fact. `brain note create --type idea` (MCP
+  `create_memory_note`) files it in the knowledge directory and starts it
+  as `open`; `brain note file` moves an inbox idea there too. Ideas are
+  found by type: `brain list --type idea`.
+- One status lifecycle shared by `fact`, `knowledge`, `document` and
+  `idea`: no status (a fresh capture nobody has looked at), `open` (waits
+  for its owner to answer, decide or confirm), `current` (reviewed and
+  kept), `promoted` (became a project or decision), `superseded` and
+  `archived` (history). `brain list --status open` is an owner's review
+  list, and visibility already limits it to notes that owner may see.
+  AGENTS.md and the `remember` skill describe it.
+
+### Changed
+
+- `fact` accepts the whole lifecycle instead of only `current` and
+  `superseded`, and `knowledge` and `document` statuses are now checked
+  against it (`invalid_status`, advisory, never blocking). A vault that
+  uses other words for those types can keep them with `status_by_type:`
+  in `config.yaml` (an empty list means any status).
+
 ## 0.19.2 — Doctor reports a project record with no status
 
 ### Added

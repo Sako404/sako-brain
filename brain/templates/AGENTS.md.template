@@ -52,6 +52,14 @@ same way it checks `[[wikilinks]]`.
 
 {{STATUS_BY_TYPE}}
 
+For notes that are neither projects nor decisions (`fact`, `knowledge`,
+`document`, `idea`), status is a review lifecycle. No status: a fresh capture
+nobody has looked at. `open`: waits for its owner to answer, decide or
+confirm, and `brain list --status open` is that owner's review list.
+`current`: reviewed and kept. `promoted`: it became a project or decision;
+link it from the note. `superseded`/`archived`: kept as history, never
+deleted. An `idea` starts `open`.
+
 IDs are permanent. If an entity is renamed, keep the `id`, update `aliases`.
 
 ## Memory rules (must follow)

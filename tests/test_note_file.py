@@ -44,6 +44,13 @@ class TestFileNote(FileNoteTestCase):
         self.assertFalse(src.exists())
         self.assertEqual(new.read_text(encoding="utf-8"), before)
 
+    def test_idea_moves_to_knowledge_dir_unchanged(self):
+        note_id, src = self._capture("idea", "Family calendar on Nextcloud")
+        before = src.read_text(encoding="utf-8")
+        _, new = memoryops.file_note(self.config, note_id)
+        self.assertEqual(new.parent, self.config.dir_for("knowledge"))
+        self.assertEqual(new.read_text(encoding="utf-8"), before)
+
     def test_fact_needs_an_existing_area(self):
         note_id, src = self._capture("fact", "Bins go out on Tuesday")
         with self.assertRaises(memoryops.MemoryWriteError):
