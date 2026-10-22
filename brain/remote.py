@@ -186,6 +186,11 @@ def should_proxy(argv: list[str]) -> bool:
     if not argv:
         return False
     first_positional = next((a for a in argv if not a.startswith("-")), None)
+    # No subcommand at all (`brain --version`, `brain --help`): answered by
+    # this client's own parser, never worth an SSH round-trip — and the
+    # dispatcher refuses them anyway.
+    if first_positional is None:
+        return False
     if first_positional in LOCAL_ONLY_COMMANDS:
         return False
     if "--vault" in argv:
