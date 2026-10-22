@@ -85,6 +85,17 @@ yet, `brain handoff write --project <id>` creates the first one.
 For each one: `git status --short` and recent `git log`. Note anything
 uncommitted and why (in progress, deliberately held back, needs review).
 
+## 4b. Repos with no remote: get the session's commits off this machine
+
+For each repo touched this session, `git remote` tells whether it has a
+remote. A repo with none that got commits this session holds them only on
+this disk. If the user's own instructions (their CLAUDE.md or Claude
+memory) name an on-demand off-machine backup for such repos, run it once
+after step 5's commits and confirm it succeeded (its exit status or log,
+not just that it started). If none is named, do not invent one: list
+these repos in the closing report's GIT STATUS as "no remote, no
+off-machine copy of today's commits".
+
 ## 5. Commit only complete, in-scope work
 
 If something is finished, tested, and within the scope of what was asked —
@@ -145,7 +156,8 @@ End with a short status block:
 
 ```
 BRAIN SAVED       — what was written/updated, confirmed read back
-GIT STATUS        — per repo: clean, or exactly what's uncommitted and why
+GIT STATUS        — per repo: clean, or exactly what's uncommitted and why;
+                    for a repo with no remote, whether today's commits were backed up
 HANDOFF           — which project(s), new or appended
 OPEN ITEMS        — genuinely open/deferred, not busywork
 OPEN NOTES        — N waiting (`brain list --status open`), titles if ≤ 5

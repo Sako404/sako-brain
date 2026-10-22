@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.20.4 — `/session-close` gets commits in remote-less repos off the machine
+
+### Changed
+
+- The `/session-close` skill has a step 4b: for a repo touched this
+  session that has no git remote and got commits, it runs the on-demand
+  off-machine backup the user's own instructions or Claude memory name,
+  and confirms it succeeded. With none named it does not invent one; the
+  closing report's GIT STATUS says the commits have no off-machine copy.
+  Client-only; the server does not need this release.
+
 ## 0.20.3 — A captured idea starts `open`
 
 ### Changed
