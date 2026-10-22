@@ -118,6 +118,28 @@ def check_missing_project_dirs(config: Config, notes) -> list[Problem]:
     return problems
 
 
+def check_project_path_mismatch(config: Config, notes) -> list[Problem]:
+    """A project's working-directory path is written to its registry entry
+    and its record together (set_project_path); a hand edit of one leaves
+    them disagreeing. Comparing the two needs no access to the directory,
+    so unlike check_missing_project_dirs this runs on every host. The
+    client-side check (project_paths_present) reads only the registry, so
+    this is what keeps a record's path from drifting unnoticed."""
+    registry = {e.id: e.path for e in load_registry(config)}
+    problems = []
+    for n in notes:
+        if n.type != "project" or n.id not in registry:
+            continue
+        record_path = n.meta.get("path")
+        if (record_path or None) != (registry[n.id] or None):
+            problems.append(Problem(
+                "project_path_mismatch",
+                f"{n.path}: record path {record_path!r} differs from registry path {registry[n.id]!r} — "
+                f"set the right one with `brain project update {n.id} --path <path>`",
+            ))
+    return problems
+
+
 def unchecked_project_path_count(config: Config) -> int:
     """Registered project paths check_missing_project_dirs skips on this
     host (0 wherever it checks them)."""
@@ -564,6 +586,7 @@ def run_all(config: Config, principal_id: str | None = None) -> list[Problem]:
     problems += check_invalid_status(config, notes)
     problems += check_broken_links(notes)
     problems += check_missing_project_dirs(config, notes)
+    problems += check_project_path_mismatch(config, notes)
     problems += check_registry_duplicates(config)
     problems += check_backup_not_canonical(config)
     problems += check_dangling_supersedes(notes)

@@ -5,6 +5,29 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.19.1 — `project show` stops claiming a client path is missing
+
+### Fixed
+
+- On the canonical server, `brain project show` printed `path exists:
+  False` for every project, and `get_project`/`project_context` returned
+  `path_exists: false`, because the server checked a desktop path it can
+  never see. It now prints `path exists: not checked on this host …` and
+  returns `path_exists: null` (unknown, not missing). In a local vault
+  both still report the real answer.
+
+### Added
+
+- `brain doctor` has a new check, `project_path_mismatch`: a project
+  record whose `path:` differs from its registry entry, which only a hand
+  edit of one of them can cause. It needs no access to the directory, so
+  it runs on the server too; it closes the gap left by
+  `project_paths_present`, which reads only the registry. Fix with
+  `brain project update <id> --path <path>`, which writes both.
+- The `/brain-doctor` skill also runs `brain integration doctor` when the
+  Brain is remote, so a missing project directory is reported in the same
+  place as the rest of the doctor's findings.
+
 ## 0.19.0 — Project paths are checked on the client, not reported as server noise
 
 ### Changed

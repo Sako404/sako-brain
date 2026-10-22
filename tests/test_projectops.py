@@ -151,6 +151,69 @@ class TestCloseProject(unittest.TestCase):
         self.assertEqual(result.new_status, "archived")
 
 
+class TestProjectPathVisibility(unittest.TestCase):
+    """The canonical server cannot see project directories: it must say
+    "not checked" rather than a False it has no grounds for, and a record
+    path that drifted from the registry must still be caught there."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.remote = dataclasses.replace(self.config, remote_project_paths=True)
+        projectops.create_project(
+            self.config, id="project-widget", name="Widget", path="/nonexistent/widget",
+            status="active", created="2026-01-01",
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _show(self, config, *args) -> str:
+        import contextlib
+        import io
+
+        from brain import cli
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.cmd_project_show(config, "project-widget", *args)
+        return out.getvalue()
+
+    def test_path_exists_is_unknown_on_a_remote_host(self):
+        self.assertIsNone(projectops.project_path_exists(self.remote, "/nonexistent/widget"))
+        self.assertFalse(projectops.project_path_exists(self.config, "/nonexistent/widget"))
+        self.assertTrue(projectops.project_path_exists(self.config, str(self.vault.root)))
+        self.assertFalse(projectops.project_path_exists(self.config, None))
+
+    def test_project_show_says_not_checked_instead_of_false(self):
+        import json
+
+        self.assertIn("path exists: not checked on this host", self._show(self.remote))
+        self.assertNotIn("path exists: False", self._show(self.remote))
+        self.assertIn("path exists: False", self._show(self.config))
+        self.assertIsNone(json.loads(self._show(self.remote, True))["path_exists"])
+
+    def test_get_project_returns_null_path_exists_on_a_remote_host(self):
+        from brain import mcp_server
+        self.assertIsNone(mcp_server.tool_get_project(self.remote, "project-widget")["path_exists"])
+        self.assertFalse(mcp_server.tool_get_project(self.config, "project-widget")["path_exists"])
+
+    def test_record_path_drift_is_reported_on_every_host_and_fixed_by_set_path(self):
+        from brain import validate
+        record = self.config.projects_dir / "ACTIVE" / "project-widget.md"
+        record.write_text(record.read_text(encoding="utf-8").replace(
+            "path: /nonexistent/widget", "path: /nonexistent/elsewhere"), encoding="utf-8")
+        for config in (self.config, self.remote):
+            mismatches = [p for p in validate.run_all(config) if p.check == "project_path_mismatch"]
+            self.assertEqual(len(mismatches), 1)
+            self.assertIn("/nonexistent/elsewhere", mismatches[0].message)
+        projectops.set_project_path(self.config, "project-widget", "/nonexistent/widget")
+        self.assertNotIn("project_path_mismatch", {p.check for p in validate.run_all(self.remote)})
+
+    def test_matching_paths_are_not_a_mismatch(self):
+        from brain import validate
+        self.assertNotIn("project_path_mismatch", {p.check for p in validate.run_all(self.remote)})
+
+
 class TestSetProjectPath(unittest.TestCase):
     """The record's `path:` and the registry's `path:` must change together,
     or not at all."""

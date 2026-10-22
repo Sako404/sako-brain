@@ -289,11 +289,12 @@ def tool_get_project(config: Config, id: str) -> dict:
     section is where the project stands; the rest of the record is history.
     An empty or old `current_state.updated` means it may not reflect the
     latest work — read the latest handoff too, and for code state check the
-    actual repository."""
+    actual repository. `path_exists` is null where this host cannot see the
+    working directory (the canonical server): unknown, not missing."""
     e = find_visible_project(config, config.acting_principal, id)
     if not e:
         raise KeyError(f"no registered project with id or alias '{id}'")
-    return {"registry": e.__dict__, "path_exists": Path(e.path).exists(),
+    return {"registry": e.__dict__, "path_exists": projectops.project_path_exists(config, e.path),
             "current_state": projectops.read_current_state(config, e.id)}
 
 
