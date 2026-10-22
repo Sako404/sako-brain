@@ -20,7 +20,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.18.0.** Pre-1.0 means the command line and configuration
+**Current release: 0.18.1.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -87,7 +87,7 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.18.0-py3-none-any.whl
+pipx install ./sako_brain-0.18.1-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
@@ -226,7 +226,7 @@ touching any other section — the position is found by parsing the note's
 own headers, never a supplied path or line range. `Current state` is where
 a project stands: replacing it moves the old text to `## Archive` at the end
 of the record and dates it in `current_state_updated`, and a record without
-the section gets it at the top. `brain project show` prints it, and `brain
+the section gets it as its first section. `brain project show` prints it, and `brain
 doctor` flags an active project whose section is empty or older than its
 latest handoff.
 
