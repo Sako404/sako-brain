@@ -485,7 +485,8 @@ def tool_create_timeline_event(config: Config, title: str, valid_from: str,
                                 people: list | None = None, projects: list | None = None,
                                 tags: list | None = None, sensitivity: str = "normal",
                                 confidence: str = "fact", source: str = "", source_date: str = "",
-                                confirm_restricted: bool = False, audience: list | None = None) -> dict:
+                                confirm_restricted: bool = False, audience: list | None = None,
+                                supersedes: str | None = None) -> dict:
     """Thin wrapper over timeline.create_event(). No new logic."""
     _require_restricted_confirmation(config, config.acting_principal, sensitivity, confirm_restricted)
     rolepolicy.require_audience_allowed(config, config.acting_principal, audience)
@@ -494,7 +495,7 @@ def tool_create_timeline_event(config: Config, title: str, valid_from: str,
         config, title=title, valid_from=valid_from, what_happened=what_happened,
         why_it_matters=why_it_matters, people=people, projects=projects, tags=tags,
         sensitivity=sensitivity, confidence=confidence, source=source, source_date=source_date,
-        audience=audience,
+        audience=audience, supersedes=supersedes or None,
     )
     return {"created_path": str(path.relative_to(config.brain_root))}
 
@@ -705,6 +706,8 @@ TOOLS = {
             "confirm_restricted": {"type": "boolean", "description": "Required (true) when sensitivity='restricted'"},
             "audience": {"type": "array", "items": {"type": "string"},
                          "description": "Explicit sharing (Stage 2), e.g. ['group:household'] or ['principal:ania'] -- omit for private (default: owner only)"},
+            "supersedes": {"type": "string",
+                           "description": "Id of an older event whose state this one replaces (a problem logged earlier and now fixed) -- marks it superseded so state readers stop reporting it as current"},
         },
         "required": ["title", "valid_from"],
     }),

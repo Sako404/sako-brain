@@ -52,6 +52,12 @@ direct file edit, never a new `brain` capability:
   `--append-text` mechanism; per this vault's append-only discipline,
   correct by annotation, never rewrite an old row to look like it was
   always accurate.
+- **A problem logged as a timeline event is now fixed** (in this session
+  or earlier) → `brain timeline add --supersedes <old-event-id> ...` with
+  what was done and how it was verified. A line in the handoff or a
+  project-record append is not enough: state readers (`brain state`,
+  Daily Brief, other MCP clients) see the old event's title as current
+  until it is marked superseded.
 - If the only true statement is "nothing decision-worthy happened, just
   incremental progress," skip this step — don't manufacture a decision
   record for a session that didn't produce one.

@@ -765,7 +765,8 @@ def cmd_timeline(config: Config, args) -> int:
         print("No timeline entries yet.")
         return 0
     for entry in entries:
-        print(f"{entry.date}  {entry.id}  {entry.title}")
+        marker = f"  [superseded by {entry.superseded_by or '?'}]" if entry.status == "superseded" else ""
+        print(f"{entry.date}  {entry.id}  {entry.title}{marker}")
     return 0
 
 
@@ -781,6 +782,7 @@ def cmd_timeline_add(config: Config, args) -> int:
             people=args.people, projects=args.projects, tags=args.tags,
             sensitivity=args.sensitivity, source=args.source or "",
             audience=getattr(args, "audience", None),
+            supersedes=getattr(args, "supersedes", None) or None,
         )
     except timeline.TimelineWriteError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -903,6 +905,9 @@ def cmd_state(config: Config, args) -> int:
     print(f"Projects with handoffs: {len(result.handoffs.project_ids)}")
     print(f"Doctor problems: {result.doctor.problem_count} ({result.doctor.blocking_count} blocking)")
     print(f"Timeline (last {result.timeline_recent.window_days}d): {len(result.timeline_recent.entries)} entries")
+    for e in result.timeline_recent.entries:
+        if e.status == "superseded":
+            print(f"  superseded: {e.id} -> {e.superseded_by or '?'}")
     if result.systemd.manager == "unavailable":
         print("Timers: not checked (no systemd user manager on this host)")
     for t in result.systemd.timers:
@@ -1851,6 +1856,9 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="Required when --sensitivity restricted. Never set this on a "
                                      "caller's behalf.")
     p_timeline_add.add_argument("--source", default="")
+    p_timeline_add.add_argument("--supersedes", default=None, metavar="EVENT_ID",
+                                help="Id of an older event this one replaces (e.g. a problem "
+                                     "logged earlier and fixed now); marks it superseded")
     p_timeline_add.add_argument("--audience", nargs="*", default=None,
                                  help="Explicit sharing, e.g. 'group:household' or 'principal:ania' "
                                       "(Stage 2) — omit for private (default: owner only)")

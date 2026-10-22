@@ -474,6 +474,8 @@ def _t_create_timeline_event(a: dict):
     argv += _confirm_restricted_flag(a)
     if a.get("source"):
         argv += ["--source", a["source"]]
+    if a.get("supersedes"):
+        argv += ["--supersedes", a["supersedes"]]
     argv += _list_flags(a, "people") + _list_flags(a, "projects") + _list_flags(a, "tags")
     argv += _list_flags(a, "audience")
     return argv, None

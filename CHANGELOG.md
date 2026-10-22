@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.17.0 — Mark a timeline event superseded
+
+### Added
+
+- `brain timeline add --supersedes <event-id>` and the matching
+  `supersedes` argument of the MCP tool `create_timeline_event`. The new
+  event records the id it replaces; the old event is marked
+  `status: superseded` and gets a forward link, its body otherwise
+  untouched. Only the owner of the old event may mark it, and the target
+  must be an event. `brain timeline`, its JSON output and `brain state`
+  (`timeline_recent`) now carry `status` and `superseded_by` per entry, so
+  a reader no longer reports a fixed problem as current from the old
+  event's title. The `timeline` and `session-close` skills say when to use
+  it.
+
 ## 0.16.0 — File an inbox capture where its type belongs
 
 ### Added

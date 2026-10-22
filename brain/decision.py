@@ -123,8 +123,9 @@ def _create_decision_locked(config: Config, title, context, options, decision, r
 
 
 def _mark_superseded(old_path: Path, new_id: str) -> None:
-    """Set the old decision's status and link forward — never touch its
-    Context/Options/Decision/Reasoning: history stays intact."""
+    """Set the old record's status and link forward — never touch the rest
+    of its body: history stays intact. Shared by decisions and timeline
+    events."""
     note = frontmatter.parse_file(old_path)
     note.meta["status"] = "superseded"
     note.meta["updated"] = dt.date.today().isoformat()

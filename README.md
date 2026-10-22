@@ -20,7 +20,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.16.0.** Pre-1.0 means the command line and configuration
+**Current release: 0.17.0.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -87,7 +87,7 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.16.0-py3-none-any.whl
+pipx install ./sako_brain-0.17.0-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
@@ -212,7 +212,9 @@ touching anything else in the vault. `brain note create --type <person|
 knowledge|document|fact> --title ...` creates a note at its canonical
 destination (a fixed bucket for person/knowledge/document; `--area <name>`
 for fact, validated against real existing areas); `brain timeline add
---title ... --date ...` creates a dated event from the event template.
+--title ... --date ...` creates a dated event from the event template
+(`--supersedes <event-id>` marks an older event superseded when the new
+one replaces the state it described, e.g. a problem now fixed).
 `brain note file <id> [--area <name>]` moves an inbox capture to the same
 canonical destination its type would get from `note create` (events go to
 the timeline), unchanged; only the note's owner may move it, and only out

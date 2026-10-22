@@ -76,6 +76,19 @@ class TestCliTimelineAdd(unittest.TestCase):
         rc, out = run_cli(["timeline", "add", "--title", "Dup", "--date", "2026-01-01"], self.vault)
         self.assertEqual(rc, 1)
 
+    def test_supersedes_marks_old_event_in_listing(self):
+        run_cli(["timeline", "add", "--title", "Broken", "--date", "2026-01-01"], self.vault)
+        rc, _ = run_cli(["timeline", "add", "--title", "Fixed", "--date", "2026-01-02",
+                         "--supersedes", "event-2026-01-01-broken"], self.vault)
+        self.assertEqual(rc, 0)
+        rc, out = run_cli(["timeline"], self.vault)
+        self.assertIn("event-2026-01-01-broken  Broken  [superseded by event-2026-01-02-fixed]", out)
+
+    def test_supersedes_unknown_id_fails_cleanly(self):
+        rc, _ = run_cli(["timeline", "add", "--title", "Fixed", "--date", "2026-01-02",
+                         "--supersedes", "event-nope"], self.vault)
+        self.assertEqual(rc, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
