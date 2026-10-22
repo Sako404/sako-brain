@@ -101,6 +101,15 @@ class TestShouldProxy(unittest.TestCase):
         self._write_remote_config()
         self.assertFalse(remote.should_proxy([]))
 
+    def test_top_level_flags_without_subcommand_are_local(self):
+        self._write_remote_config()
+        for argv in (["--version"], ["--help"], ["-h"]):
+            self.assertFalse(remote.should_proxy(argv), argv)
+
+    def test_subcommand_help_still_proxies(self):
+        self._write_remote_config()
+        self.assertTrue(remote.should_proxy(["search", "--help"]))
+
     def test_incomplete_remote_config_is_a_surfaced_error_not_silent_local(self):
         self.config_path.write_text('server = "x"\n', encoding="utf-8")  # missing identity_file
         self.assertTrue(remote.should_proxy(["search", "x"]))

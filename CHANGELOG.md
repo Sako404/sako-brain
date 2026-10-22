@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.15.2 — `--version` and `--help` answer locally on a remote client
+
+### Fixed
+
+- `brain --version` and `brain --help` on a client set up for a remote
+  canonical Brain answer locally instead of going over SSH, where the
+  dispatcher refused them. `--version` reports this client's version.
+  A subcommand's `--help` still goes to the server.
+
 ## 0.15.1 — Doctor no longer checks a separate dispatcher script
 
 ### Removed
