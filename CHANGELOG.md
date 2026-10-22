@@ -5,6 +5,30 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.18.0 — One dated place for where a project stands
+
+### Added
+
+- `## Current state` is where a project stands. `brain project
+  section-update <id> --section "Current state" --mode replace` dates it
+  in the new frontmatter field `current_state_updated`, and a record
+  without the section gets it right after its title.
+- A replace never loses text: whatever it overwrites, in any allowlisted
+  section, moves to `## Archive` at the end of the record under
+  `### <section> (replaced <date>)`.
+- `brain project show` (text and `--json`), the MCP tools `get_project`
+  and `project_context`, and `brain state` (`projects.current_state_updated`)
+  return the section and its date.
+- `brain doctor` reports, as advisory problems, an active, planned or
+  on-hold project whose `Current state` is empty
+  (`project_current_state_missing`) or older than its latest handoff
+  (`project_current_state_stale`).
+- The `project-update`, `session-close`, `handoff`, `resume` and
+  `brain-recall` skills, the Codex snippet, the vault `AGENTS.md` template
+  and the state-audit procedure now say to replace `Current state` with
+  the whole current picture rather than append dated state blocks, and to
+  read it first.
+
 ## 0.17.0 — Mark a timeline event superseded
 
 ### Added
