@@ -248,6 +248,31 @@ def install_claude_code(skills_dir: Path | None = None, mcp_config_path: Path | 
     }
 
 
+def stale_skill_links(skills_dir: Path | None = None) -> list[dict] | None:
+    """Installed Brain skill symlinks that do not point at THIS package's
+    copy of the skill — typically a link left on an old venv after an
+    upgrade, which keeps serving that version's instructions. Returns None
+    when the package is zip-backed (skills were copied, not linked, so
+    there is no link target to compare)."""
+    skills_dir = skills_dir or CLAUDE_SKILLS_DIR_DEFAULT
+    src_root = _integrations_root() / "claude-code" / "skills"
+    stale = []
+    for name in shipped_skill_names():
+        dest = skills_dir / name
+        if not dest.is_symlink():
+            continue
+        try:
+            src_path = Path(str(src_root / name))
+        except Exception:
+            return None
+        if not src_path.is_dir():
+            return None
+        target = os.readlink(dest)
+        if (dest.parent / target).resolve() != src_path.resolve():
+            stale.append({"skill": name, "target": target})
+    return stale
+
+
 def uninstall_claude_code(skills_dir: Path | None = None, mcp_config_path: Path | None = None) -> dict:
     skills_dir = skills_dir or CLAUDE_SKILLS_DIR_DEFAULT
     mcp_config_path = mcp_config_path or CLAUDE_MCP_CONFIG_DEFAULT
@@ -587,6 +612,16 @@ def run_doctor(target: str | None = None) -> dict:
         checks.append(_check("claude_skills_installed", installed == expected,
                               f"{len(installed)}/{len(expected)} installed"
                               + ("" if installed == expected else f" — missing: {sorted(expected - installed)}")))
+        stale = stale_skill_links(skills_dir)
+        if stale is None:
+            checks.append(_check("claude_skills_current", True,
+                                  "not checkable: package is zip-backed, skills were copied"))
+        else:
+            checks.append(_check(
+                "claude_skills_current", not stale,
+                "every installed skill links to this package" if not stale else
+                f"{len(stale)} skill link(s) point elsewhere, e.g. {stale[0]['skill']} -> "
+                f"{stale[0]['target']} — run `brain integration install claude-code --force`"))
         mcp_registered = False
         if CLAUDE_MCP_CONFIG_DEFAULT.is_file():
             try:
