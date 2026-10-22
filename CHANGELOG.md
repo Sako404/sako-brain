@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.18.2 — `integration doctor` sees skill links left on an old version
+
+### Fixed
+
+- `brain integration doctor` has a new check, `claude_skills_current`: it
+  fails when an installed skill symlink points anywhere other than this
+  package's copy of the skill, typically a venv from an earlier version
+  that keeps serving that version's instructions after an upgrade. Fix
+  with `brain integration install claude-code --force`. The existing
+  `claude_skills_installed` check only counted links, so it reported OK
+  while all 15 pointed at an old version. Client-only; the server does
+  not need this release.
+
 ## 0.18.1 — Keep a record's intro out of a new Current state
 
 ### Fixed
