@@ -5,6 +5,8 @@ append to the body. It does not delete existing body content.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import datetime as dt
 from pathlib import Path
 
@@ -64,19 +66,48 @@ class AmbiguousNoteIdError(UpdateError):
     `audit.log_event` and `paths.ensure_private_file`)."""
 
 
-def find_note_paths(config: Config, note_id: str) -> list[Path]:
-    """Every file claiming `note_id`, in a deterministic order. Normally
-    one; more than one is a structural fault, not something to resolve by
-    preference."""
-    found = []
+# (brain_root, id -> paths) while note_paths_snapshot() is active, else None.
+_PATHS_BY_ID: contextvars.ContextVar[tuple[Path, dict[str, list[Path]]] | None] = (
+    contextvars.ContextVar("paths_by_id", default=None))
+
+
+def _scan_paths_by_id(config: Config) -> dict[str, list[Path]]:
+    found: dict[str, list[Path]] = {}
     for path in frontmatter.iter_markdown_files(config.brain_root, config.content_dirs):
         try:
             note = frontmatter.parse_file(path)
         except frontmatter.FrontmatterError:
             continue
-        if note.id == note_id:
-            found.append(path)
+        found.setdefault(note.id, []).append(path)
     return found
+
+
+@contextlib.contextmanager
+def note_paths_snapshot(config: Config):
+    """Inside this block every id -> path lookup reads one scan of the vault
+    instead of rescanning it per lookup, which made a per-project loop
+    (registry visibility, `brain state`) cost one full scan per project.
+    Read-only stretches only: a file written inside the block is not seen.
+    Nested use for the same vault reuses the outer snapshot."""
+    current = _PATHS_BY_ID.get()
+    if current is not None and current[0] == config.brain_root:
+        yield
+        return
+    token = _PATHS_BY_ID.set((config.brain_root, _scan_paths_by_id(config)))
+    try:
+        yield
+    finally:
+        _PATHS_BY_ID.reset(token)
+
+
+def find_note_paths(config: Config, note_id: str) -> list[Path]:
+    """Every file claiming `note_id`, in a deterministic order. Normally
+    one; more than one is a structural fault, not something to resolve by
+    preference."""
+    snapshot = _PATHS_BY_ID.get()
+    if snapshot is not None and snapshot[0] == config.brain_root:
+        return list(snapshot[1].get(note_id, []))
+    return list(_scan_paths_by_id(config).get(note_id, []))
 
 
 def find_note_path(config: Config, note_id: str) -> Path | None:

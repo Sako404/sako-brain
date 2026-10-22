@@ -40,6 +40,7 @@ from .memoryqueue import PendingEntry, list_pending
 from .paths import Config
 from .projectops import read_current_state
 from .registry import ProjectEntry, load_registry
+from .update import note_paths_snapshot
 from .systemdstatus import TIMER_UNITS, TimerStatus, timer_status, user_manager_available
 from .timeline import TimelineEntry, list_timeline
 from .validate import Problem, is_admin_principal
@@ -316,7 +317,8 @@ def get_operational_state(config: Config, *, include_restricted: bool = False,
         )
 
     try:
-        projects = _collect_projects(config)
+        with note_paths_snapshot(config):
+            projects = _collect_projects(config)
         sources["projects"] = SourceStatus(ok=True)
     except Exception as exc:  # noqa: BLE001 — isolate this section only
         projects = ProjectsSection()

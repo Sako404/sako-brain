@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.20.1 — Project listing and `brain state` no longer rescan the vault per project
+
+### Fixed
+
+- Every read path that filters the registry by visibility (`brain
+  projects`, `project show`, `get_project`, `project_context`) and the
+  projects section of `brain state` looked each project's record up with
+  a full scan of the vault, one scan per project. On a real Brain with 30
+  projects and about 300 notes `brain projects` took 13 s and `brain
+  state` 15–27 s, past the 20 s that `brain integration doctor` allows
+  for `canonical_brain_connectivity`, so that check failed. Those paths
+  now scan the vault once per call (`update.note_paths_snapshot`) and
+  get the same answers; on a synthetic vault of the same size the
+  registry filter went from 3.6 s to 0.14 s.
+
 ## 0.20.0 — A review lifecycle for notes, and an `idea` type
 
 ### Added
