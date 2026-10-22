@@ -77,6 +77,20 @@ def check_invalid_status(config: Config, notes) -> list[Problem]:
     return problems
 
 
+def check_project_status_missing(notes) -> list[Problem]:
+    """check_invalid_status only judges a status that is there. A project
+    record with none drops out of every status-driven view (the status
+    folder, state's by_status, the current-state checks), which is how a
+    handoff saved as `type: project` went unnoticed."""
+    return [
+        Problem("project_status_missing",
+                f"{n.path}: type 'project' with no status — a real project needs one "
+                f"(`brain project update {n.id} --status <status>`); a note that is not a project "
+                f"needs its type corrected (`brain update {n.id} --set type=document`)")
+        for n in notes if n.type == "project" and not n.status
+    ]
+
+
 def check_broken_links(notes) -> list[Problem]:
     ids = {n.id for n in notes if n.id}
     problems = []
@@ -584,6 +598,7 @@ def run_all(config: Config, principal_id: str | None = None) -> list[Problem]:
     problems += check_invalid_acl(notes)
     problems += check_duplicate_ids(notes)
     problems += check_invalid_status(config, notes)
+    problems += check_project_status_missing(notes)
     problems += check_broken_links(notes)
     problems += check_missing_project_dirs(config, notes)
     problems += check_project_path_mismatch(config, notes)

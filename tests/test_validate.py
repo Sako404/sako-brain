@@ -31,6 +31,16 @@ class TestValidate(unittest.TestCase):
         checks = {p.check for p in problems}
         self.assertIn("invalid_status", checks)
 
+    def test_detects_project_without_status(self):
+        path = self.vault.root / "30_PROJECTS" / "ACTIVE" / "p.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("---\nid: project-handoff-note\ntype: project\nstatus: null\n---\n\n# A handoff\n")
+        self.vault.write_note("30_PROJECTS/ACTIVE", "q.md", id="project-real", type="project", status="active")
+        self.vault.write_note("70_DOCUMENTS", "d.md", id="document-x", type="document")
+        missing = [p for p in validate.run_all(self.config) if p.check == "project_status_missing"]
+        self.assertEqual(len(missing), 1)
+        self.assertIn("project-handoff-note", missing[0].message)
+
     def test_detects_invalid_yaml(self):
         path = self.vault.root / "60_KNOWLEDGE" / "bad.md"
         path.write_text("---\nid: [unterminated\n---\nbody\n")

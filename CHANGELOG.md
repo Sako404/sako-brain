@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.19.2 — Doctor reports a project record with no status
+
+### Added
+
+- `brain doctor` has a new non-blocking check, `project_status_missing`:
+  a note with `type: project` and no status. `invalid_status` only judged
+  a status that was present, so such a record dropped out of every
+  status-driven view unnoticed; on a real Brain it was a ChatGPT handoff
+  saved as a project. Fix a real project with `brain project update <id>
+  --status <status>`, anything else by correcting its type.
+
 ## 0.19.1 — `project show` stops claiming a client path is missing
 
 ### Fixed
