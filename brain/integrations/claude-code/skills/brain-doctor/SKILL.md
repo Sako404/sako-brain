@@ -14,7 +14,8 @@ description: Run and interpret the Brain's health checks. Use when the user asks
    relative Markdown links), missing project directories (on a remote
    Brain: `project_paths_present` in `brain integration doctor`), a
    record's project path disagreeing with the registry, invalid YAML
-   frontmatter, invalid `status` values, duplicate project registry entries,
+   frontmatter, invalid `status` values, a project record with no status,
+   duplicate project registry entries,
    the Google Drive backup directory being mistaken for canonical, and
    credential-like patterns accidentally stored in notes.
 3. **Never auto-fix or delete anything** — the tool only reports. Present
