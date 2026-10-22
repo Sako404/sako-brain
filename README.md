@@ -20,7 +20,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.14.10.** Pre-1.0 means the command line and configuration
+**Current release: 0.15.0.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -87,7 +87,7 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.14.10-py3-none-any.whl
+pipx install ./sako_brain-0.15.0-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
@@ -270,6 +270,12 @@ operations use separate SSH identities if you gave both; which identity
 can actually do what is enforced by the server's own dispatcher, not
 guessed client-side. No secret is ever written into the vault or this
 repository — private keys stay exactly where you point `brain setup` at.
+
+The dispatcher ships in this package (`python -m brain.dispatch`), so the
+server needs only this install and one `authorized_keys` line per client
+key. [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md) covers the server side:
+key lines, modes, acting for another person, and moving from an older,
+separately deployed dispatcher.
 
 ## Agent integrations
 

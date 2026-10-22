@@ -91,10 +91,12 @@ principal. Stage 2's visibility enforcement (which principal sees which
 records) depends on the gateway correctly asserting, per request, which
 principal it's acting for — a `--acting-principal <id>` prefix the
 server-side dispatcher independently re-validates against the canonical
-principal registry before honoring (see `brain-dispatch.py`'s
-`resolve_effective_principal`). Only these two identities may make that
-assertion; every other SSH identity (desktop, example-service, capture) is refused
-outright if it tries.
+principal registry before honoring (see `brain/dispatch.py`'s
+`resolve_effective_principal`). Only keys whose forced command carries
+`--delegation mandatory` (these two) or `--delegation optional` may make
+that assertion; every other SSH identity (desktop, example-service,
+capture) is refused outright if it tries. See
+[SERVER_SETUP.md](SERVER_SETUP.md) for the `authorized_keys` lines.
 
 **This means possession of either gateway SSH private key is equivalent to
 being able to assert ANY active principal's identity to the vault** — not

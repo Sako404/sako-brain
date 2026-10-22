@@ -354,9 +354,12 @@ def check_password_file_not_backed_up(config: Config) -> list[Problem]:
 
 def check_dispatcher_deployment_info(config: Config) -> list[Problem]:
     """Pre-onboarding hardening: a real incident (2026-10-02) demonstrated
-    that the SSH dispatcher script (brain-dispatch.py — deliberately
-    outside the pip wheel, deployed via a separate step) can be correct
-    and tested in git while production keeps running an older copy. This
+    that the SSH dispatcher script (brain-dispatch.py — then outside the
+    pip wheel, deployed via a separate step) can be correct and tested in
+    git while production keeps running an older copy. From v0.15.0 the
+    dispatcher ships in this package (`python -m brain.dispatch`); this
+    check stays for servers whose forced commands still point at a
+    separately deployed script, and goes once those have migrated. This
     cannot PREVENT that — nothing here knows what hash is "expected",
     since the dispatcher is versioned in a separate repository with no
     shared release cycle — but it makes the deployed hash VISIBLE, so a
