@@ -49,6 +49,60 @@ class TestCreateEvent(unittest.TestCase):
             timeline.create_event(self.config, title="Dup", valid_from="2026-01-01")
 
 
+class TestSupersedeEvent(unittest.TestCase):
+    """An event that replaces the state an older one described (a problem
+    logged, then fixed) marks the old one superseded, so state readers stop
+    reporting the old title as current."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.old = timeline.create_event(self.config, title="Alert channel down",
+                                         valid_from="2026-10-22",
+                                         what_happened="Token expired.")
+        self.old_id = frontmatter.parse_file(self.old).id
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_marks_old_event_and_links_forward(self):
+        new = timeline.create_event(self.config, title="Alert channel fixed",
+                                    valid_from="2026-10-22", supersedes=self.old_id)
+        new_note = frontmatter.parse_file(new)
+        old_note = frontmatter.parse_file(self.old)
+        self.assertEqual(new_note.meta["supersedes"], self.old_id)
+        self.assertEqual(old_note.status, "superseded")
+        self.assertIn(f"Superseded by [[{new_note.id}]]", old_note.body)
+
+    def test_never_touches_old_body(self):
+        timeline.create_event(self.config, title="Alert channel fixed",
+                              valid_from="2026-10-22", supersedes=self.old_id)
+        self.assertIn("Token expired.", frontmatter.parse_file(self.old).body)
+
+    def test_list_timeline_reports_status_and_superseded_by(self):
+        new = timeline.create_event(self.config, title="Alert channel fixed",
+                                    valid_from="2026-10-22", supersedes=self.old_id)
+        by_id = {e.id: e for e in timeline.list_timeline(self.config)}
+        self.assertEqual(by_id[self.old_id].status, "superseded")
+        self.assertEqual(by_id[self.old_id].superseded_by, frontmatter.parse_file(new).id)
+        self.assertEqual(by_id[frontmatter.parse_file(new).id].superseded_by, "")
+
+    def test_unknown_target_fails_without_creating_anything(self):
+        before = sorted(self.config.timeline_dir.glob("*.md"))
+        with self.assertRaises(timeline.TimelineWriteError):
+            timeline.create_event(self.config, title="Fix", valid_from="2026-10-22",
+                                  supersedes="event-does-not-exist")
+        self.assertEqual(sorted(self.config.timeline_dir.glob("*.md")), before)
+
+    def test_target_must_be_an_event(self):
+        from brain import decision
+        d = decision.create_decision(self.config, title="Some call", date="2026-10-01")
+        with self.assertRaises(timeline.TimelineWriteError):
+            timeline.create_event(self.config, title="Fix", valid_from="2026-10-22",
+                                  supersedes=frontmatter.parse_file(d).id)
+        self.assertNotEqual(frontmatter.parse_file(d).status, "superseded")
+
+
 class TestTimelineVisibility(unittest.TestCase):
     """Stage 2 (multi-user visibility): list_timeline filters directly
     (unlike registry.py, nothing needs the unfiltered list for write/

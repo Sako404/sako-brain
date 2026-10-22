@@ -391,6 +391,13 @@ class TestConfirmRestrictedForwarding(unittest.TestCase):
         })
         self.assertIn("--confirm-restricted", argv)
 
+    def test_create_timeline_event_forwards_supersedes(self):
+        argv, _ = mcp_bridge._t_create_timeline_event({
+            "title": "x", "valid_from": "2026-01-01", "supersedes": "event-2025-12-31-old",
+        })
+        i = argv.index("--supersedes")
+        self.assertEqual(argv[i + 1], "event-2025-12-31-old")
+
     def test_update_memory_sends_lists_as_json_not_python_repr(self):
         argv, _ = mcp_bridge._t_update_memory({
             "id": "x", "set_fields": {"people": ["person-a", "person-b"], "status": "current"},
