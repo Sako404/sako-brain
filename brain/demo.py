@@ -244,8 +244,11 @@ def build(root: Path, *, project_roots_parent: Path | None = None,
     write("projects", f"{DEMO_PROJECT_ID}.md", _note(
         id=DEMO_PROJECT_ID, type="project", status="active",
         title=DEMO_PROJECT_NAME, today=today, people=[DEMO_PERSON_ID],
-        extra={"path": str(observatory)},
+        extra={"path": str(observatory), "current_state_updated": today},
         body=(
+            "## Current state\n\n"
+            "Running. The first observing season is under way; nothing is blocked.\n\n"
+            "## Purpose\n\n"
             "A synthetic project used to exercise the project lifecycle.\n\n"
             f"Decision on record: [[{DEMO_DECISION_ID}]]."
         ),

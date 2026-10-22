@@ -441,6 +441,7 @@ class TestProjectContext(unittest.TestCase):
             result = mcp_bridge._execute_tool("project_context", {"id": "project-x"})
 
         self.assertEqual(result["registry"], {"id": "project-x", "path": "/tmp/x"})
+        self.assertIsNone(result["current_state"])
         self.assertEqual(result["record"], note_text)
         self.assertIsNone(result["filesystem_facts"])
         self.assertEqual(calls, [["project", "show", "project-x", "--json"], ["get", "project-x"]])

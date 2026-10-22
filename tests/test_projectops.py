@@ -378,5 +378,80 @@ class TestCreateProjectSetsOwnership(unittest.TestCase):
         self.assertEqual(note.meta["audience"], ["group:household"])
 
 
+class TestCurrentStateAndArchive(unittest.TestCase):
+    """`Current state` is replaced as a whole and dated; whatever a replace
+    overwrites moves to `## Archive`, so nothing is lost; an older record
+    without the section gets it at the top of the body."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.path = projectops.create_project(
+            self.config, id="project-widget", name="Widget", path="/a", status="active",
+        )
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _replace(self, text, section="Current state"):
+        return projectops.update_section(self.config, "project-widget", section, "replace", text)
+
+    def test_replace_sets_current_state_updated(self):
+        import datetime as dt
+        note = frontmatter.parse_file(self._replace("Broken: alerts down."))
+        self.assertEqual(note.meta["current_state_updated"], dt.date.today().isoformat())
+
+    def test_other_sections_do_not_touch_current_state_date(self):
+        note = frontmatter.parse_file(self._replace("x", section="Next actions"))
+        self.assertNotIn("current_state_updated", note.meta)
+
+    def test_replaced_content_moves_to_archive(self):
+        self._replace("Broken: alerts down.")
+        note = frontmatter.parse_file(self._replace("Fixed: alerts work."))
+        state = projectops.current_state(note)
+        self.assertEqual(state["text"], "Fixed: alerts work.")
+        archive = note.body[note.body.index("## Archive"):]
+        self.assertIn("### Current state (replaced ", archive)
+        self.assertIn("Broken: alerts down.", archive)
+        self.assertNotIn("Broken: alerts down.", note.body[:note.body.index("## Archive")])
+
+    def test_archive_keeps_every_replaced_version_in_order(self):
+        self._replace("One.")
+        self._replace("Two.")
+        note = frontmatter.parse_file(self._replace("Three."))
+        archive = note.body[note.body.index("## Archive"):]
+        self.assertEqual(note.body.count("## Archive"), 1)
+        self.assertLess(archive.index("One."), archive.index("Two."))
+        self.assertNotIn("Three.", archive)
+
+    def test_replacing_an_empty_section_archives_nothing(self):
+        note = frontmatter.parse_file(self._replace("First state."))
+        self.assertNotIn("## Archive", note.body)
+
+    def test_missing_current_state_is_created_after_title(self):
+        self.vault.write_note(str(self.path.parent.relative_to(self.vault.root)), self.path.name,
+                               id="project-widget",
+                               type="project", status="active", title="Widget",
+                               body="## Status\n\nOld status text.\n")
+        note = frontmatter.parse_file(self._replace("Now running."))
+        self.assertTrue(note.body.lstrip("\n").startswith("# Widget\n\n## Current state\nNow running."))
+        self.assertIn("## Status\n\nOld status text.", note.body)
+        self.assertNotIn("## Archive", note.body)
+
+    def test_other_missing_sections_still_refused(self):
+        self.vault.write_note(str(self.path.parent.relative_to(self.vault.root)), self.path.name,
+                               id="project-widget",
+                               type="project", status="active", title="Widget", body="")
+        with self.assertRaises(projectops.SectionEditError):
+            self._replace("x", section="Next actions")
+
+    def test_read_current_state(self):
+        self._replace("Running.")
+        state = projectops.read_current_state(self.config, "project-widget")
+        self.assertEqual(state["text"], "Running.")
+        self.assertTrue(state["updated"])
+        self.assertIsNone(projectops.read_current_state(self.config, "project-nope"))
+
+
 if __name__ == "__main__":
     unittest.main()

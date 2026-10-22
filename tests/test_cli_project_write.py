@@ -52,6 +52,20 @@ class TestProjectShowDiscoverSyncStillWork(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("Example Project", out)
 
+    def test_show_json_carries_current_state(self):
+        import json
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-example.md", id="project-example",
+                               type="project", body="## Current state\n\nRunning fine.\n")
+        rc, out = run_cli(["project", "show", "project-example", "--json"], self.vault)
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["current_state"], {"text": "Running fine.", "updated": ""})
+
+    def test_show_text_prints_current_state(self):
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-example.md", id="project-example",
+                               type="project", body="## Current state\n\nRunning fine.\n")
+        rc, out = run_cli(["project", "show", "project-example"], self.vault)
+        self.assertIn("Current state (updated never):\nRunning fine.", out)
+
     def test_discover_routes_correctly(self):
         # run_cli() drives the CLI through env vars only (BRAIN_ROOT/BRAIN_STATE_DIR),
         # not vault.config()'s projects_roots, so a fresh vault's 90_SYSTEM/config.yaml

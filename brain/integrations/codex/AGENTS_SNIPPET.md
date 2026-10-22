@@ -41,9 +41,13 @@ something is finished), pick the instrument deliberately:
   limit, and no filter syntax. `status: proposed` is matched as the words
   "status" and "proposed", so it returns `decided` records and misses
   `proposed` ones. It cannot answer "how many are open".
-- `brain get` / `read_memory` for a full record (closure sections and later
-  corrections live at the *bottom* of long records), and `brain handoff show`
-  for the detail a deliberately-thin record omits.
+- `brain project show` / `get_project` for where a project stands: its
+  record's `Current state` section and the date it was written. The rest of
+  a project record is history; a line there ("broken", "TODO") is not current
+  unless `Current state` or a newer handoff says so.
+- `brain get` / `read_memory` for a full record (in older records, closure
+  sections and later corrections live at the *bottom*), and `brain handoff
+  show` for the detail a deliberately-thin record omits.
 
 Keep apart, and label, the metadata `status`, what the content says, what was
 verified in production, and what is unverified. Metadata and content

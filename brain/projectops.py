@@ -758,6 +758,14 @@ def _set_project_path_locked(config: Config, project_id: str, new_path: str) -> 
 # "just in case".
 PROJECT_SECTION_ALLOWLIST = ("Current state", "Milestones", "Problems / limitations", "Next actions")
 
+# `Current state` is the one place a reader takes "where does this project
+# stand" from: replaced as a whole, dated in `current_state_updated`, and
+# created at the top of the body when an older record lacks it. Whatever a
+# replace overwrites is moved to `## Archive` at the end of the body, so
+# replacing never loses history.
+CURRENT_STATE_SECTION = "Current state"
+ARCHIVE_SECTION = "Archive"
+
 
 class SectionEditError(ValueError):
     """A named-section edit that cannot be applied safely."""
@@ -780,6 +788,62 @@ def _section_span(lines: list[str], section: str) -> tuple[int, int]:
             end = j
             break
     return start, end
+
+
+def _has_section(body: str, section: str) -> bool:
+    header = f"## {section}"
+    return any(line.rstrip("\n") == header for line in body.splitlines())
+
+
+def _insert_after_title(body: str, block: str) -> str:
+    """Put `block` right after the body's `# ` title (or at the top when it
+    has none), so the section is the first thing a reader meets."""
+    lines = body.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith("# "):
+            head = "".join(lines[:i + 1])
+            rest = "".join(lines[i + 1:]).lstrip("\n")
+            return f"{head.rstrip(chr(10))}\n\n{block}{rest}"
+    return block + body
+
+
+def _append_to_archive(body: str, entry: str) -> str:
+    """Add `entry` at the end of `## Archive`, creating that section at the
+    end of the body when it is missing."""
+    lines = body.splitlines(keepends=True)
+    try:
+        _start, end = _section_span(lines, ARCHIVE_SECTION)
+    except SectionEditError:
+        return f"{body.rstrip(chr(10))}\n\n## {ARCHIVE_SECTION}\n\n{entry}"
+    head = "".join(lines[:end]).rstrip("\n")
+    tail = "".join(lines[end:])
+    return f"{head}\n\n{entry}" + (f"\n{tail}" if tail else "")
+
+
+def current_state(note: frontmatter.Note) -> dict:
+    """The record's `Current state` text and the date it was last written
+    (`current_state_updated`; empty when it was never written through
+    `update_section`)."""
+    text = ""
+    lines = note.body.splitlines(keepends=True)
+    try:
+        start, end = _section_span(lines, CURRENT_STATE_SECTION)
+        text = "".join(lines[start:end]).strip()
+    except SectionEditError:
+        pass
+    return {"text": text, "updated": str(note.meta.get("current_state_updated") or "")}
+
+
+def read_current_state(config: Config, project_id: str, principal_id: str | None = None) -> dict | None:
+    """`current_state()` of a project record the caller may see, or None when
+    there is no visible record under that id."""
+    if principal_id is None:
+        principal_id = config.acting_principal
+    try:
+        text = visibility.read_visible_note_text(config, principal_id, project_id)
+    except FileNotFoundError:
+        return None
+    return current_state(frontmatter.parse_text(text, Path(f"{project_id}.md")))
 
 
 def update_section(config: Config, project_id: str, section: str, mode: str, content: str,
@@ -839,6 +903,9 @@ def _update_section_locked(config: Config, project_id: str, section: str, mode: 
             f"— '{principal_id}' is not permitted"
         )
 
+    if section == CURRENT_STATE_SECTION and not _has_section(note.body, section):
+        note.body = _insert_after_title(note.body, f"## {section}\n\n")
+
     lines = note.body.splitlines(keepends=True)
     start, end = _section_span(lines, section)
     current_block = "".join(lines[start:end])
@@ -858,8 +925,14 @@ def _update_section_locked(config: Config, project_id: str, section: str, mode: 
         existing = current_block.rstrip("\n")
         new_block = f"{existing}\n\n{content}\n\n" if existing else f"{content}\n\n"
 
+    today = dt.date.today().isoformat()
     note.body = "".join(lines[:start]) + new_block + "".join(lines[end:])
-    note.meta["updated"] = dt.date.today().isoformat()
+    if mode == "replace" and current_block.strip():
+        note.body = _append_to_archive(
+            note.body, f"### {section} (replaced {today})\n\n{current_block.strip()}\n")
+    if section == CURRENT_STATE_SECTION:
+        note.meta["current_state_updated"] = today
+    note.meta["updated"] = today
     path.write_text(frontmatter.render(note), encoding="utf-8")
     indexer.index_note(config, path)
     audit.log_event(config, event="note.write", principal_id=config.acting_principal,

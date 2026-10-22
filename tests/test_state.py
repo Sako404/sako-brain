@@ -75,6 +75,16 @@ class TestOperationalStateProjects(unittest.TestCase):
         ids = sorted(e.id for e in result.projects.entries)
         self.assertEqual(ids, ["project-alpha", "project-beta"])
 
+    def test_reports_current_state_updated_per_project(self):
+        from brain import projectops
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-alpha.md", id="project-alpha",
+                               type="project", status="active", body="## Current state\n\n")
+        projectops.update_section(self.config, "project-alpha", "Current state", "replace", "Up.")
+        result = state.get_operational_state(self.config)
+        updated = result.projects.current_state_updated
+        self.assertTrue(updated["project-alpha"])
+        self.assertIsNone(updated["project-beta"])  # no visible record
+
     def test_json_serializable_with_unquoted_yaml_dates_in_registry(self):
         # Regression: a real registry with unquoted created:/updated: dates
         # (YAML auto-types these as datetime.date) used to crash

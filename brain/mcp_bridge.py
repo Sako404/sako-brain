@@ -542,6 +542,7 @@ def _execute_project_context(arguments: dict) -> dict:
 
     return {
         "registry": show_result.get("registry"),
+        "current_state": show_result.get("current_state"),
         "record": proc2.stdout,
         "filesystem_facts": None,
     }

@@ -38,6 +38,7 @@ from .handoff import list_projects_with_handoffs
 from .indexer import connect
 from .memoryqueue import PendingEntry, list_pending
 from .paths import Config
+from .projectops import read_current_state
 from .registry import ProjectEntry, load_registry
 from .systemdstatus import TIMER_UNITS, TimerStatus, timer_status, user_manager_available
 from .timeline import TimelineEntry, list_timeline
@@ -56,6 +57,10 @@ class SourceStatus:
 class ProjectsSection:
     by_status: dict = field(default_factory=dict)
     entries: list = field(default_factory=list)  # list[ProjectEntry]
+    # id -> date the record's `Current state` was last written ("" = never,
+    # None = no visible record). Where a project stands lives in that
+    # section; an empty or old date means it may not reflect recent work.
+    current_state_updated: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -123,9 +128,13 @@ class OperationalState:
 def _collect_projects(config: Config) -> ProjectsSection:
     entries = load_registry(config)
     by_status: dict[str, int] = {}
+    current_state_updated: dict[str, str | None] = {}
     for e in entries:
         by_status[e.status or "unknown"] = by_status.get(e.status or "unknown", 0) + 1
-    return ProjectsSection(by_status=by_status, entries=entries)
+        state = read_current_state(config, e.id)
+        current_state_updated[e.id] = None if state is None else state["updated"]
+    return ProjectsSection(by_status=by_status, entries=entries,
+                           current_state_updated=current_state_updated)
 
 
 def _collect_decisions(config: Config, include_restricted: bool) -> tuple[DecisionsSection, int]:

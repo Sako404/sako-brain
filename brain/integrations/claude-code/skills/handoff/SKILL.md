@@ -50,5 +50,8 @@ handoff yet, this creates one.
   isn't already captured, use `/decision` or update the project record
   directly first — the handoff should reference those, not duplicate
   their content.
+- If where the project stands changed, replace the record's `Current
+  state` too (`/project-update`). `brain doctor` reports
+  `project_current_state_stale` when the handoff is newer than it.
 - Report what was written, briefly (see the "Brain updated:" convention
   in `CLAUDE.md`).

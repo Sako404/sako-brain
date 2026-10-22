@@ -116,6 +116,11 @@ milestones, problems, next actions, links to people, links to documents, and
 the working directory path (a reference, not a copy). See `_registry.yaml` for
 the canonical id → filesystem path mapping.
 
+Where a project stands lives in one place: its `## Current state` section,
+replaced as a whole (`brain project section-update <id> --section "Current
+state" --mode replace`) and dated in `current_state_updated`. The replaced text
+moves to `## Archive`. Never record state by appending dated blocks elsewhere.
+
 `brain project discover` may **propose** candidate projects found under
 {{PROJECTS_ROOTS}} for review. It must never register or import a project
 automatically.
