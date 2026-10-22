@@ -59,7 +59,9 @@ def capture(config: Config, type_: str, title: str, text: str = "", tags: list[s
         "---",
         f"id: {dest.stem}",
         f"type: {type_}",
-        "status:",
+        # An idea waits for its owner from the start, as in create_memory;
+        # anything else is an unreviewed capture with no status.
+        f"status: {'open' if type_ == 'idea' else ''}".rstrip(),
         f"created: {today}",
         f"updated: {today}",
         f"people: {people or []}",
