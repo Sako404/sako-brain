@@ -1893,7 +1893,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_note_create = note_sub.add_parser(
         "create", help="person/knowledge/document go to their fixed bucket; fact needs --area")
     p_note_create.add_argument("--type", required=True, dest="type",
-                               help="person | knowledge | document | fact")
+                               help="person | knowledge | document | fact | idea")
     p_note_create.add_argument("--title", required=True)
     p_note_create.add_argument("--text", default="")
     p_note_create.add_argument("--area", default=None,

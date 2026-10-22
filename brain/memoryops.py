@@ -33,6 +33,8 @@ FIXED_DESTINATION_TYPES = {
     "person": "people",
     "knowledge": "knowledge",
     "document": "documents",
+    # Ideas are told apart by type, not folder: `brain list --type idea`.
+    "idea": "knowledge",
 }
 
 
@@ -59,6 +61,8 @@ def _body_for(type_: str, title: str, text: str) -> str:
         return f"# {title}\n\n## What this is\n\n{detail}\n\n## Where it lives\n\n## Key points\n\n## Related\n"
     if type_ == "fact":
         return f"# {title}\n\n## Detail\n\n{detail}\n\n## Source / provenance\n\n## Related\n"
+    if type_ == "idea":
+        return f"# {title}\n\n## Idea\n\n{detail}\n\n## Why it might matter\n\n## Related\n"
     raise AssertionError(f"no body template for type {type_!r}")  # unreachable — caller validates first
 
 
@@ -108,7 +112,8 @@ def create_memory(config: Config, type_: str, title: str, text: str = "",
 
     meta = {
         "id": note_id, "type": type_,
-        "status": "current" if type_ == "fact" else "",
+        # A new idea waits for its owner; a fact is stated as current.
+        "status": {"fact": "current", "idea": "open"}.get(type_, ""),
         "created": today, "updated": today,
         "people": people or [], "projects": projects or [], "tags": tags or [],
         "sensitivity": sensitivity, "source": source, "source_date": source_date,

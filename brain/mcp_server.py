@@ -676,7 +676,7 @@ TOOLS = {
     "create_memory_note": (tool_create_memory_note, {
         "type": "object",
         "properties": {
-            "type": {"type": "string", "description": "person | knowledge | document | fact"},
+            "type": {"type": "string", "description": "person | knowledge | document | fact | idea"},
             "title": {"type": "string"}, "text": {"type": "string"},
             "tags": {"type": "array", "items": {"type": "string"}},
             "people": {"type": "array", "items": {"type": "string"}},

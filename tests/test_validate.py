@@ -31,6 +31,19 @@ class TestValidate(unittest.TestCase):
         checks = {p.check for p in problems}
         self.assertIn("invalid_status", checks)
 
+    def test_note_lifecycle_statuses(self):
+        """fact/knowledge/document/idea share one review lifecycle; no status
+        (a fresh capture) stays valid, a word outside it does not."""
+        for i, type_ in enumerate(("fact", "knowledge", "document", "idea")):
+            for status in ("open", "current", "promoted", "superseded", "archived", ""):
+                self.vault.write_note("60_KNOWLEDGE", f"{type_}-{status}.md", id=f"{type_}-{status}-{i}",
+                                      type=type_, status=status)
+        self.assertNotIn("invalid_status", {p.check for p in validate.run_all(self.config)})
+        self.vault.write_note("60_KNOWLEDGE", "bad.md", id="knowledge-bad", type="knowledge", status="todo")
+        invalid = [p for p in validate.run_all(self.config) if p.check == "invalid_status"]
+        self.assertEqual(len(invalid), 1)
+        self.assertIn("bad.md: status 'todo'", invalid[0].message)
+
     def test_detects_project_without_status(self):
         path = self.vault.root / "30_PROJECTS" / "ACTIVE" / "p.md"
         path.parent.mkdir(parents=True, exist_ok=True)
