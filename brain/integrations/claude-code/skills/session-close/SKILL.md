@@ -107,6 +107,16 @@ matches intent. Run `brain index` after the batch. A write you haven't
 confirmed isn't done yet; don't report it as saved until you've re-read
 it.
 
+## 7b. Count notes waiting for the user
+
+Run `brain list --status open` (a complete listing by metadata, not a
+search) and put the count in the closing report, with the titles when
+there are five or fewer. These are notes the user marked, or that were
+created, as waiting for them (an `idea` starts `open`). Report only: do
+not change their status, triage them or suggest closing them, unless the
+user asks. If the command fails, say so in the report; it does not make
+the session close incomplete.
+
 ## 8. Only now, optionally: local Claude memory
 
 Local memory (`~/.claude/projects/*/memory/`) may hold **only**: stable
@@ -138,5 +148,6 @@ BRAIN SAVED       — what was written/updated, confirmed read back
 GIT STATUS        — per repo: clean, or exactly what's uncommitted and why
 HANDOFF           — which project(s), new or appended
 OPEN ITEMS        — genuinely open/deferred, not busywork
+OPEN NOTES        — N waiting (`brain list --status open`), titles if ≤ 5
 SESSION CLOSED    — or "SESSION CLOSE INCOMPLETE: <reason>" per step 0/2
 ```
