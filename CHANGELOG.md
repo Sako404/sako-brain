@@ -5,6 +5,44 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## Unreleased
+
+### Added
+
+- `python -m brain.dispatch`, the SSH forced-command dispatcher for a
+  server-hosted canonical Brain. It used to be a separate script outside
+  the package, so a server needed a copy nobody else had, and it could
+  drift from the package it served. Every setting is now a flag in the
+  key's `authorized_keys` line (`--mode`, `--vault`, `--state-dir`,
+  `--principal`, `--client`, `--delegation`, `--remote-project-paths`).
+  Nothing about one deployment is written into the code.
+- `--delegation none|optional|mandatory` decides per key whether it may
+  act as another principal, in place of a list of client names written
+  into the script. A key that does not say gets `none`.
+- `brain/commandpolicy.py`, the one list of which command may be run by
+  which kind of key. The dispatcher enforces it and the client uses it to
+  choose its read or write key. A test fails if a CLI command is missing
+  from it, if the client would present a key the dispatcher refuses, or if
+  a bundled skill uses a command no key may run.
+- docs/SERVER_SETUP.md: setting up the server side, the modes, acting for
+  another person, and moving from a separately deployed dispatcher.
+
+### Changed
+
+- `brain memory` is sent under the read key instead of the write key. The
+  dispatcher refuses it from every key either way, because the queue has
+  no per-person visibility yet. The refusal now says so ("single-principal
+  only") instead of "not an allowed write subcommand".
+- The bundled `remember` skill no longer tells an agent to queue a fact
+  when the Brain is remote, where the queue is unavailable. It asks the
+  user whether to save the fact instead.
+
+### Upgrade notes
+
+- Existing servers keep working until their `authorized_keys` lines are
+  changed: the old script is untouched. docs/SERVER_SETUP.md describes
+  moving one key at a time.
+
 ## 0.14.10 — Project status and path change only through the project commands
 
 ### Changed

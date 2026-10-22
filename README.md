@@ -271,6 +271,12 @@ can actually do what is enforced by the server's own dispatcher, not
 guessed client-side. No secret is ever written into the vault or this
 repository — private keys stay exactly where you point `brain setup` at.
 
+The dispatcher ships in this package (`python -m brain.dispatch`), so the
+server needs only this install and one `authorized_keys` line per client
+key. [docs/SERVER_SETUP.md](docs/SERVER_SETUP.md) covers the server side:
+key lines, modes, acting for another person, and moving from an older,
+separately deployed dispatcher.
+
 ## Agent integrations
 
 Official, generic Claude Code and Codex integrations ship inside this

@@ -121,7 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_codes_client ON authorization_codes(client_id);
 _PRINCIPAL_INDEX_DDL = "CREATE INDEX IF NOT EXISTS idx_tokens_principal ON tokens(principal_id)"
 
 # The one principal every pre-Stage-1 identity has always implicitly
-# been — matches brain-dispatch.py's own DEFAULT_PRINCIPAL and the
+# been — matches brain/dispatch.py's default --principal and the
 # Stage 1 rollout's explicit instruction ("existing identities become
 # principal:marcin"), kept here (not imported) since the gateway has no
 # dependency on the vault's own identity module — it only ever stores
@@ -191,8 +191,8 @@ class Storage:
         `authorization_codes` row from crashing the upgrade (see
         TestOpeningARealPreStage1DatabaseDoesNotCrash), but '' is not a
         real principal — every pre-Stage-1 identity has always implicitly
-        been principal-marcin (same convention as brain-dispatch.py's own
-        DEFAULT_PRINCIPAL and _migrate_legacy_owner above), so backfill it
+        been principal-marcin (same convention as brain/dispatch.py's
+        default --principal and _migrate_legacy_owner above), so backfill it
         the same way the legacy owner password already is. Without this,
         a long-lived refresh_token issued before Stage 1 keeps rotating
         forward through oauth.refresh() — which faithfully preserves

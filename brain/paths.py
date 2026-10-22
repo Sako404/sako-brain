@@ -248,7 +248,7 @@ class Config:
     # owner_principal/audience. Comes ONLY from BRAIN_CALLER_PRINCIPAL, which
     # only the SSH forced-command dispatcher sets (from its own
     # authorized_keys-fixed --principal flag, never anything a client can
-    # send — see brain-dispatch.py). Defaults to DEFAULT_ACTING_PRINCIPAL,
+    # send — see brain/dispatch.py). Defaults to DEFAULT_ACTING_PRINCIPAL,
     # the same "every pre-Stage-2 identity is principal-marcin" default
     # Stage 1 already established, so a caller that hasn't been wired
     # through this threading yet sees exactly what it always saw — the
@@ -260,7 +260,7 @@ class Config:
     # "desktop-client") and whether acting_principal came from that
     # identity's own fixed --principal ("ssh") or from a gateway's
     # per-request --acting-principal assertion ("gateway") —
-    # BRAIN_CALLER_TRANSPORT, set by brain-dispatch.py alongside
+    # BRAIN_CALLER_TRANSPORT, set by brain/dispatch.py alongside
     # BRAIN_CALLER_PRINCIPAL. Not yet read anywhere except to be threaded
     # into the Brain-core audit log extension; carried here now so that
     # extension doesn't also need a dispatcher/threading change.
@@ -269,11 +269,11 @@ class Config:
     # Stage 2 remote-MCP per-client audit provenance: the REAL OAuth
     # client_id (and, where the gateway has one on file, a display
     # client_name) that validate_token() resolved for this request —
-    # BRAIN_CALLER_OAUTH_CLIENT_ID / _NAME, set by brain-dispatch.py ONLY
-    # when the connecting identity is one of the two gateway ones AND the
+    # BRAIN_CALLER_OAUTH_CLIENT_ID / _NAME, set by brain/dispatch.py ONLY
+    # when the connecting key was installed with --delegation AND the
     # gateway actually delegated this request (mirrors how
     # BRAIN_CALLER_PRINCIPAL is only ever a delegated assertion for those
-    # same two identities — see brain-dispatch.py's
+    # same delegating keys — see brain/dispatch.py's
     # resolve_effective_principal()). Empty for every other caller
     # (desktop, Claude Code, Codex, local SSH, example-service) — nothing here
     # changes their provenance. Never an authorization input: purely

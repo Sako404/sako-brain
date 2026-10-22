@@ -131,7 +131,7 @@ def acting_as(principal_id: str | None, client_id: str | None = None, client_nam
     OAuth `client_id`/`client_name` alongside it, via
     BRAIN_GATEWAY_ACTING_CLIENT_ID/_NAME. The dispatcher independently
     re-validates all of these and refuses them outright from any SSH
-    identity other than the two dedicated gateway ones — this only
+    key not installed with --delegation — this only
     controls what gets ASKED for, never what's granted. `client_id` is
     never an authorization input on this end either, only provenance for
     the eventual audit entry. Restores the previous values on exit (never

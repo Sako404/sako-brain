@@ -34,6 +34,11 @@ moved..." — plausible, durable, but not explicitly "remember this."
   --confidence assumption --reason "..."`. Mention briefly that you've
   queued it for review (`brain memory pending` to see the queue) — don't
   make a big deal of it, one line is enough.
+- If this client uses a remote canonical Brain, the queue is not
+  available: it has no per-person visibility yet, so the server refuses
+  `brain memory` from every remote client ("single-principal only"). Don't
+  retry and don't fall back to an authoritative write on your own. Ask in
+  one line whether to save the fact now, and write it only on a clear yes.
 - Exception: if it's sensitive or consequential enough that writing it
   even to the *pending* queue feels presumptuous, ask a brief
   confirming question instead of queueing silently. Use judgement — don't

@@ -30,6 +30,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import commandpolicy
 from . import paths as paths_mod
 
 CLIENT_CONFIG_ENV = "SAKO_BRAIN_CLIENT_CONFIG"
@@ -39,27 +40,13 @@ SLUG = paths_mod.APP_DIRNAME
 # Commands that must run locally even when a remote server is configured —
 # they configure *this* client, or (for `init`) create a local vault; they
 # are never something to hand to a remote canonical Brain.
-LOCAL_ONLY_COMMANDS = {"setup", "integration", "init", "remote-gateway"}
-
-# Mirrors the server dispatcher's WRITE_ONLY_SUBCOMMANDS / READ_ONLY_SUBCOMMANDS
-# at the granularity the client can cheaply check. Getting this wrong picks
-# the "wrong" key and gets a clear server-side refusal (or, for `project
-# show`/`discover`/`sync` under a read-only-only setup, a spurious one) — it
-# never grants or denies anything the server wouldn't enforce anyway.
-_WRITE_TOP_LEVEL = {"decision", "update", "note", "handoff", "remember", "memory", "index"}
-_PROJECT_READ_ONLY_SUBS = {"show", "discover", "sync"}
+LOCAL_ONLY_COMMANDS = commandpolicy.LOCAL_ONLY
 
 
 def _is_write_subcommand(argv: list[str]) -> bool:
-    if not argv:
-        return False
-    top = argv[0]
-    if top == "timeline":
-        return len(argv) > 1 and argv[1] == "add"
-    if top == "project":
-        sub = argv[1] if len(argv) > 1 else None
-        return sub not in _PROJECT_READ_ONLY_SUBS
-    return top in _WRITE_TOP_LEVEL
+    # Same sets the dispatcher enforces (brain.commandpolicy), so the key
+    # chosen here can no longer drift from what the server will accept.
+    return commandpolicy.uses_write_identity(argv)
 
 
 @dataclass
@@ -220,9 +207,9 @@ def should_proxy(argv: list[str]) -> bool:
 # an already-validated OAuth token's own principal_id — never by an
 # ordinary desktop/example-service client, which has no reason to ever set this. The
 # server-side dispatcher independently re-validates this assertion (and
-# refuses it outright from any identity other than the two dedicated
-# gateway ones) — this env var only controls what THIS process asks for,
-# never what it's granted. See brain-dispatch.py's
+# refuses it outright from any key not installed with --delegation) —
+# this env var only controls what THIS process asks for, never what it's
+# granted. See brain/dispatch.py's
 # resolve_effective_principal() for the actual trust boundary.
 GATEWAY_ACTING_PRINCIPAL_ENV = "BRAIN_GATEWAY_ACTING_PRINCIPAL"
 # Stage 2 remote-MCP per-client audit provenance: set alongside
@@ -230,8 +217,8 @@ GATEWAY_ACTING_PRINCIPAL_ENV = "BRAIN_GATEWAY_ACTING_PRINCIPAL"
 # mcp_bridge.acting_as()) — never independently, and never from anything
 # an MCP client's request body could supply. Carried through the SSH
 # delegation prefix the same way the acting principal already is; see
-# brain-dispatch.py's parse_delegated_command() for how the server side
-# parses and (for GATEWAY_DELEGATION_CLIENTS only) trusts them.
+# brain/dispatch.py's parse_delegated_command() for how the server side
+# parses and (for keys installed with --delegation only) trusts them.
 GATEWAY_ACTING_CLIENT_ID_ENV = "BRAIN_GATEWAY_ACTING_CLIENT_ID"
 GATEWAY_ACTING_CLIENT_NAME_ENV = "BRAIN_GATEWAY_ACTING_CLIENT_NAME"
 
