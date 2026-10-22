@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.18.1 — Keep a record's intro out of a new Current state
+
+### Fixed
+
+- When a record had no `## Current state`, 0.18.0 inserted the header
+  right after the title, so an intro line between the title and the first
+  section became the new section's content, and the replace that created
+  it moved that line to `## Archive` as "Current state (replaced …)". The
+  section is now inserted just before the first `## ` header (at the end
+  when there is none), and the intro stays where it was. Records already
+  affected keep the moved line in their archive; nothing was deleted.
+
 ## 0.18.0 — One dated place for where a project stands
 
 ### Added
@@ -12,7 +24,7 @@ command line and configuration format may change between minor versions.
 - `## Current state` is where a project stands. `brain project
   section-update <id> --section "Current state" --mode replace` dates it
   in the new frontmatter field `current_state_updated`, and a record
-  without the section gets it right after its title.
+  without the section gets it as its first section.
 - A replace never loses text: whatever it overwrites, in any allowlisted
   section, moves to `## Archive` at the end of the record under
   `### <section> (replaced <date>)`.

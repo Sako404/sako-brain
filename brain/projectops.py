@@ -760,7 +760,7 @@ PROJECT_SECTION_ALLOWLIST = ("Current state", "Milestones", "Problems / limitati
 
 # `Current state` is the one place a reader takes "where does this project
 # stand" from: replaced as a whole, dated in `current_state_updated`, and
-# created at the top of the body when an older record lacks it. Whatever a
+# created as the first section when an older record lacks it. Whatever a
 # replace overwrites is moved to `## Archive` at the end of the body, so
 # replacing never loses history.
 CURRENT_STATE_SECTION = "Current state"
@@ -795,16 +795,18 @@ def _has_section(body: str, section: str) -> bool:
     return any(line.rstrip("\n") == header for line in body.splitlines())
 
 
-def _insert_after_title(body: str, block: str) -> str:
-    """Put `block` right after the body's `# ` title (or at the top when it
-    has none), so the section is the first thing a reader meets."""
+def _insert_before_first_section(body: str, block: str) -> str:
+    """Put `block` just before the body's first `## ` header, so it is the
+    first section a reader meets. Whatever stands between the title and
+    that header (an intro line) stays where it is — it must not become the
+    new section's content. With no `## ` header, `block` goes at the end."""
     lines = body.splitlines(keepends=True)
     for i, line in enumerate(lines):
-        if line.startswith("# "):
-            head = "".join(lines[:i + 1])
-            rest = "".join(lines[i + 1:]).lstrip("\n")
-            return f"{head.rstrip(chr(10))}\n\n{block}{rest}"
-    return block + body
+        if line.startswith("## "):
+            head = "".join(lines[:i]).rstrip("\n")
+            rest = "".join(lines[i:])
+            return f"{head}\n\n{block}{rest}" if head else f"{block}{rest}"
+    return f"{body.rstrip(chr(10))}\n\n{block}"
 
 
 def _append_to_archive(body: str, entry: str) -> str:
@@ -904,7 +906,7 @@ def _update_section_locked(config: Config, project_id: str, section: str, mode: 
         )
 
     if section == CURRENT_STATE_SECTION and not _has_section(note.body, section):
-        note.body = _insert_after_title(note.body, f"## {section}\n\n")
+        note.body = _insert_before_first_section(note.body, f"## {section}\n\n")
 
     lines = note.body.splitlines(keepends=True)
     start, end = _section_span(lines, section)
