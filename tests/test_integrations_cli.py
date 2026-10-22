@@ -193,6 +193,56 @@ class TestDoctorNeverPrintsSecrets(unittest.TestCase):
         self.assertTrue(any(c["name"] == "canonical_brain_connectivity" for c in report["checks"]))
 
 
+class TestProjectPathsPresent(unittest.TestCase):
+    """The canonical server cannot see project paths, so the client checks
+    the live ones (project_paths_present); finished projects may be gone."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.present = Path(self.tmp.name) / "present"
+        self.present.mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _state(self, *entries):
+        return {"projects": {"entries": list(entries)}}
+
+    def test_ok_when_every_live_path_exists(self):
+        check = ic._check_project_paths_present(self._state(
+            {"id": "project-a", "path": str(self.present), "status": "active"},
+            {"id": "project-old", "path": "/nonexistent/old", "status": "archived"},
+            {"id": "project-done", "path": "/nonexistent/done", "status": "completed"},
+            {"id": "project-nopath", "path": "", "status": "active"},
+        ))
+        self.assertTrue(check["ok"])
+        self.assertIn("1 active/planned/on-hold", check["detail"])
+
+    def test_fails_naming_each_missing_live_path(self):
+        check = ic._check_project_paths_present(self._state(
+            {"id": "project-a", "path": str(self.present), "status": "active"},
+            {"id": "project-gone", "path": "/nonexistent/gone", "status": "on-hold"},
+        ))
+        self.assertFalse(check["ok"])
+        self.assertIn("1 of 2", check["detail"])
+        self.assertIn("project-gone: /nonexistent/gone", check["detail"])
+
+    def test_run_doctor_checks_paths_only_with_a_remote_configured(self):
+        from unittest.mock import patch, MagicMock
+
+        state = json.dumps(self._state({"id": "project-gone", "path": "/nonexistent/gone", "status": "active"}))
+        fake_state_proc = MagicMock(returncode=0, stdout=state, stderr="")
+        fake_bridge_proc = MagicMock(returncode=0, stdout="", stderr="")
+        fake_cfg = MagicMock(ssh_user="u", server="s", ssh_port="22")
+        for cfg, expected in ((fake_cfg, [False]), (None, [])):
+            with patch.object(ic.remote, "load_client_config", return_value=cfg), \
+                 patch.object(ic, "_run_brain_capture", return_value=fake_state_proc), \
+                 patch("subprocess.run", return_value=fake_bridge_proc):
+                report = ic.run_doctor()
+            got = [c["ok"] for c in report["checks"] if c["name"] == "project_paths_present"]
+            self.assertEqual(got, expected)
+
+
 
 class TestStaleSkillLinks(unittest.TestCase):
     """A skill link left on an old venv after an upgrade keeps serving that

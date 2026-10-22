@@ -867,8 +867,13 @@ def cmd_status(config: Config, args) -> int:
 
 def cmd_doctor(config: Config, args) -> int:
     problems = validate.run_all(config)
+    unchecked = validate.unchecked_project_path_count(config) if not _admin_refused(problems) else 0
+    unchecked_note = (f"Not checked on this host: {unchecked} project path(s) that live on the client; "
+                      f"`brain integration doctor` checks them there.")
     if not problems:
         print("Brain doctor: no problems found.")
+        if unchecked:
+            print(unchecked_note)
         return 0
     print(f"Brain doctor: {len(problems)} problem(s) found:\n")
     by_check: dict[str, list] = {}
@@ -879,7 +884,15 @@ def cmd_doctor(config: Config, args) -> int:
         for item in items:
             print(f"  - {item.message}")
         print()
+    if unchecked:
+        print(unchecked_note)
     return 1
+
+
+def _admin_refused(problems) -> bool:
+    # run_all answers a non-admin with this one problem and nothing else;
+    # such a caller must not learn the registry size either.
+    return any(p.check == "admin_required" for p in problems)
 
 
 def cmd_state(config: Config, args) -> int:
