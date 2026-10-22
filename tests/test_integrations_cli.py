@@ -193,5 +193,46 @@ class TestDoctorNeverPrintsSecrets(unittest.TestCase):
         self.assertTrue(any(c["name"] == "canonical_brain_connectivity" for c in report["checks"]))
 
 
+
+class TestStaleSkillLinks(unittest.TestCase):
+    """A skill link left on an old venv after an upgrade keeps serving that
+    version's instructions; doctor must see it (claude_skills_current)."""
+
+    def setUp(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.skills = self.root / "skills"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_fresh_install_has_no_stale_links(self):
+        ic.install_claude_code(skills_dir=self.skills, mcp_config_path=self.root / "mcp.json")
+        self.assertEqual(ic.stale_skill_links(self.skills), [])
+
+    def test_link_to_an_old_copy_is_reported(self):
+        ic.install_claude_code(skills_dir=self.skills, mcp_config_path=self.root / "mcp.json")
+        old = self.root / "old-venv" / "timeline"
+        old.mkdir(parents=True)
+        (self.skills / "timeline").unlink()
+        (self.skills / "timeline").symlink_to(old)
+        self.assertEqual(ic.stale_skill_links(self.skills), [{"skill": "timeline", "target": str(old)}])
+
+    def test_force_reinstall_clears_stale_links(self):
+        ic.install_claude_code(skills_dir=self.skills, mcp_config_path=self.root / "mcp.json")
+        old = self.root / "old-venv" / "timeline"
+        old.mkdir(parents=True)
+        (self.skills / "timeline").unlink()
+        (self.skills / "timeline").symlink_to(old)
+        ic.install_claude_code(skills_dir=self.skills, mcp_config_path=self.root / "mcp.json", force=True)
+        self.assertEqual(ic.stale_skill_links(self.skills), [])
+
+    def test_foreign_non_symlink_is_not_this_checks_business(self):
+        self.skills.mkdir()
+        (self.skills / "timeline").mkdir()
+        self.assertEqual(ic.stale_skill_links(self.skills), [])
+
+
 if __name__ == "__main__":
     unittest.main()
