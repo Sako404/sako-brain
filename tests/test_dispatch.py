@@ -483,12 +483,13 @@ class TestRunsAsARealModule(unittest.TestCase):
         self.principal = identity_mod.create_principal(
             self.vault.config(), display_name="Alex", role="admin").id
 
-    def _run(self, command, *flags):
+    def _run(self, command, *flags, isolated=False):
         import subprocess
         env = {k: v for k, v in os.environ.items() if not k.startswith("BRAIN_")}
         env["SSH_ORIGINAL_COMMAND"] = command
         return subprocess.run(
-            [sys.executable, "-m", "brain.dispatch", "--vault", str(self.vault.root),
+            [sys.executable, *(["-I"] if isolated else []), "-m", "brain.dispatch",
+             "--vault", str(self.vault.root),
              "--state-dir", str(self.vault.state_dir), *flags],
             env=env, capture_output=True, text=True, timeout=60,
             cwd=Path(__file__).resolve().parent.parent)
@@ -506,7 +507,8 @@ class TestRunsAsARealModule(unittest.TestCase):
     @unittest.skipUnless((Path(sys.executable).parent / "brain").is_file(),
                          "package not installed in this interpreter's environment")
     def test_allowed_command_runs_the_installed_brain(self):
-        result = self._run("status", "--principal", self.principal)
+        # -I exactly as a forced command runs it; needs the installed package.
+        result = self._run("status", "--principal", self.principal, isolated=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
