@@ -139,6 +139,50 @@ class TestTitleTier(unittest.TestCase):
         self.assertNotIn("document-target", ids[:1])
 
 
+class TestAliases(unittest.TestCase):
+    """A note's `aliases` are names it goes by, so searching for one must
+    find it the way its title would — live, the backlog's alias
+    `next-actions` and project-family-command-center's alias `fcc` were
+    not indexed at all."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        path = self.vault.root / "30_PROJECTS" / "ACTIVE" / "project-fcc.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        filler = " ".join(f"unrelated{i}" for i in range(1500))
+        path.write_text(
+            "---\nid: project-fcc\ntype: project\nstatus: active\n"
+            "aliases:\n- fcc\n- household-dashboard\n---\n\n"
+            f"# Family Command Center\n\n{filler}\n"
+        )
+        for i in range(5):
+            self.vault.write_note(
+                "50_TIMELINE", f"event-{i}.md", id=f"event-{i}", type="event",
+                title=f"Event {i}", body=f"The FCC did a thing, round {i}.",
+            )
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_alias_finds_the_note_first(self):
+        ids = [r.id for r in search.search(self.config, "fcc", limit=8)]
+        self.assertEqual(ids[0], "project-fcc", ids)
+
+    def test_hyphenated_alias_matches(self):
+        ids = [r.id for r in search.search(self.config, "household-dashboard", limit=8)]
+        self.assertEqual(ids[0], "project-fcc", ids)
+
+    def test_displayed_title_is_the_title_alone(self):
+        result = search.search(self.config, "fcc", limit=1)[0]
+        self.assertEqual(result.title, "Family Command Center")
+
+    def test_note_without_aliases_still_indexes(self):
+        ids = [r.id for r in search.search(self.config, "Event 3", limit=8)]
+        self.assertEqual(ids[0], "event-3", ids)
+
+
 class TestNaturalLanguageQuestions(unittest.TestCase):
     """Phase 5B regression: a full question ("Where did X finish?") must
     not fail just because most of its words are function words that don't

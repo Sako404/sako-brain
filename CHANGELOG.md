@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.21.3 — Search finds a note by its aliases
+
+### Fixed
+
+- A note's `aliases` were never indexed, so searching for one (e.g. `fcc`
+  for Family Command Center, `next-actions` for the backlog) could not
+  find the note by that name. The index's full-text `title` column now
+  holds the title plus every alias, so an alias matches the way the title
+  does, title tier included. Results still show, and order the title
+  tier by, the title alone. No schema change: an existing index keeps
+  working and picks aliases up note by note as they are written, or all
+  at once with `brain index`. Server-side; run `brain index` after
+  deploying.
+
 ## 0.21.2 — Among title matches, the shortest title comes first
 
 ### Fixed

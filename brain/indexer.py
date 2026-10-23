@@ -179,10 +179,15 @@ def _upsert_note(conn: sqlite3.Connection, config: Config, path: Path) -> str | 
             str(supersedes),
         ),
     )
+    # The FTS `title` column holds every name the note goes by: its title
+    # plus its `aliases`, so a search for an alias matches like a title
+    # does (search.py's title tier included). `notes.title` stays the
+    # title alone — that is what results display and order by.
+    names = " ".join([note.title, *(str(a) for a in note.list_field("aliases") if a)])
     conn.execute("DELETE FROM notes_fts WHERE id = ?", (note.id,))
     conn.execute(
         "INSERT INTO notes_fts (id, title, body, tags) VALUES (?, ?, ?, ?)",
-        (note.id, note.title, note.body, tags),
+        (note.id, names, note.body, tags),
     )
     return note.id
 
