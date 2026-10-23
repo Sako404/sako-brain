@@ -80,15 +80,21 @@ BODY_WEIGHT = 1.0
 TAGS_WEIGHT = 3.0
 
 
-def _run_match(conn, match_expr: str, limit: int):
+def _run_match(conn, match_expr: str, limit: int, *, shortest_title_first: bool = False):
+    # Title tier only: among notes whose title holds every term, the shortest
+    # title is the one most *about* the query ("TRON" before "Decision: TRON
+    # modules enable CLI command"), and bm25() cannot tell, since its length
+    # penalty counts the body too. Prefix matching makes this matter as well:
+    # "next"* also matches "Nextcloud".
+    order = "length(n.title), " if shortest_title_first else ""
     return conn.execute(
-        """
+        f"""
         SELECT n.id, n.type, n.status, n.title, n.path,
                snippet(notes_fts, 2, '[', ']', '...', 10) AS snip
         FROM notes_fts
         JOIN notes n ON n.id = notes_fts.id
         WHERE notes_fts MATCH ?
-        ORDER BY bm25(notes_fts, ?, ?, ?, ?)
+        ORDER BY {order}bm25(notes_fts, ?, ?, ?, ?)
         LIMIT ?
         """,
         (match_expr, ID_WEIGHT, TITLE_WEIGHT, BODY_WEIGHT, TAGS_WEIGHT, limit),
@@ -115,7 +121,8 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
        hold a long note up: a ~25 KB backlog titled "Cross-project next
        actions" ranked 12th for "next actions" behind short notes that only
        mention the words in their body. A note whose title carries the
-       whole query is the most precise hit there is, so it comes first.
+       whole query is the most precise hit there is, so it comes first,
+       shortest title first.
     1. AND of every content term — most precise, right answer for a clean
        keyword query like "Family Command Center".
     2. AND with exactly one term dropped, tried once per term. Phase 5B
@@ -150,7 +157,7 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
                     seen.add(r["id"])
                     rows.append(r)
 
-        _add(_run_match(conn, _title_expr(terms), fetch_limit))
+        _add(_run_match(conn, _title_expr(terms), fetch_limit, shortest_title_first=True))
 
         if len(rows) < fetch_limit and len(terms) > 1:
             _add(_run_match(conn, _and_expr(terms), fetch_limit - len(rows)))
