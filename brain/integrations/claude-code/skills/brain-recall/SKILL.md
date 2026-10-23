@@ -28,6 +28,13 @@ noise.
    nothing useful comes back. Multiple targeted searches beat one vague
    one.
 
+   Search matches words, not meaning, and notes are written in more than
+   one language. When a search finds nothing relevant, retry before
+   concluding the Brain has nothing: the other language the notes use
+   (Polish for an English query, English for a Polish one), the base
+   form of an inflected word ("dysk" for "dysku"), and synonyms or the
+   technical term ("degraded pool" for "disk problem").
+
    `brain search` is ranked **full-text** search with a limit, and it has
    no filter syntax — it is the right tool for "which notes mention this?"
    and the wrong one for "list everything that is still open". For that,
