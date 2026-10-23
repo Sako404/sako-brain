@@ -1,6 +1,9 @@
+import dataclasses
 import unittest
 
-from brain import memoryqueue
+import yaml
+
+from brain import memoryqueue, writepolicy
 from tests.helpers import TempVault
 
 
@@ -102,6 +105,84 @@ class TestMemoryQueue(unittest.TestCase):
         pending = memoryqueue.list_pending(self.config)
         self.assertEqual(len(pending), 1)
         self.assertEqual(pending[0].id, e2.id)
+
+
+
+class TestMemoryQueueOwnership(unittest.TestCase):
+    """v0.22.0: entries belong to whoever queued them and are read through
+    visibility.py, so the queue is safe to reach through the dispatcher."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.marcin = self.vault.config()
+        self.sam = dataclasses.replace(self.marcin, acting_principal="principal-sam")
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_entry_belongs_to_the_acting_principal(self):
+        entry = memoryqueue.add(self.sam, candidate_fact="Sam's fact")
+        self.assertEqual(entry.owner_principal, "principal:sam")
+        self.assertEqual(entry.audience, [])
+
+    def test_private_entry_is_invisible_to_anyone_else(self):
+        entry = memoryqueue.add(self.sam, candidate_fact="Sam's private fact")
+        self.assertEqual(memoryqueue.list_all(self.marcin), [])
+        self.assertIsNone(memoryqueue.get(self.marcin, entry.id))
+        for resolve in (lambda: memoryqueue.accept(self.marcin, entry.id),
+                        lambda: memoryqueue.reject(self.marcin, entry.id)):
+            with self.assertRaises(memoryqueue.MemoryQueueError) as ctx:
+                resolve()
+            # Same message as for an id that does not exist at all.
+            self.assertIn("no pending memory entry", str(ctx.exception))
+
+    def test_audience_grants_reading_but_not_resolving(self):
+        entry = memoryqueue.add(self.sam, candidate_fact="Shared fact", audience=["principal:marcin"])
+        self.assertEqual([e.id for e in memoryqueue.list_pending(self.marcin)], [entry.id])
+        with self.assertRaises(memoryqueue.MemoryQueueError) as ctx:
+            memoryqueue.accept(self.marcin, entry.id)
+        self.assertIn("only the owner", str(ctx.exception))
+        self.assertEqual(memoryqueue.get(self.sam, entry.id).status, "pending")
+
+    def test_accepted_note_carries_owner_and_audience(self):
+        entry = memoryqueue.add(self.sam, candidate_fact="Shared fact", audience=["principal:marcin"])
+        accepted = memoryqueue.accept(self.sam, entry.id)
+        text = (self.sam.brain_root / accepted.written_to).read_text()
+        self.assertIn("owner_principal: principal:sam", text)
+        self.assertIn("principal:marcin", text)
+
+    def test_malformed_audience_is_refused(self):
+        with self.assertRaises(memoryqueue.MemoryQueueError):
+            memoryqueue.add(self.sam, candidate_fact="x", audience=["sam"])
+
+    def test_entry_without_owner_belongs_to_the_default_owner(self):
+        path = self.marcin.inbox_dir / memoryqueue.QUEUE_RELATIVE_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump([{
+            "id": "mem-legacy1", "created": "2026-09-01", "candidate_fact": "Old fact",
+            "status": "pending",
+        }]))
+        self.assertEqual([e.id for e in memoryqueue.list_pending(self.marcin)], ["mem-legacy1"])
+        self.assertEqual(memoryqueue.list_pending(self.sam), [])
+        self.assertEqual(memoryqueue.get(self.marcin, "mem-legacy1").owner_principal, "principal:marcin")
+
+    def test_restricted_entry_needs_confirmation_to_accept(self):
+        entry = memoryqueue.add(self.marcin, candidate_fact="x", sensitivity="restricted")
+        with self.assertRaises(writepolicy.WritePolicyError):
+            memoryqueue.accept(self.marcin, entry.id)
+        self.assertEqual(memoryqueue.get(self.marcin, entry.id).status, "pending")
+        self.assertEqual(memoryqueue.accept(self.marcin, entry.id, confirm_restricted=True).status,
+                         "accepted")
+
+    def test_concurrent_adds_lose_nothing(self):
+        import threading
+        threads = [threading.Thread(target=memoryqueue.add, args=(self.marcin,),
+                                    kwargs={"candidate_fact": f"fact {i}"}) for i in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(len(memoryqueue.list_all(self.marcin)), 20)
 
 
 if __name__ == "__main__":

@@ -34,10 +34,12 @@ SCOPES_SUPPORTED = " ".join(ALL_SCOPES)
 READ_TOOLS = frozenset({
     "search_memory", "list_notes", "read_memory", "get_context", "list_projects",
     "get_project", "search_timeline", "project_context", "get_operational_state",
+    "list_queued_memory",
 })
 
 WRITE_TOOLS = frozenset({
-    "remember", "update_memory", "queue_memory", "write_handoff",
+    "remember", "update_memory", "queue_memory", "accept_queued_memory",
+    "reject_queued_memory", "write_handoff",
     "create_decision", "create_project", "update_project_status",
     "update_project_path", "close_project", "update_project_section", "create_memory_note",
     "file_inbox_note", "create_timeline_event",

@@ -28,7 +28,9 @@ explicit `confirm_restricted: true` argument (the CLI's equivalent:
 unnoticed side effect of a tool call. `queue_memory` exposes the
 Level 2 pending-memory queue (see `memoryqueue.py`) for MCP-only clients —
 the "durable-seeming but not explicitly confirmed" case — as a
-non-authoritative staging step rather than an immediate write.
+non-authoritative staging step rather than an immediate write;
+`list_queued_memory`, `accept_queued_memory` and `reject_queued_memory`
+let the entry's owner review it from the same client.
 """
 from __future__ import annotations
 
@@ -263,16 +265,63 @@ def tool_update_memory(config: Config, id: str, set_fields: dict | None = None,
 def tool_queue_memory(config: Config, candidate_fact: str, entities: list | None = None,
                        source: str = "", source_date: str = "", proposed_destination: str = "",
                        proposed_type: str = "fact", sensitivity: str = "normal",
-                       confidence: str = "assumption", reason: str = "") -> dict:
-    """Level 2 write policy: queue a plausible-but-unconfirmed durable fact
-    for human review rather than writing it as an authoritative record."""
+                       confidence: str = "assumption", reason: str = "",
+                       confirm_restricted: bool = False, audience: list | None = None) -> dict:
+    """Queue a plausible but unconfirmed durable fact for the owner's review instead of writing a record (Level 2).
+
+    The entry belongs to the calling principal and is private unless
+    `audience` says otherwise. Nothing is written into the Brain until the
+    owner accepts it (accept_queued_memory). Secret-shaped content is
+    refused; `sensitivity="restricted"` requires `confirm_restricted=true`."""
+    _require_restricted_confirmation(config, config.acting_principal, sensitivity, confirm_restricted)
+    rolepolicy.require_audience_allowed(config, config.acting_principal, audience)
     _scan_for_secrets(candidate_fact, reason)
     entry = memoryqueue.add(
         config, candidate_fact=candidate_fact, entities=entities, source=source,
         source_date=source_date, proposed_destination=proposed_destination,
         proposed_type=proposed_type, sensitivity=sensitivity, confidence=confidence, reason=reason,
+        audience=audience,
     )
     return {"queued_id": entry.id, "status": entry.status}
+
+
+def _queue_listing(entries: list, include_restricted: bool) -> dict:
+    shown = [e for e in entries if include_restricted or e.sensitivity != "restricted"]
+    return {"entries": [dataclasses.asdict(e) for e in shown],
+            "restricted_omitted": len(entries) - len(shown)}
+
+
+def tool_list_queued_memory(config: Config, include_resolved: bool = False,
+                             include_restricted: bool = False) -> dict:
+    """Pending-memory entries the caller may see: their own, plus any shared with them through audience.
+
+    Pending only unless include_resolved=true. Restricted entries are
+    counted in restricted_omitted, not listed, unless include_restricted=true."""
+    entries = (memoryqueue.list_all(config) if include_resolved
+               else memoryqueue.list_pending(config))
+    return _queue_listing(entries, include_restricted)
+
+
+def tool_accept_queued_memory(config: Config, id: str, title: str | None = None,
+                               confirm_restricted: bool = False) -> dict:
+    """Accept one of your own pending-memory entries: write it into the Brain as a note in the inbox.
+
+    Only the entry's owner may accept it; being in its audience is not
+    enough. The note gets the entry's type, sensitivity, provenance and
+    audience. Accepting a restricted entry requires confirm_restricted=true.
+    Ask the user before accepting — the queue exists so a person decides."""
+    _scan_for_secrets(title or "")
+    entry = memoryqueue.accept(config, id, title=title, confirm_restricted=confirm_restricted)
+    return dataclasses.asdict(entry)
+
+
+def tool_reject_queued_memory(config: Config, id: str, note: str = "") -> dict:
+    """Reject one of your own pending-memory entries; it stays in the queue as rejected, for history.
+
+    Only the entry's owner may reject it."""
+    _scan_for_secrets(note)
+    entry = memoryqueue.reject(config, id, note=note)
+    return dataclasses.asdict(entry)
 
 
 def tool_list_projects(config: Config) -> dict:
@@ -587,8 +636,35 @@ TOOLS = {
             "source": {"type": "string"}, "source_date": {"type": "string"},
             "proposed_destination": {"type": "string"}, "proposed_type": {"type": "string"},
             "sensitivity": {"type": "string"}, "confidence": {"type": "string"}, "reason": {"type": "string"},
+            "confirm_restricted": {"type": "boolean", "description": "Required (true) when sensitivity='restricted'"},
+            "audience": {"type": "array", "items": {"type": "string"},
+                         "description": "Explicit sharing (Stage 2), e.g. ['group:household'] -- omit for private (default: owner only). Carried over to the note if accepted"},
         },
         "required": ["candidate_fact"],
+    }),
+    "list_queued_memory": (tool_list_queued_memory, {
+        "type": "object",
+        "properties": {
+            "include_resolved": {"type": "boolean", "description": "Also list accepted and rejected entries (default false)"},
+            "include_restricted": {"type": "boolean", "description": "Default false — set true only when restricted content is directly relevant and intended"},
+        },
+    }),
+    "accept_queued_memory": (tool_accept_queued_memory, {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "Entry id, e.g. mem-1a2b3c4d"},
+            "title": {"type": "string", "description": "Note title; default: the first 80 characters of the fact"},
+            "confirm_restricted": {"type": "boolean", "description": "Required (true) when the entry is restricted"},
+        },
+        "required": ["id"],
+    }),
+    "reject_queued_memory": (tool_reject_queued_memory, {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string", "description": "Entry id, e.g. mem-1a2b3c4d"},
+            "note": {"type": "string", "description": "Why it was rejected"},
+        },
+        "required": ["id"],
     }),
     "list_projects": (tool_list_projects, {"type": "object", "properties": {}}),
     "get_project": (tool_get_project, {

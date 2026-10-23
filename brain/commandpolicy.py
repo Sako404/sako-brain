@@ -6,24 +6,25 @@ Before v0.15.0 the dispatcher lived outside this package and the client
 (`remote.py`) kept a hand-copied mirror of its allowlists. The two drifted
 three times: `index` sent under the read identity (v0.11.1), a production
 dispatcher older than the one in git (2026-10-02), and `memory`, which the
-client sent under the write identity while the dispatcher refuses it in
+client sent under the write identity while the dispatcher refused it in
 every mode (2026-10-22). Both `brain.dispatch` and `remote.py` now read
 these sets, and tests/test_commandpolicy.py fails the run that leaves any
 CLI command unclassified.
 
-Every top-level command is in exactly one of five categories:
+Every top-level command is in exactly one of four categories:
 
-  READ             safe for any identity in read mode or above
-  WRITE            write mode only (plus the narrow capture mode, below)
-  LOCAL_ONLY       configures this client; never sent anywhere
-  SINGLE_PRINCIPAL never through the dispatcher in any mode: carries no
-                   ownership/visibility of its own, so a delegating
-                   identity (the remote gateway) could expose one
-                   principal's data to another. See memoryqueue.py's
-                   INVARIANT.
-  HOST_ONLY        administration and host-local operations; runs only
-                   where `brain` has direct filesystem access to the vault
-                   (for a server, a local shell on that machine)
+  READ        safe for any identity in read mode or above
+  WRITE       write mode only (plus the narrow capture mode, below)
+  LOCAL_ONLY  configures this client; never sent anywhere
+  HOST_ONLY   administration and host-local operations; runs only where
+              `brain` has direct filesystem access to the vault (for a
+              server, a local shell on that machine)
+
+Until v0.22.0 a fifth category, SINGLE_PRINCIPAL, held `memory`: the
+pending-memory queue had no ownership of its own, so a delegating identity
+(the remote gateway) could have shown one principal's entries to another.
+Its entries now carry owner_principal/audience (see memoryqueue.py), so it
+is an ordinary WRITE command with read-only listing pairs.
 
 READ and WRITE are coarse, by top-level name; the two pair sets refine
 them where one top-level name carries both kinds of subcommand.
@@ -36,9 +37,9 @@ READ = frozenset({
 })
 WRITE = frozenset({
     "project", "decision", "update", "index", "note", "handoff", "remember",
+    "memory",
 })
 LOCAL_ONLY = frozenset({"setup", "integration", "init", "remote-gateway"})
-SINGLE_PRINCIPAL = frozenset({"memory"})
 HOST_ONLY = frozenset({
     "principal", "group", "role-policy", "migrate-stage2-owner-principal",
     "agents-doc", "ask", "backup", "chat", "git", "integrity",
@@ -50,6 +51,7 @@ WRITE_ONLY_PAIRS = frozenset({("timeline", "add")})
 # never by adding all of `project` to READ, which would grant its writes too.
 READ_ONLY_PAIRS = frozenset({
     ("project", "show"), ("project", "discover"), ("project", "sync"),
+    ("memory", "pending"), ("memory", "review"),
 })
 
 # Dispatcher modes. `capture` and `status` are deliberately narrower than
@@ -70,9 +72,6 @@ def is_allowed(mode: str, argv: list[str]) -> tuple[bool, str]:
     top = argv[0]
     pair = tuple(argv[:2]) if len(argv) >= 2 else None
 
-    if top in SINGLE_PRINCIPAL:
-        return False, (f"{top} is single-principal only and is never available "
-                       "through the dispatcher; run it on the vault host")
     if mode == "read" and pair in READ_ONLY_PAIRS:
         return True, ""
     if top not in MODES[mode]:
