@@ -40,6 +40,15 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     tags,
     tokenize = 'porter unicode61'
 );
+
+-- Each alias as its own lowercased row, for exact comparison (search.py's
+-- whole-title tier). The FTS title column has them too, but joined to the
+-- title, where an exact match cannot be told apart from a title word.
+CREATE TABLE IF NOT EXISTS note_aliases (
+    id TEXT,
+    alias TEXT
+);
+CREATE INDEX IF NOT EXISTS note_aliases_alias ON note_aliases (alias);
 """
 
 
@@ -183,7 +192,11 @@ def _upsert_note(conn: sqlite3.Connection, config: Config, path: Path) -> str | 
     # plus its `aliases`, so a search for an alias matches like a title
     # does (search.py's title tier included). `notes.title` stays the
     # title alone — that is what results display and order by.
-    names = " ".join([note.title, *(str(a) for a in note.list_field("aliases") if a)])
+    aliases = [str(a) for a in note.list_field("aliases") if a]
+    names = " ".join([note.title, *aliases])
+    conn.execute("DELETE FROM note_aliases WHERE id = ?", (note.id,))
+    conn.executemany("INSERT INTO note_aliases (id, alias) VALUES (?, ?)",
+                     [(note.id, a.lower()) for a in aliases])
     conn.execute("DELETE FROM notes_fts WHERE id = ?", (note.id,))
     conn.execute(
         "INSERT INTO notes_fts (id, title, body, tags) VALUES (?, ?, ?, ?)",

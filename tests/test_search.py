@@ -277,6 +277,94 @@ class TestWholeTitleTier(unittest.TestCase):
         self.assertNotIn("project-gizmo", ids)
 
 
+class TestRelaxedTiersDropTheCommonestTermFirst(unittest.TestCase):
+    """Live case: "How does the Brain backup work?" put a session-close
+    decision (title: "Brain", "workflow") first — the relaxed title tier
+    dropped "backup", the rarest and most telling word, before the others."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        self.vault.write_note(
+            "40_DECISIONS", "session.md", id="decision-session", type="decision",
+            title="Decision: Session-close workflow and Vault symmetry", body="Short.",
+        )
+        self.vault.write_note(
+            "40_DECISIONS", "backup.md", id="decision-backup", type="decision",
+            title="Decision: Vault backup freshness is watched by Kuma", body="Short.",
+        )
+        for i in range(8):
+            self.vault.write_note(
+                "60_KNOWLEDGE", f"k{i}.md", id=f"knowledge-{i}", type="knowledge",
+                title=f"Note {i}", body=f"The vault needs work, item {i}.",
+            )
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_rarest_term_is_kept_longest(self):
+        ids = [r.id for r in search.search(self.config, "How does the Vault backup work?", limit=8)]
+        self.assertEqual(ids[0], "decision-backup", ids)
+        self.assertLess(ids.index("decision-backup"), ids.index("decision-session"), ids)
+
+
+class TestWholeAliasTier(unittest.TestCase):
+    """Live case: "fcc status" put project-family-command-center third and
+    "Jaki jest status fcc?" not in the top three — the whole-title tier
+    compared titles only, and "fcc" is the project's alias."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        path = self.vault.root / "30_PROJECTS" / "ACTIVE" / "project-fcc.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        filler = " ".join(f"unrelated{i}" for i in range(1500))
+        path.write_text(
+            "---\nid: project-fcc\ntype: project\nstatus: active\n"
+            "aliases:\n- FCC\n---\n\n"
+            f"# Family Command Center\n\nThe project record. {filler}\n"
+        )
+        for i in range(6):
+            self.vault.write_note(
+                "40_DECISIONS", f"decision-{i}.md", id=f"decision-{i}", type="decision",
+                title=f"Decision {i}: FCC direction {i}", body=f"The status of part {i} is fine.",
+            )
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_alias_equal_to_a_term_puts_the_note_first(self):
+        for query in ("fcc status", "status fcc", "Jaki jest status fcc?"):
+            with self.subTest(query=query):
+                ids = [r.id for r in search.search(self.config, query, limit=8)]
+                self.assertEqual(ids[0], "project-fcc", ids)
+
+    def test_an_alias_word_inside_a_longer_title_is_not_promoted(self):
+        # "direction" is in every decision title, but no note has it as a
+        # whole alias, so the project does not jump ahead on its account.
+        ids = [r.id for r in search.search(self.config, "direction fine", limit=8)]
+        self.assertNotIn("project-fcc", ids[:1])
+
+    def test_index_without_the_alias_table_still_searches(self):
+        conn = indexer.connect(self.config)
+        conn.execute("DROP TABLE note_aliases")
+        conn.commit()
+        conn.close()
+        ids = [r.id for r in search.search(self.config, "fcc status", limit=8)]
+        self.assertIn("project-fcc", ids)
+
+    def test_reindexing_a_note_replaces_its_aliases(self):
+        path = self.vault.root / "30_PROJECTS" / "ACTIVE" / "project-fcc.md"
+        path.write_text(path.read_text().replace("- FCC", "- famcc"))
+        indexer.index_note(self.config, path)
+        conn = indexer.connect(self.config)
+        rows = conn.execute("SELECT alias FROM note_aliases WHERE id = 'project-fcc'").fetchall()
+        conn.close()
+        self.assertEqual([r["alias"] for r in rows], ["famcc"])
+
+
 class TestNaturalLanguageQuestions(unittest.TestCase):
     """Phase 5B regression: a full question ("Where did X finish?") must
     not fail just because most of its words are function words that don't
