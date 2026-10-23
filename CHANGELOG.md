@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.21.7 — A Polish title keeps its letters in the new note's id
+
+### Fixed
+
+- Ids made from a title (`remember`, `note create`, `decision create`,
+  `timeline add`, memory accept, principal and group ids) dropped every
+  non-ASCII letter and split the word there: "słownym" became `s-ownym`,
+  "dowodów" `dowod-w`. Accented letters now keep their base letter
+  (`slownym`, `dowodow`), including ones Unicode does not decompose
+  (ł, ø, đ, ß → ss, æ → ae). Letters with no Latin base still become a
+  separator. Only new ids change; existing notes keep the id in their
+  file. Server-side.
+
 ## 0.21.6 — A search that finds nothing is retried in other words
 
 ### Changed
