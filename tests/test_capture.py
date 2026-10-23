@@ -44,6 +44,21 @@ class TestCapture(unittest.TestCase):
         self.assertEqual(capture.slugify("Hello, World!"), "hello-world")
         self.assertEqual(capture.slugify("  spaced out  "), "spaced-out")
 
+    def test_slugify_keeps_accented_letters_as_their_base(self):
+        # A Polish decision title lost ł and ó whole: "słownym" → "s-ownym",
+        # "dowodów" → "dowod-w".
+        self.assertEqual(
+            capture.slugify("Zostaje przy wyszukiwaniu słownym, do czasu dowodów"),
+            "zostaje-przy-wyszukiwaniu-slownym-do-czasu-dowodow",
+        )
+        self.assertEqual(capture.slugify("Zażółć gęślą jaźń"), "zazolc-gesla-jazn")
+        self.assertEqual(capture.slugify("Straße Øresund Ærø"), "strasse-oresund-aero")
+        self.assertEqual(capture.slugify("Łódź ŁÓDŹ"), "lodz-lodz")
+
+    def test_slugify_without_a_latin_base_still_separates(self):
+        self.assertEqual(capture.slugify("TRON 東京 notes"), "tron-notes")
+        self.assertEqual(capture.slugify("東京"), "note")
+
 
 class TestCaptureSetsOwnership(unittest.TestCase):
     """Stage 2 (multi-user visibility): a new record defaults to private
