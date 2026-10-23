@@ -510,8 +510,10 @@ def tool_create_timeline_event(config: Config, title: str, valid_from: str,
 def tool_get_operational_state(config: Config, include_restricted: bool = False,
                                 timeline_window_days: int = 14) -> dict:
     """Deterministic, read-only operational-state snapshot: projects,
-    decisions, memory queue, handoffs, doctor, timeline, systemd timers,
-    and a reference to the last saved integrity manifest. No AI, no
+    decisions, memory queue, handoffs, backlog documents (tag `backlog`,
+    each with a `stale` flag against the newest handoff — read them by id
+    before saying what is open), doctor, timeline, systemd timers, and a
+    reference to the last saved integrity manifest. No AI, no
     network calls, never writes anything. Restricted content excluded
     unless include_restricted=true."""
     result = state_mod.get_operational_state(

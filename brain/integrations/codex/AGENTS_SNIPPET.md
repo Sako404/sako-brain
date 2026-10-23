@@ -31,7 +31,10 @@ When you report on Brain state (how many decisions are open, whether
 something is finished), pick the instrument deliberately:
 
 - `brain state` / `get_operational_state` — the deterministic, complete
-  operational snapshot. Start there.
+  operational snapshot. Start there. Its `backlog` section lists documents
+  tagged `backlog` (cross-project next actions); read each with `brain get` /
+  `read_memory` before saying what is open, and say so when one is `stale`
+  (last updated before the newest handoff).
 - `brain list` / `list_notes` — the complete listing **by metadata**
   (`type`/`status`/`project`/`tag`), read from canonical Markdown, not the
   search index. Check `complete` before quoting a number: it is false for

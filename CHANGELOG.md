@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.21.0 — `brain state` points at the backlog and says when it is stale
+
+### Added
+
+- `brain state` / `get_operational_state` has a `backlog` section: every
+  `document` tagged `backlog` with status `current` (id, title, path,
+  `updated`) and a `stale` flag, set when the document was last updated
+  before the newest handoff (`newest_handoff`). Found by tag, never by a
+  fixed id or path; content stays in the note, so the snapshot does not
+  grow with the document. Restricted backlog documents are filtered like
+  the other sections (`sensitivity_omitted["backlog"]`). Before this, a
+  cross-project next-actions list was invisible to "what's open": items
+  living only there never reached the snapshot.
+- `brain state` (text) lists the backlog documents and marks a stale one.
+- Agent guidance (`AGENTS.md` template, Codex snippet, `brain-recall`
+  skill, `docs/STATE_AUDIT_PROCEDURE.md`, the MCP tool description): read
+  every listed backlog document before reporting what is open, and report
+  a stale one. The server and the client both need this release.
+
 ## 0.20.4 — `/session-close` gets commits in remote-less repos off the machine
 
 ### Changed

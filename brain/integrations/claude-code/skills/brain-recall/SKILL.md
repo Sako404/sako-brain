@@ -35,7 +35,9 @@ noise.
    by metadata, which reports its own `total_visible` and `complete` — and
    `complete` is false for any page, the last one included, and false when
    a file claiming to be a note could not be read), or
-   `brain state` for the whole operational snapshot. A query like
+   `brain state` for the whole operational snapshot (for "what's open",
+   also read every document its `backlog` section lists, and flag one
+   marked `stale`). A query like
    `"status: proposed"` typed into `search` matches the *words*, so it
    returns decided records and misses proposed ones — this has produced a
    wrong state report before.
