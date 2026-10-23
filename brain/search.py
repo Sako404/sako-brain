@@ -54,6 +54,10 @@ def _or_expr(terms: list[str]) -> str:
     return " OR ".join(_escape_term(t) for t in terms)
 
 
+def _title_expr(terms: list[str]) -> str:
+    return f"title : ({_and_expr(terms)})"
+
+
 # Weights for bm25(), one per column IN TABLE-DECLARATION ORDER — this
 # includes `id`, even though it's UNINDEXED and never actually matches
 # text (SQLite still reserves a weight slot for it). Columns are:
@@ -106,6 +110,12 @@ _OVERFETCH = 4
 def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
     """Tiered query relaxation, strictest first:
 
+    0. Every content term in the title. bm25() normalizes by the length of
+       the whole row, title and body together, so TITLE_WEIGHT alone cannot
+       hold a long note up: a ~25 KB backlog titled "Cross-project next
+       actions" ranked 12th for "next actions" behind short notes that only
+       mention the words in their body. A note whose title carries the
+       whole query is the most precise hit there is, so it comes first.
     1. AND of every content term — most precise, right answer for a clean
        keyword query like "Family Command Center".
     2. AND with exactly one term dropped, tried once per term. Phase 5B
@@ -140,8 +150,10 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
                     seen.add(r["id"])
                     rows.append(r)
 
-        if len(terms) > 1:
-            _add(_run_match(conn, _and_expr(terms), fetch_limit))
+        _add(_run_match(conn, _title_expr(terms), fetch_limit))
+
+        if len(rows) < fetch_limit and len(terms) > 1:
+            _add(_run_match(conn, _and_expr(terms), fetch_limit - len(rows)))
 
         if len(rows) < fetch_limit and len(terms) > 2:
             for i in range(len(terms)):

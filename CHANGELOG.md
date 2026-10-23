@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.21.1 — Search puts a note whose title has every query word first
+
+### Fixed
+
+- `brain search` / `search_memory` has a new first tier: notes whose
+  title contains every content term of the query. FTS5's `bm25()`
+  normalizes by the length of the whole row, title and body together, so
+  the title weight could not hold up a long note: a ~25 KB backlog titled
+  "Cross-project next actions" ranked 12th for "next actions", behind
+  short handoffs that only had the words in a heading, and fell outside
+  a limit of 8. Ordering after the title tier is unchanged. Server-side
+  fix; the client does not need it.
+
 ## 0.21.0 — `brain state` points at the backlog and says when it is stale
 
 ### Added
