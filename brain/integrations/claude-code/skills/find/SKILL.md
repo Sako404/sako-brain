@@ -18,6 +18,11 @@ context, see `brain-recall` instead — you shouldn't need the user to type
 4. Summarize findings for the user with file paths (`path:line` not needed
    for whole-note references — just the relative path is enough) so they can
    open the note directly.
-5. If nothing is found, say so plainly rather than guessing — don't
+5. Search matches words, not meaning, and notes are written in more than
+   one language. Before reporting that nothing was found, retry in the
+   other language the notes use (Polish for an English query, English for
+   a Polish one), with the base form of an inflected word ("dysk" for
+   "dysku"), and with synonyms or the technical term.
+6. If nothing is found, say so plainly rather than guessing — don't
    fabricate an answer from general knowledge when the user is asking about
    *their* Brain contents.

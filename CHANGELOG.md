@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.21.6 — A search that finds nothing is retried in other words
+
+### Changed
+
+- `brain-recall` and `find` skills: when a search finds nothing relevant,
+  retry in the notes' other language, with the base form of an inflected
+  word ("dysk" for "dysku") and with synonyms or the technical term,
+  before saying the Brain has nothing. `brain search` matches words, not
+  meaning, and its stemmer handles English only, so a Polish question or
+  a paraphrase could miss a note that is there. Client-side: re-run
+  `brain integration install claude-code` after upgrading.
+
 ## 0.21.5 — A two-word question finds the note named by one of its words
 
 ### Fixed
