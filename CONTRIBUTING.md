@@ -102,6 +102,39 @@ worse remedy than the exposure itself). The second is recorded in
 `CHANGELOG.md`; both are recorded in full in the project's private decision
 log.
 
+### Building the release artefacts
+
+A release that changes the package bumps the version in the same PR:
+`brain/__init__.py` (the only place it is written), the version strings in
+`README.md` and the packaging tests, and a `CHANGELOG.md` entry. Once the PR
+is merged, build from the merge commit, never from a working tree:
+
+```sh
+git archive <merge-commit> | tar -x -C <empty-dir>
+cd <empty-dir>
+python -I -m build --outdir <dist-dir> .
+```
+
+This needs the `build` package (`pip install build`, or your distribution's
+`python-build`). A plain export is used because setuptools leaves a `build/`
+directory in the tree and does not remove files from it, so a module deleted
+since the last local build can still end up in a wheel built in place.
+`-I` keeps the current directory off `sys.path`.
+
+Before publishing, check that the wheel holds exactly the tracked package
+files, and record the checksums:
+
+```bash
+diff <(unzip -Z1 <dist-dir>/sako_brain-<version>-py3-none-any.whl | grep '^brain/' | sort) \
+     <(git ls-files brain | sort)
+sha256sum <dist-dir>/*.whl <dist-dir>/*.tar.gz
+```
+
+The GitHub release is tagged `v<version>` on the merge commit, titled
+`v<version> — <changelog heading>`, carries the wheel and the sdist, and its
+notes are that version's `CHANGELOG.md` section followed by a
+`### Checksums (SHA-256)` block and a pointer to `CHANGELOG.md`.
+
 ## Pull requests
 
 - One change per PR, with a message explaining *why*, not only what.
