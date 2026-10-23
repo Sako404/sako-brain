@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.21.4 — A question finds its subject, not its incidental words
+
+### Fixed
+
+- `brain search` / `search_memory`: for a query of three or more terms,
+  a new tier after the title tier takes notes whose title holds every
+  term but one (tried once per term, shortest title first), before the
+  content tiers. Live, "Where did Family Command Center finish?" put a
+  RomM handoff first: no title holds "finish", so the content tier ranked
+  long notes mentioning the project in one place and "finish" in another
+  above the project record. Now the project record is first. Two-term
+  queries are not relaxed this way (one title word is too loose: "next"
+  matches "Nextcloud"). Checked read-only against the live index.
+  Server-side.
+
 ## 0.21.3 — Search finds a note by its aliases
 
 ### Fixed

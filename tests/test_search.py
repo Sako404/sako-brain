@@ -183,6 +183,51 @@ class TestAliases(unittest.TestCase):
         self.assertEqual(ids[0], "event-3", ids)
 
 
+class TestRelaxedTitleTier(unittest.TestCase):
+    """Live case: "Where did Family Command Center finish?" put a RomM
+    handoff first — a long note mentioning the project in one place and
+    "finish" in another matched every term, while no title holds "finish"
+    and the project record came after all such notes."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        filler = " ".join(f"unrelated{i}" for i in range(1500))
+        self.vault.write_note(
+            "30_PROJECTS/ACTIVE", "project-wcc.md", id="project-wcc", type="project",
+            title="Widget Command Center", body=f"The project record. {filler}",
+        )
+        for i in range(6):
+            self.vault.write_note(
+                "30_PROJECTS/ACTIVE", f"handoff-other-{i}.md", id=f"handoff-other-{i}",
+                type="document", title=f"Handoff — Other {i}",
+                body=f"We finish the scan today. Unlike the Widget Command Center, this one {i}.",
+            )
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_question_puts_the_subject_first(self):
+        ids = [r.id for r in search.search(self.config, "Where did Widget Command Center finish?", limit=8)]
+        self.assertEqual(ids[0], "project-wcc", ids)
+
+    def test_two_terms_are_not_relaxed_to_one_title_word(self):
+        # "Gadget finish": a note titled just "Gadget" without "finish"
+        # anywhere must not jump above a note that holds both words.
+        self.vault.write_note(
+            "60_KNOWLEDGE", "gadget.md", id="knowledge-gadget", type="knowledge",
+            title="Gadget", body="Nothing else here.",
+        )
+        self.vault.write_note(
+            "60_KNOWLEDGE", "k.md", id="knowledge-both", type="knowledge",
+            title="Notes", body="The gadget team will finish late.",
+        )
+        indexer.rebuild(self.config)
+        ids = [r.id for r in search.search(self.config, "Gadget finish", limit=20)]
+        self.assertLess(ids.index("knowledge-both"), ids.index("knowledge-gadget"), ids)
+
+
 class TestNaturalLanguageQuestions(unittest.TestCase):
     """Phase 5B regression: a full question ("Where did X finish?") must
     not fail just because most of its words are function words that don't
