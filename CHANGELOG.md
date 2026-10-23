@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.21.2 — Among title matches, the shortest title comes first
+
+### Fixed
+
+- The title tier added in 0.21.1 ordered its hits by `bm25()`, which has
+  the same whole-row length penalty, and prefix matching lets `next`
+  match "Nextcloud": live, "next actions" put the backlog 4th behind
+  three short Nextcloud notes. The title tier now orders by title length
+  first (the shortest title holding every term is the note most about
+  the query), then `bm25()`. Checked read-only against the live index:
+  "next actions", "Family Command Center", "TRON", "Smoke and Steel" and
+  "Vaultwarden" now each put the note named that way first. Server-side.
+
 ## 0.21.1 — Search puts a note whose title has every query word first
 
 ### Fixed

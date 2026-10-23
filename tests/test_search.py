@@ -118,6 +118,20 @@ class TestTitleTier(unittest.TestCase):
         ids = [r.id for r in search.search(self.config, "next actions", limit=20)]
         self.assertEqual(sorted(ids[1:]), sorted(f"handoff-{i}" for i in range(12)))
 
+    def test_shortest_title_wins_among_title_matches(self):
+        # Live case: "next"* also matches "Nextcloud", and these short notes
+        # beat the long backlog on bm25() inside the title tier.
+        for i in range(3):
+            self.vault.write_note(
+                "50_TIMELINE", f"event-{i}.md", id=f"event-{i}", type="event",
+                title=f"Nextcloud domain migration {i}: partial execution, two human actions blocking",
+                body="Short.",
+            )
+        indexer.rebuild(self.config)
+        ids = [r.id for r in search.search(self.config, "next actions", limit=8)]
+        self.assertEqual(ids[0], "document-target", ids)
+        self.assertEqual(sorted(ids[1:4]), ["event-0", "event-1", "event-2"])
+
     def test_partial_title_match_does_not_jump_the_queue(self):
         # "next" is in the title but "logical" is not: no title-tier hit,
         # so ordering falls back to the content tiers.
