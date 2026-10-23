@@ -438,5 +438,86 @@ class TestOperationalStateAdminGate(unittest.TestCase):
         self.assertIn("state", result.sources)
 
 
+class TestOperationalStateBacklog(unittest.TestCase):
+    """The success test from the task record: an open item living only in a
+    backlog document must be reachable from `brain state` without the agent
+    knowing which file to read — so the document is surfaced by tag, with a
+    freshness flag against the newest handoff."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def _backlog(self, updated="2026-10-20", **kw):
+        kw.setdefault("status", "current")
+        kw.setdefault("type", "document")
+        self.vault.write_note("30_PROJECTS", "_next-actions.md", id="document-next-actions",
+                               updated=updated, tags=["backlog", "next-actions"],
+                               title="Cross-project next actions", **kw)
+
+    def _handoff(self, project, updated):
+        self.vault.write_note("30_PROJECTS/ACTIVE", f"project-{project}-handoff.md",
+                               id=f"handoff-project-{project}", type="document",
+                               status="current", updated=updated, tags=["handoff"])
+
+    def test_backlog_document_surfaced_by_tag(self):
+        self._backlog()
+        indexer.rebuild(self.config)
+        result = state.get_operational_state(self.config)
+        self.assertTrue(result.sources["backlog"].ok)
+        self.assertEqual(len(result.backlog.entries), 1)
+        entry = result.backlog.entries[0]
+        self.assertEqual(entry["id"], "document-next-actions")
+        self.assertEqual(entry["updated"], "2026-10-20")
+        self.assertTrue(entry["path"].endswith("_next-actions.md"))
+        self.assertFalse(entry["stale"])  # no handoff to compare with
+
+    def test_stale_when_older_than_newest_handoff(self):
+        self._backlog(updated="2026-10-14")
+        self._handoff("alpha", "2026-10-10")
+        self._handoff("beta", "2026-10-21")
+        indexer.rebuild(self.config)
+        result = state.get_operational_state(self.config)
+        self.assertEqual(result.backlog.newest_handoff, "2026-10-21")
+        self.assertTrue(result.backlog.entries[0]["stale"])
+
+    def test_not_stale_when_updated_with_newest_handoff(self):
+        self._backlog(updated="2026-10-21")
+        self._handoff("beta", "2026-10-21")
+        indexer.rebuild(self.config)
+        result = state.get_operational_state(self.config)
+        self.assertFalse(result.backlog.entries[0]["stale"])
+
+    def test_tag_match_is_exact_not_substring(self):
+        self.vault.write_note("10_KNOWLEDGE", "k.md", id="knowledge-x", type="document",
+                               status="current", tags=["backlog-ideas"])
+        indexer.rebuild(self.config)
+        result = state.get_operational_state(self.config)
+        self.assertEqual(result.backlog.entries, [])
+
+    def test_archived_backlog_not_surfaced(self):
+        self._backlog(status="archived")
+        indexer.rebuild(self.config)
+        result = state.get_operational_state(self.config)
+        self.assertEqual(result.backlog.entries, [])
+
+    def test_restricted_backlog_omitted_by_default(self):
+        path = self.vault.root / "30_PROJECTS" / "_next-actions.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "---\nid: document-next-actions\ntype: document\nstatus: current\n"
+            "updated: 2026-10-20\ntags: [backlog]\nsensitivity: restricted\n---\n\n# Backlog\n"
+        )
+        indexer.rebuild(self.config)
+        result = state.get_operational_state(self.config)
+        self.assertEqual(result.backlog.entries, [])
+        self.assertEqual(result.sensitivity_omitted["backlog"], 1)
+        result = state.get_operational_state(self.config, include_restricted=True)
+        self.assertEqual(len(result.backlog.entries), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

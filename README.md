@@ -20,7 +20,7 @@ so the vault stays Markdown and configuration, and nothing else.
 
 It works from a plain text editor with no AI, no account and no network.
 
-**Current release: 0.20.4.** Pre-1.0 means the command line and configuration
+**Current release: 0.21.0.** Pre-1.0 means the command line and configuration
 format may still change; your notes will not — they are text.
 
 ## Why it exists
@@ -87,7 +87,7 @@ Sako Brain is **not on PyPI**. Install the wheel from the
 [latest release](https://github.com/Sako404/sako-brain/releases/latest):
 
 ```sh
-pipx install ./sako_brain-0.20.4-py3-none-any.whl
+pipx install ./sako_brain-0.21.0-py3-none-any.whl
 ```
 
 Each release lists the SHA-256 of its artefacts, so you can check what you
@@ -199,7 +199,8 @@ for dated events, `brain handoff` for session notes, `brain agents-doc` to
 regenerate `AGENTS.md`, `brain context --json` for feeding an agent one
 question's worth of context, and `brain state --json` for a deterministic,
 read-only snapshot of the whole vault's operational state (projects,
-decisions, memory queue, handoffs, doctor, recent timeline, systemd timers) —
+decisions, memory queue, handoffs, `backlog`-tagged next-action documents
+with a staleness flag, doctor, recent timeline, systemd timers) —
 built for a script or a scheduled summary to consume, not for asking a
 question. `brain update <id> --set key=value --append-text "..."` sets
 frontmatter fields and/or appends a dated note to an existing note by id,

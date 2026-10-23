@@ -81,6 +81,19 @@ class TestStateCommand(unittest.TestCase):
         payload = json.loads(out)
         self.assertIn("decision-restricted", [d["id"] for d in payload["decisions"]["open"]])
 
+    def test_human_readable_output_names_a_stale_backlog(self):
+        self.vault.write_note("30_PROJECTS", "_next-actions.md", id="document-next-actions",
+                               type="document", status="current", updated="2026-10-14",
+                               tags=["backlog"])
+        self.vault.write_note("30_PROJECTS/ACTIVE", "project-alpha-handoff.md",
+                               id="handoff-project-alpha", type="document", status="current",
+                               updated="2026-10-21", tags=["handoff"])
+        indexer.rebuild(self.config)
+        rc, out = run_cli(["state"], self.vault)
+        self.assertEqual(rc, 0)
+        self.assertIn("document-next-actions  updated 2026-10-14 — STALE", out)
+        self.assertIn("(2026-10-21)", out)
+
     def test_timeline_days_flag_is_wired_through(self):
         rc, out = run_cli(["state", "--json", "--timeline-days", "3"], self.vault)
         payload = json.loads(out)

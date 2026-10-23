@@ -926,6 +926,12 @@ def cmd_state(config: Config, args) -> int:
 
     print(f"\nMemory queue pending: {result.memory_queue.pending_count}")
     print(f"Projects with handoffs: {len(result.handoffs.project_ids)}")
+    if result.backlog.entries:
+        print("Backlog (read before reporting what's open):")
+        for b in result.backlog.entries:
+            stale = (f" — STALE, older than the newest handoff ({result.backlog.newest_handoff})"
+                     if b["stale"] else "")
+            print(f"  {b['id']}  updated {b['updated'] or '?'}{stale}")
     print(f"Doctor problems: {result.doctor.problem_count} ({result.doctor.blocking_count} blocking)")
     print(f"Timeline (last {result.timeline_recent.window_days}d): {len(result.timeline_recent.entries)} entries")
     for e in result.timeline_recent.entries:

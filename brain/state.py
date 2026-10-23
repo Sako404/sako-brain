@@ -34,7 +34,7 @@ from datetime import date, datetime, timedelta
 from . import __version__
 from . import gitops
 from . import validate
-from .handoff import list_projects_with_handoffs
+from .handoff import HANDOFF_TAG, list_projects_with_handoffs
 from .indexer import connect
 from .memoryqueue import PendingEntry, list_pending
 from .paths import Config
@@ -82,6 +82,17 @@ class HandoffsSection:
 
 
 @dataclass
+class BacklogSection:
+    # Documents tagged `backlog` (status current): the cross-project lists an
+    # agent reads at session start. Only where they are and how fresh — the
+    # content stays in the note, read it by id. `stale` means the document was
+    # last updated before the newest handoff, i.e. a session recorded state
+    # in a handoff without re-sorting the backlog.
+    newest_handoff: str = ""
+    entries: list = field(default_factory=list)  # list[dict]: id/title/path/updated/stale
+
+
+@dataclass
 class DoctorSection:
     problem_count: int = 0
     blocking_count: int = 0
@@ -119,6 +130,7 @@ class OperationalState:
     decisions: DecisionsSection
     memory_queue: MemoryQueueSection
     handoffs: HandoffsSection
+    backlog: BacklogSection
     doctor: DoctorSection
     timeline_recent: TimelineSection
     systemd: SystemdSection
@@ -190,6 +202,54 @@ def _collect_handoffs(config: Config) -> HandoffsSection:
     metadata here would be exactly the new business logic this module must
     not introduce."""
     return HandoffsSection(project_ids=list_projects_with_handoffs(config))
+
+
+def _parse_date(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _collect_backlog(config: Config, include_restricted: bool) -> tuple[BacklogSection, int]:
+    """Backlog documents are found by tag, never by a fixed id or path, and
+    compared with the newest handoff by frontmatter dates only — the same
+    deterministic comparison `brain doctor` makes for a project's Current
+    state against its handoff. Restricted handoffs still count towards the
+    newest date: only a date leaves the index, never their content."""
+    if not config.db_path.exists():
+        return BacklogSection(), 0
+    conn = connect(config)
+    try:
+        rows = conn.execute(
+            "SELECT id, type, status, title, path, updated, sensitivity, tags FROM notes "
+            "WHERE ',' || tags || ',' LIKE '%,backlog,%' OR ',' || tags || ',' LIKE '%,' || ? || ',%' "
+            "ORDER BY id", (HANDOFF_TAG,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    handoff_dates = [d for row in rows if HANDOFF_TAG in (row["tags"] or "").split(",")
+                     if (d := _parse_date(row["updated"])) is not None]
+    newest_handoff = max(handoff_dates) if handoff_dates else None
+
+    section = BacklogSection(newest_handoff=newest_handoff.isoformat() if newest_handoff else "")
+    omitted = 0
+    for row in rows:
+        if "backlog" not in (row["tags"] or "").split(","):
+            continue
+        if row["type"] != "document" or row["status"] != "current":
+            continue
+        if (row["sensitivity"] or "normal") == "restricted" and not include_restricted:
+            omitted += 1
+            continue
+        updated = _parse_date(row["updated"])
+        section.entries.append({
+            "id": row["id"], "title": row["title"], "path": row["path"],
+            "updated": row["updated"] or "",
+            "stale": bool(newest_handoff and (updated is None or updated < newest_handoff)),
+        })
+    return section, omitted
 
 
 def _collect_doctor(config: Config) -> DoctorSection:
@@ -299,6 +359,7 @@ def get_operational_state(config: Config, *, include_restricted: bool = False,
     sources: dict[str, SourceStatus] = {}
     sensitivity_omitted: dict[str, int | None] = {
         "decisions": None, "memory_queue": None, "timeline_recent": None,
+        "backlog": None,
     }
 
     if not is_admin_principal(config, principal_id):
@@ -311,6 +372,7 @@ def get_operational_state(config: Config, *, include_restricted: bool = False,
             brain_version=__version__, vault_root=str(config.brain_root), sources=sources,
             projects=ProjectsSection(), decisions=DecisionsSection(),
             memory_queue=MemoryQueueSection(), handoffs=HandoffsSection(),
+            backlog=BacklogSection(),
             doctor=DoctorSection(), timeline_recent=TimelineSection(window_days=timeline_window_days),
             systemd=SystemdSection(), integrity_ref=IntegrityRefSection(),
             sensitivity_omitted=sensitivity_omitted,
@@ -344,6 +406,13 @@ def get_operational_state(config: Config, *, include_restricted: bool = False,
     except Exception as exc:  # noqa: BLE001
         handoffs = HandoffsSection()
         sources["handoffs"] = SourceStatus(ok=False, error=str(exc))
+
+    try:
+        backlog, sensitivity_omitted["backlog"] = _collect_backlog(config, include_restricted)
+        sources["backlog"] = SourceStatus(ok=True)
+    except Exception as exc:  # noqa: BLE001
+        backlog = BacklogSection()
+        sources["backlog"] = SourceStatus(ok=False, error=str(exc))
 
     try:
         doctor = _collect_doctor(config)
@@ -385,6 +454,7 @@ def get_operational_state(config: Config, *, include_restricted: bool = False,
         decisions=decisions,
         memory_queue=memory_queue,
         handoffs=handoffs,
+        backlog=backlog,
         doctor=doctor,
         timeline_recent=timeline_recent,
         systemd=systemd,

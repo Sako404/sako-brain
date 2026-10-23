@@ -14,6 +14,13 @@ index-derived sections; a successful response does not prove the index is
 fresh or that every canonical record was discovered. Do not use its counts
 as a substitute for the metadata listing below.
 
+Its `backlog` section lists the documents tagged `backlog` (status
+`current`) — cross-project next-action lists whose items exist nowhere else
+in the snapshot. Read each one before reporting what is open. `stale: true`
+means it was last updated before the newest handoff (`newest_handoff`), so
+a later session may have changed state without re-sorting it: report that,
+and check the newer handoffs for what it misses.
+
 ### Step 2 — Enumerate by metadata
 
 For an exhaustive question, use:

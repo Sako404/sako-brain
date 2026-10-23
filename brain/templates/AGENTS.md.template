@@ -167,7 +167,10 @@ project's status is, whether something is finished — use the right instrument
 and name it:
 
 - `brain state --json` is the deterministic, complete operational snapshot.
-  Start there.
+  Start there. Its `backlog` section lists documents tagged `backlog`
+  (cross-project next actions); read each with `brain get` before saying what
+  is open, and say so when one is `stale` (last updated before the newest
+  handoff).
 - `brain list --type <t> --status <s>` is the complete listing **by
   metadata**, read from canonical Markdown rather than the search index.
   Check `complete` before quoting a number: it is false for any page (the
