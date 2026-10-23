@@ -213,11 +213,13 @@ class TestRelaxedTitleTier(unittest.TestCase):
         self.assertEqual(ids[0], "project-wcc", ids)
 
     def test_two_terms_are_not_relaxed_to_one_title_word(self):
-        # "Gadget finish": a note titled just "Gadget" without "finish"
-        # anywhere must not jump above a note that holds both words.
+        # "Gadget finish": a note with "Gadget" inside a longer title and no
+        # "finish" anywhere must not jump above a note that holds both
+        # words. (A note whose whole title is "Gadget" may — that is the
+        # whole-title tier, see TestWholeTitleTier.)
         self.vault.write_note(
             "60_KNOWLEDGE", "gadget.md", id="knowledge-gadget", type="knowledge",
-            title="Gadget", body="Nothing else here.",
+            title="Gadget supply notes", body="Nothing else here.",
         )
         self.vault.write_note(
             "60_KNOWLEDGE", "k.md", id="knowledge-both", type="knowledge",
@@ -226,6 +228,53 @@ class TestRelaxedTitleTier(unittest.TestCase):
         indexer.rebuild(self.config)
         ids = [r.id for r in search.search(self.config, "Gadget finish", limit=20)]
         self.assertLess(ids.index("knowledge-both"), ids.index("knowledge-gadget"), ids)
+
+
+class TestWholeTitleTier(unittest.TestCase):
+    """Live case: "What is the status of TRON?" (status, TRON) did not put
+    project-tron — titled just "TRON" — first; long decisions with both
+    words in the body won."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        filler = " ".join(f"unrelated{i}" for i in range(1500))
+        self.vault.write_note(
+            "30_PROJECTS/ACTIVE", "project-gizmo.md", id="project-gizmo", type="project",
+            title="GIZMO", body=f"The project record. {filler}",
+        )
+        for i in range(6):
+            self.vault.write_note(
+                "40_DECISIONS", f"decision-{i}.md", id=f"decision-{i}", type="decision",
+                title=f"Decision {i}: GIZMO stage {i}", body=f"The status of stage {i} is fine.",
+            )
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_two_term_question_puts_the_subject_first(self):
+        ids = [r.id for r in search.search(self.config, "What is the status of GIZMO?", limit=8)]
+        self.assertEqual(ids[0], "project-gizmo", ids)
+
+    def test_works_without_an_english_word_list(self):
+        ids = [r.id for r in search.search(self.config, "Jaki jest status GIZMO?", limit=8)]
+        self.assertEqual(ids[0], "project-gizmo", ids)
+
+    def test_title_holding_both_terms_still_comes_first(self):
+        self.vault.write_note(
+            "40_DECISIONS", "outage.md", id="decision-outage", type="decision",
+            title="GIZMO outage", body="Short.",
+        )
+        indexer.rebuild(self.config)
+        ids = [r.id for r in search.search(self.config, "GIZMO outage", limit=8)]
+        self.assertEqual(ids[:2], ["decision-outage", "project-gizmo"], ids)
+
+    def test_a_word_inside_a_longer_title_is_not_a_whole_title(self):
+        # "stage" is in every decision title but is no decision's whole
+        # title, so nothing is promoted on its account.
+        ids = [r.id for r in search.search(self.config, "stage fine", limit=8)]
+        self.assertNotIn("project-gizmo", ids)
 
 
 class TestNaturalLanguageQuestions(unittest.TestCase):

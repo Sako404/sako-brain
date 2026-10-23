@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.21.5 — A two-word question finds the note named by one of its words
+
+### Fixed
+
+- `brain search` / `search_memory`: with two or more terms, a note whose
+  whole title is one of the terms (case-insensitive) now comes right
+  after the title tiers, before the content tiers. Live, "What is the
+  status of TRON?" (status, TRON) and "What did we decide about
+  Vaultwarden?" did not put the notes titled "TRON" and "Vaultwarden"
+  first; now they do, and "Jaki jest status TRON?" too — no word list,
+  so it does not depend on the question's language. A word inside a
+  longer title still does not count ("next" does not promote
+  "Nextcloud ..."). Checked read-only against the live index; 10 notes
+  there have a one-word title. Server-side.
+
 ## 0.21.4 — A question finds its subject, not its incidental words
 
 ### Fixed
