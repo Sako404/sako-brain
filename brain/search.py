@@ -123,6 +123,13 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
        mention the words in their body. A note whose title carries the
        whole query is the most precise hit there is, so it comes first,
        shortest title first.
+    0b. With three or more terms: every term but one in the title, tried
+       once per term, shortest title first. A question carries words that
+       are not its subject: for "Where did Family Command Center finish?"
+       no title holds "finish", and tier 1 then ranked long notes that
+       mention the project somewhere and "finish" somewhere else (a RomM
+       handoff first) above the project record. Not for two terms: one
+       term left in a title is too loose ("next" matches "Nextcloud").
     1. AND of every content term — most precise, right answer for a clean
        keyword query like "Family Command Center".
     2. AND with exactly one term dropped, tried once per term. Phase 5B
@@ -158,6 +165,14 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
                     rows.append(r)
 
         _add(_run_match(conn, _title_expr(terms), fetch_limit, shortest_title_first=True))
+
+        if len(terms) > 2:
+            for i in range(len(terms)):
+                if len(rows) >= fetch_limit:
+                    break
+                relaxed = terms[:i] + terms[i + 1:]
+                _add(_run_match(conn, _title_expr(relaxed), fetch_limit - len(rows),
+                                shortest_title_first=True))
 
         if len(rows) < fetch_limit and len(terms) > 1:
             _add(_run_match(conn, _and_expr(terms), fetch_limit - len(rows)))
