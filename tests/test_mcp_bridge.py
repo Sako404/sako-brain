@@ -124,11 +124,7 @@ class TestToolsListAdvertisedMatchesExecutable(unittest.TestCase):
         caps = {
             "interfaces": {"mcp": {"tools": [
                 {"name": "search_memory", "description": "d", "input_schema": {}},
-                # queue_memory is deliberately, permanently unsupported here —
-                # the dispatcher's security boundary doesn't allow `brain
-                # memory` at all (see decision record), not merely "not yet
-                # wired up" — so it's a stable fixture for "no translator".
-                {"name": "queue_memory", "description": "d", "input_schema": {}},
+                {"name": "some_tool_with_no_translator", "description": "d", "input_schema": {}},
             ]}}
         }
         with patch.object(mcp_bridge, "_run_brain", return_value=_completed(stdout=json.dumps(caps))):
@@ -152,10 +148,10 @@ class TestToolsListAdvertisedMatchesExecutable(unittest.TestCase):
         self.assertTrue(advertised.issubset(mcp_bridge.TRANSLATORS.keys()))
         self.assertEqual(advertised, set(mcp_bridge.TRANSLATORS.keys()))
 
-    # Deliberately, permanently unsupported over this bridge — see
-    # mcp_bridge.py's own module docstring (the dispatcher's security
-    # boundary doesn't allow `brain memory` at all, not an oversight).
-    DELIBERATELY_UNBRIDGED_TOOLS = {"queue_memory"}
+    # Tools mcp_server.TOOLS has that this bridge deliberately does not
+    # translate, each with its reason. Empty since v0.22.0, when the
+    # pending-memory queue gained ownership and became bridgeable.
+    DELIBERATELY_UNBRIDGED_TOOLS: set[str] = set()
 
     def test_translators_has_no_gap_against_the_real_tool_source(self):
         """Pre-onboarding hardening (2026-10-02): the test above only proves
@@ -216,6 +212,10 @@ class TestTranslatorsPreferJsonOverTextParsing(unittest.TestCase):
         "close_project": {"id": "x"},
         "update_project_section": {"id": "x", "section": "s", "mode": "append", "content": "c"},
         "create_timeline_event": {"title": "t", "valid_from": "2026-01-01"},
+        "queue_memory": {"candidate_fact": "x"},
+        "list_queued_memory": {},
+        "accept_queued_memory": {"id": "mem-x"},
+        "reject_queued_memory": {"id": "mem-x"},
     }
 
     def test_every_non_exempt_translator_argv_includes_json(self):
@@ -248,6 +248,39 @@ class TestTranslators(unittest.TestCase):
     def test_get_context_default_no_restricted_flag(self):
         argv, _ = mcp_bridge._t_get_context({"query": "widget"})
         self.assertNotIn("--restricted", argv)
+
+    def test_queue_memory_argv(self):
+        argv, _ = mcp_bridge._t_queue_memory({
+            "candidate_fact": "Alex sold the car", "entities": ["person-alex"],
+            "proposed_type": "fact", "audience": ["group:household"], "source": "chat",
+        })
+        self.assertEqual(argv[:5], ["memory", "add", "--fact", "Alex sold the car", "--json"])
+        self.assertEqual(argv[argv.index("--entities") + 1], "person-alex")
+        self.assertEqual(argv[argv.index("--type") + 1], "fact")
+        self.assertEqual(argv[argv.index("--audience") + 1], "group:household")
+        self.assertEqual(argv[argv.index("--source") + 1], "chat")
+        self.assertNotIn("--confirm-restricted", argv)
+
+    def test_queue_memory_defaults_source_to_client_name(self):
+        mcp_bridge._CURRENT_CLIENT = "claude-ai"
+        try:
+            argv, _ = mcp_bridge._t_queue_memory({"candidate_fact": "x"})
+        finally:
+            mcp_bridge._CURRENT_CLIENT = "unknown"
+        self.assertEqual(argv[argv.index("--source") + 1], "mcp-bridge:claude-ai")
+
+    def test_list_queued_memory_argv(self):
+        self.assertEqual(mcp_bridge._t_list_queued_memory({})[0], ["memory", "pending", "--json"])
+        self.assertEqual(
+            mcp_bridge._t_list_queued_memory({"include_resolved": True, "include_restricted": True})[0],
+            ["memory", "review", "--json", "--include-restricted"])
+
+    def test_accept_and_reject_queued_memory_argv(self):
+        self.assertEqual(
+            mcp_bridge._t_accept_queued_memory({"id": "mem-1", "title": "T", "confirm_restricted": True})[0],
+            ["memory", "accept", "mem-1", "--json", "--title", "T", "--confirm-restricted"])
+        self.assertEqual(mcp_bridge._t_reject_queued_memory({"id": "mem-1", "note": "wrong"})[0],
+                         ["memory", "reject", "mem-1", "--json", "--note", "wrong"])
 
     def test_remember_defaults_source_to_client_name(self):
         mcp_bridge._CURRENT_CLIENT = "codex"
@@ -486,7 +519,7 @@ class TestProjectContext(unittest.TestCase):
 class TestExecuteTool(unittest.TestCase):
     def test_unsupported_tool_raises_clear_error(self):
         with self.assertRaises(mcp_bridge.BridgeError) as ctx:
-            mcp_bridge._execute_tool("queue_memory", {})
+            mcp_bridge._execute_tool("some_tool_with_no_translator", {})
         self.assertIn("not yet supported", str(ctx.exception))
 
     def test_nonzero_exit_raises_with_stderr(self):
@@ -703,6 +736,43 @@ class TestBridgeCannotBypassSharedWritePolicy(unittest.TestCase):
         with self.assertRaises(mcp_bridge.BridgeError) as ctx:
             mcp_bridge._execute_tool("remember", arguments)
         self.assertIn("confirm_restricted", str(ctx.exception))
+
+    def test_memory_queue_round_trip_through_the_real_cli(self):
+        queued = mcp_bridge._execute_tool("queue_memory", {"candidate_fact": "Alex sold the old car"})
+        self.assertEqual(queued["status"], "pending")
+        listed = mcp_bridge._execute_tool("list_queued_memory", {})
+        self.assertEqual([e["id"] for e in listed["entries"]], [queued["queued_id"]])
+        self.assertEqual(listed["entries"][0]["owner_principal"], "principal:marcin")
+        accepted = mcp_bridge._execute_tool("accept_queued_memory", {"id": queued["queued_id"]})
+        self.assertEqual(accepted["status"], "accepted")
+        self.assertTrue(accepted["written_to"].startswith("00_INBOX/"))
+        self.assertEqual(mcp_bridge._execute_tool("list_queued_memory", {})["entries"], [])
+
+    def test_accept_with_secret_title_is_refused_through_the_real_cli(self):
+        queued = mcp_bridge._execute_tool("queue_memory", {"candidate_fact": "ordinary"})
+        with self.assertRaises(mcp_bridge.BridgeError):
+            mcp_bridge._execute_tool("accept_queued_memory", {
+                "id": queued["queued_id"], "title": f"api key: {self.SECRET}"})
+        self.assertEqual(len(mcp_bridge._execute_tool("list_queued_memory", {})["entries"]), 1)
+
+    def test_queue_memory_with_secret_is_refused_through_the_real_cli(self):
+        with self.assertRaises(mcp_bridge.BridgeError) as ctx:
+            mcp_bridge._execute_tool("queue_memory", {"candidate_fact": f"api key: {self.SECRET}"})
+        self.assertNotIn(self.SECRET, str(ctx.exception))
+
+    def test_restricted_queue_and_accept_need_confirmation_through_the_real_cli(self):
+        with self.assertRaises(mcp_bridge.BridgeError) as ctx:
+            mcp_bridge._execute_tool("queue_memory", {"candidate_fact": "x", "sensitivity": "restricted"})
+        self.assertIn("confirm_restricted", str(ctx.exception))
+        queued = mcp_bridge._execute_tool("queue_memory", {
+            "candidate_fact": "x", "sensitivity": "restricted", "confirm_restricted": True})
+        self.assertEqual(mcp_bridge._execute_tool("list_queued_memory", {})["restricted_omitted"], 1)
+        with self.assertRaises(mcp_bridge.BridgeError) as ctx:
+            mcp_bridge._execute_tool("accept_queued_memory", {"id": queued["queued_id"]})
+        self.assertIn("confirm_restricted", str(ctx.exception))
+        accepted = mcp_bridge._execute_tool("accept_queued_memory", {
+            "id": queued["queued_id"], "confirm_restricted": True})
+        self.assertEqual(accepted["status"], "accepted")
 
 
 if __name__ == "__main__":

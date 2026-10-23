@@ -5,6 +5,44 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.22.0 — The pending-memory queue works from remote clients
+
+### Added
+
+- Pending-memory entries now carry `owner_principal` (whoever queued
+  them) and `audience`, read through the same visibility check as notes.
+  A caller lists only the entries it may see, and only an entry's owner
+  can accept or reject it; being in its audience grants reading only. An
+  entry queued before 0.22.0 has no owner field and belongs to the
+  default owner (`principal:marcin` on a standard install), the same
+  fail-closed default an un-migrated note gets. An accepted entry becomes
+  a note owned by the same principal with the same audience.
+- `brain memory` goes through the SSH dispatcher: `pending` and `review`
+  in read mode, `add`, `accept` and `reject` in write mode. Until now the
+  dispatcher refused it from every key, so neither the desktop client nor
+  the remote gateway could reach the queue at all.
+- MCP tools `list_queued_memory` (read), `accept_queued_memory` and
+  `reject_queued_memory` (write), and `queue_memory` in the MCP bridge, so
+  claude.ai and other remote clients can queue and their owner can review.
+  `queue_memory` and `brain memory add` take `--audience`/`audience`.
+- `brain memory` subcommands take `--json`; `pending` and `review` count
+  restricted entries instead of listing them unless `--include-restricted`.
+- The remote gateway's server instructions say when to queue instead of
+  writing, and that accepting is the user's call.
+
+### Changed
+
+- Queueing and accepting a `restricted` entry need `--confirm-restricted`
+  (`confirm_restricted=true` over MCP, plus the `brain.restricted` scope
+  through the gateway), like every other restricted write.
+- `brain memory add` and `reject --note` run the secret-pattern scan the
+  MCP tool already ran.
+- Every change to the queue file holds an exclusive lock in the state
+  directory, so concurrent remote writers can no longer lose an entry.
+
+Server- and client-side: deploy the server, then upgrade clients for the
+CLI flags and the updated `remember` skill.
+
 ## 0.21.7 — A Polish title keeps its letters in the new note's id
 
 ### Fixed

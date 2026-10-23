@@ -1298,39 +1298,66 @@ def cmd_integrity(config: Config, args) -> int:
     return 1 if report.problems else 0
 
 
+def _emit_entry(entry) -> None:
+    print(json.dumps(dataclasses.asdict(entry), indent=2, ensure_ascii=False))
+
+
 def cmd_memory_add(config: Config, args) -> int:
+    writepolicy.require_restricted_confirmation(config, config.acting_principal, args.sensitivity,
+                                                 args.confirm_restricted)
+    rolepolicy.require_audience_allowed(config, config.acting_principal, args.audience)
+    writepolicy.scan_for_secrets(args.fact, args.reason or "")
     try:
         entry = memoryqueue.add(
             config, candidate_fact=args.fact, entities=args.entities,
             source=args.source or "", source_date=args.source_date or "",
             proposed_destination=args.destination or "", proposed_type=args.type,
             sensitivity=args.sensitivity, confidence=args.confidence, reason=args.reason or "",
+            audience=args.audience,
         )
     except memoryqueue.MemoryQueueError as exc:
         print(f"Refused: {exc}", file=sys.stderr)
         return 1
+    if args.json:
+        print(json.dumps({"queued_id": entry.id, "status": entry.status}, indent=2))
+        return 0
     print(f"Queued as {entry.id} (status: pending). Review with 'brain memory pending'.")
     return 0
 
 
+def _without_restricted(entries: list, include_restricted: bool) -> tuple[list, int]:
+    shown = [e for e in entries if include_restricted or e.sensitivity != "restricted"]
+    return shown, len(entries) - len(shown)
+
+
 def cmd_memory_pending(config: Config, args) -> int:
-    entries = memoryqueue.list_pending(config)
+    entries, omitted = _without_restricted(memoryqueue.list_pending(config), args.include_restricted)
+    if args.json:
+        print(json.dumps({"entries": [dataclasses.asdict(e) for e in entries],
+                          "restricted_omitted": omitted}, indent=2, ensure_ascii=False))
+        return 0
     if not entries:
         print("No pending memory items.")
-        return 0
     for e in entries:
         print(f"{e.id}  [{e.sensitivity}/{e.confidence}]  {e.candidate_fact[:80]}")
+    if omitted:
+        print(f"({omitted} restricted item(s) not shown; pass --include-restricted)")
     return 0
 
 
 def cmd_memory_review(config: Config, args) -> int:
-    entries = memoryqueue.list_all(config)
+    entries, omitted = _without_restricted(memoryqueue.list_all(config), args.include_restricted)
+    if args.json:
+        print(json.dumps({"entries": [dataclasses.asdict(e) for e in entries],
+                          "restricted_omitted": omitted}, indent=2, ensure_ascii=False))
+        return 0
     if not entries:
         print("Pending memory queue is empty.")
-        return 0
     for e in entries:
         print(f"id:                    {e.id}")
         print(f"status:                {e.status}")
+        print(f"owner_principal:       {e.owner_principal}")
+        print(f"audience:              {', '.join(e.audience) or '-'}")
         print(f"candidate_fact:        {e.candidate_fact}")
         print(f"entities:              {', '.join(e.entities) or '-'}")
         print(f"source:                {e.source or '-'}")
@@ -1344,25 +1371,36 @@ def cmd_memory_review(config: Config, args) -> int:
             print(f"resolved_at:           {e.resolved_at}")
             print(f"written_to:            {e.written_to or '-'}")
         print()
+    if omitted:
+        print(f"({omitted} restricted item(s) not shown; pass --include-restricted)")
     return 0
 
 
 def cmd_memory_accept(config: Config, args) -> int:
+    writepolicy.scan_for_secrets(args.title or "")
     try:
-        entry = memoryqueue.accept(config, args.id, title=args.title)
+        entry = memoryqueue.accept(config, args.id, title=args.title,
+                                   confirm_restricted=args.confirm_restricted)
     except memoryqueue.MemoryQueueError as exc:
         print(f"Could not accept: {exc}", file=sys.stderr)
         return 1
+    if args.json:
+        _emit_entry(entry)
+        return 0
     print(f"Accepted {entry.id} -> wrote {entry.written_to}")
     return 0
 
 
 def cmd_memory_reject(config: Config, args) -> int:
+    writepolicy.scan_for_secrets(args.note or "")
     try:
         entry = memoryqueue.reject(config, args.id, note=args.note or "")
     except memoryqueue.MemoryQueueError as exc:
         print(f"Could not reject: {exc}", file=sys.stderr)
         return 1
+    if args.json:
+        _emit_entry(entry)
+        return 0
     print(f"Rejected {entry.id}.")
     return 0
 
@@ -2009,14 +2047,28 @@ def build_parser() -> argparse.ArgumentParser:
     p_memory_add.add_argument("--sensitivity", default="normal", choices=["normal", "private", "restricted"])
     p_memory_add.add_argument("--confidence", default="assumption", choices=["fact", "assumption", "opinion"])
     p_memory_add.add_argument("--reason", default="", help="Why this might be worth remembering")
-    memory_sub.add_parser("pending", help="List open (pending) items")
-    memory_sub.add_parser("review", help="Show full detail for every item, including resolved ones")
+    p_memory_add.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
+                              help="Required when --sensitivity restricted. Never set this on a caller's behalf.")
+    p_memory_add.add_argument("--audience", nargs="*", default=None,
+                              help="Who may also see the entry (and the note, if accepted), e.g. "
+                                   "'group:household' — omit for private (default: owner only)")
+    p_memory_add.add_argument("--json", action="store_true", help="Emit JSON on stdout")
+    for name, help_text in (("pending", "List open (pending) items you may see"),
+                            ("review", "Show full detail for every item you may see, including resolved ones")):
+        p = memory_sub.add_parser(name, help=help_text)
+        p.add_argument("--include-restricted", action="store_true", dest="include_restricted",
+                       help="Also show restricted items (counted, not listed, by default)")
+        p.add_argument("--json", action="store_true", help="Emit JSON on stdout")
     p_memory_accept = memory_sub.add_parser("accept", help="Write a pending item into the Brain")
     p_memory_accept.add_argument("id")
     p_memory_accept.add_argument("--title", default=None, help="Override the auto-derived note title")
+    p_memory_accept.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
+                                 help="Required to accept a restricted item. Never set this on a caller's behalf.")
+    p_memory_accept.add_argument("--json", action="store_true", help="Emit JSON on stdout")
     p_memory_reject = memory_sub.add_parser("reject", help="Discard a pending item (kept in the queue for audit history)")
     p_memory_reject.add_argument("id")
     p_memory_reject.add_argument("--note", default="", help="Why it was rejected")
+    p_memory_reject.add_argument("--json", action="store_true", help="Emit JSON on stdout")
 
     p_handoff = sub.add_parser("handoff", help="Project session handoff — write / show / list")
     handoff_sub = p_handoff.add_subparsers(dest="handoff_command", required=True)

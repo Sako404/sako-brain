@@ -81,9 +81,11 @@ Some commands never go through any key:
 - **Host-only** commands (`principal`, `group`, `role-policy`, `backup`,
   `integrity`, `git`, `agents-doc`, `ask`, `chat`, and the Stage 2
   migration) run only in a local shell on the server.
-- **`memory`, the pending-memory queue**, is single-principal only. It has
-  no per-person visibility yet, so the dispatcher refuses it from every key
-  and the bundled `remember` skill asks the user instead.
+- **`memory`, the pending-memory queue**, is an ordinary command since
+  v0.22.0: `memory pending` and `memory review` need read mode, `add`,
+  `accept` and `reject` write mode. Each entry carries its own
+  `owner_principal` and `audience`, so a caller sees only entries it may
+  see and resolves only its own.
 
 `brain/commandpolicy.py` holds these lists. The client uses the same file
 to choose which of its keys to present, and a test fails if any CLI
@@ -158,7 +160,6 @@ Every refusal is one line on stderr, starting with `refused:`:
 | Message | Cause |
 |---|---|
 | `X is not an allowed read subcommand` | The key's mode doesn't include `X`. The client may have used its read key for a write. |
-| `X is single-principal only ...` | `X` never goes through the dispatcher. Run it on the server. |
 | `principal 'P' is disabled or does not exist` | `P` is disabled, missing, or the vault couldn't be read. |
 | `identity 'C' is not permitted to assert an acting principal` | A key without `--delegation` sent a delegation prefix. |
 | `identity 'C' must assert an acting principal for every request` | A `mandatory` key sent a request without one. |

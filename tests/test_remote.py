@@ -32,11 +32,11 @@ class TestIsWriteSubcommand(unittest.TestCase):
         for top in ("remember", "decision", "handoff", "note", "update"):
             self.assertTrue(remote._is_write_subcommand([top]), top)
 
-    def test_memory_goes_under_the_read_identity(self):
-        """`memory` is single-principal only and the dispatcher refuses it in
-        every mode; it used to be sent under the write identity, which
-        presented the more powerful key for a request that can never pass."""
-        self.assertFalse(remote._is_write_subcommand(["memory", "add"]))
+    def test_memory_listing_is_read_and_changes_are_write(self):
+        for sub in ("pending", "review"):
+            self.assertFalse(remote._is_write_subcommand(["memory", sub]), sub)
+        for sub in ("add", "accept", "reject"):
+            self.assertTrue(remote._is_write_subcommand(["memory", sub]), sub)
 
     def test_index_is_write(self):
         """Regression: the server dispatcher's WRITE_ALLOWED includes

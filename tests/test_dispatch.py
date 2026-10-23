@@ -122,19 +122,29 @@ class TestWriteMode(unittest.TestCase):
         self.assertFalse(is_allowed("capture", ["timeline", "add", "--title", "x", "--date", "2026-01-01"])[0])
 
 
-class TestSinglePrincipalCommandsNeverDispatched(unittest.TestCase):
-    """memoryqueue.py's INVARIANT: the pending-memory queue has no ownership
-    or visibility fields, so no key — above all a delegating one — may reach
-    it through the dispatcher."""
+class TestMemoryQueueModes(unittest.TestCase):
+    """v0.22.0: the queue carries its own ownership, so it is dispatchable —
+    listing in read mode, changes in write mode only, nothing under the
+    narrow capture/status identities."""
 
-    def test_memory_refused_in_every_mode(self):
-        for mode in dispatch.commandpolicy.MODES:
-            for argv in (["memory", "add", "--fact", "x"], ["memory", "pending"],
-                         ["memory", "review"], ["memory", "accept", "id"]):
+    def test_listing_is_read(self):
+        for argv in (["memory", "pending"], ["memory", "review"]):
+            with self.subTest(argv=argv):
+                self.assertTrue(is_allowed("read", argv)[0])
+                self.assertTrue(is_allowed("write", argv)[0])
+
+    def test_changes_need_write_mode(self):
+        for argv in (["memory", "add", "--fact", "x"], ["memory", "accept", "id"],
+                     ["memory", "reject", "id"]):
+            with self.subTest(argv=argv):
+                self.assertFalse(is_allowed("read", argv)[0])
+                self.assertTrue(is_allowed("write", argv)[0])
+
+    def test_refused_under_capture_and_status(self):
+        for mode in ("capture", "status"):
+            for argv in (["memory", "pending"], ["memory", "add", "--fact", "x"]):
                 with self.subTest(mode=mode, argv=argv):
-                    allowed, reason = is_allowed(mode, argv)
-                    self.assertFalse(allowed)
-                    self.assertIn("single-principal", reason)
+                    self.assertFalse(is_allowed(mode, argv)[0])
 
 
 class TestCaptureMode(unittest.TestCase):
@@ -423,10 +433,15 @@ class TestDelegationEndToEnd(unittest.TestCase):
             argv=self.ASSISTANT,
             ssh_original_command="--acting-principal principal-sam -- decision create --title x"), {})
 
-    def test_delegating_key_still_cannot_reach_the_memory_queue(self):
-        self.assertEqual(run_main(
+    def test_delegating_key_reaches_the_memory_queue_as_the_asserted_principal(self):
+        """v0.22.0: the queue filters by owner itself, so the gateway may
+        reach it — but only ever as the principal it asserted, never as the
+        key's own identity."""
+        captured = run_main(
             argv=["--client", "gateway-write", "--delegation", "mandatory", "--mode", "write"],
-            ssh_original_command="--acting-principal principal-sam -- memory review"), {})
+            ssh_original_command="--acting-principal principal-sam -- memory review --json")
+        self.assertEqual(captured["env"]["BRAIN_CALLER_PRINCIPAL"], "principal-sam")
+        self.assertEqual(captured["argv"][1:], ["memory", "review", "--json"])
 
     def test_optional_key_without_assertion_runs_as_itself(self):
         captured = run_main(argv=self.ASSISTANT + ["--principal", "principal-alex"],
@@ -499,10 +514,10 @@ class TestRunsAsARealModule(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("refused: principal 'principal-nobody'", result.stderr)
 
-    def test_memory_queue_is_refused_for_a_real_principal(self):
-        result = self._run("memory review", "--mode", "write", "--principal", self.principal)
+    def test_memory_add_is_refused_under_the_read_identity(self):
+        result = self._run("memory add --fact x", "--mode", "read", "--principal", self.principal)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("single-principal", result.stderr)
+        self.assertIn("memory is not an allowed read subcommand", result.stderr)
 
     @unittest.skipUnless((Path(sys.executable).parent / "brain").is_file(),
                          "package not installed in this interpreter's environment")

@@ -18,7 +18,6 @@ CATEGORIES = {
     "READ": cp.READ,
     "WRITE": cp.WRITE,
     "LOCAL_ONLY": cp.LOCAL_ONLY,
-    "SINGLE_PRINCIPAL": cp.SINGLE_PRINCIPAL,
     "HOST_ONLY": cp.HOST_ONLY,
 }
 
@@ -57,7 +56,7 @@ class TestEveryCommandIsClassified(unittest.TestCase):
 
 class TestModesStayInsideTheirBoundary(unittest.TestCase):
     def test_no_mode_grants_a_non_dispatchable_command(self):
-        never = cp.LOCAL_ONLY | cp.SINGLE_PRINCIPAL | cp.HOST_ONLY
+        never = cp.LOCAL_ONLY | cp.HOST_ONLY
         for mode, allowed in cp.MODES.items():
             with self.subTest(mode=mode):
                 self.assertEqual(allowed & never, set())
@@ -100,13 +99,6 @@ class TestShippedSkillsWorkAgainstARemoteBrain(unittest.TestCase):
                 argv = full.split()
                 top = argv[0]
                 if top in cp.LOCAL_ONLY:
-                    continue
-                if top in cp.SINGLE_PRINCIPAL:
-                    # Allowed only alongside an explicit instruction for what
-                    # to do when the Brain is remote.
-                    if "remote canonical Brain" not in text:
-                        problems.append(f"{skill_file.parent.name}: uses 'brain {full}' "
-                                        "with no remote canonical Brain fallback")
                     continue
                 if not cp.is_allowed("write", argv)[0]:
                     problems.append(f"{skill_file.parent.name}: 'brain {full}' is never dispatchable")

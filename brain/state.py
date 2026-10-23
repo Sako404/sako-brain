@@ -184,8 +184,9 @@ def _collect_decisions(config: Config, include_restricted: bool) -> tuple[Decisi
     return section, omitted
 
 
-def _collect_memory_queue(config: Config, include_restricted: bool) -> tuple[MemoryQueueSection, int]:
-    all_pending = list_pending(config)
+def _collect_memory_queue(config: Config, principal_id: str,
+                          include_restricted: bool) -> tuple[MemoryQueueSection, int]:
+    all_pending = list_pending(config, principal_id)
     section = MemoryQueueSection(pending_count=len(all_pending))
     omitted = 0
     for entry in all_pending:
@@ -347,8 +348,8 @@ def get_operational_state(config: Config, *, include_restricted: bool = False,
     than duplicated) — this dashboard mixes operational/infra state
     (systemd timers, the integrity manifest, doctor's own findings) with
     content that currently has no visibility filtering at all once pulled
-    in here (open decisions via a raw SQL query, the pending memory queue,
-    which has no owner_principal field yet to filter by at all). Reachable
+    in here (open decisions via a raw SQL query). The pending memory queue
+    is filtered to the caller's own visible entries (v0.22.0). Reachable
     over the SSH dispatcher's read mode like `brain doctor`, so a
     non-admin caller must not get any of this just by asking `brain
     state`. A non-admin caller gets an otherwise-empty envelope with
@@ -394,7 +395,7 @@ def get_operational_state(config: Config, *, include_restricted: bool = False,
         sources["decisions"] = SourceStatus(ok=False, error=str(exc))
 
     try:
-        memory_queue, sensitivity_omitted["memory_queue"] = _collect_memory_queue(config, include_restricted)
+        memory_queue, sensitivity_omitted["memory_queue"] = _collect_memory_queue(config, principal_id, include_restricted)
         sources["memory_queue"] = SourceStatus(ok=True)
     except Exception as exc:  # noqa: BLE001
         memory_queue = MemoryQueueSection()

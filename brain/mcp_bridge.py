@@ -30,16 +30,14 @@ As of v0.10.0, coverage is the full v0.10.0 "CORE COMPLETE" set: every read
 and write a normal Claude/Codex session needs day to day (search, context,
 state, list/get project, project context, timeline read/search, remember/
 note/update, decisions, projects — create/update-status/close/section-
-update, handoffs, timeline events). Two tools are deliberately NOT here,
-neither is a gap:
-- `queue_memory` — the server dispatcher's own security boundary doesn't
-  allow `brain memory` at all (see the v0.10.0 capability audit's decision
-  record); extending that boundary "for parity" was explicitly out of
-  scope, not an oversight.
-- `get_project_path` no longer exists as an MCP tool at all (removed from
-  `mcp_server.TOOLS` the same pass) — it was a pure subset of `get_project`
-  (registry.path), never used by any real caller, so it was deprecated
-  rather than bridged.
+update, handoffs, timeline events). Since v0.22.0 that includes the
+pending-memory queue (`queue_memory`, `list_queued_memory`,
+`accept_queued_memory`, `reject_queued_memory` over `brain memory`): it was
+deliberately absent while the queue had no ownership of its own and the
+dispatcher refused `brain memory` outright. `get_project_path` no longer
+exists as an MCP tool at all (removed from `mcp_server.TOOLS` in v0.10.0) —
+it was a pure subset of `get_project` (registry.path), never used by any
+real caller, so it was deprecated rather than bridged.
 `project_context` is the one tool NOT a 1:1 CLI translation — see
 `_execute_project_context`'s own docstring for why (the server can't see a
 desktop project's git state, so filesystem_facts is always null here).
@@ -481,6 +479,43 @@ def _t_create_timeline_event(a: dict):
     return argv, None
 
 
+def _t_queue_memory(a: dict):
+    argv = ["memory", "add", "--fact", a["candidate_fact"], "--json"]
+    argv += _list_flags(a, "entities")
+    for key, flag in (("source_date", "--source-date"), ("proposed_destination", "--destination"),
+                      ("proposed_type", "--type"), ("sensitivity", "--sensitivity"),
+                      ("confidence", "--confidence"), ("reason", "--reason")):
+        if a.get(key):
+            argv += [flag, a[key]]
+    # Same provenance default as remember: an explicit `source` always wins.
+    argv += ["--source", a.get("source") or f"mcp-bridge:{_CURRENT_CLIENT}"]
+    argv += _confirm_restricted_flag(a)
+    argv += _list_flags(a, "audience")
+    return argv, None
+
+
+def _t_list_queued_memory(a: dict):
+    argv = ["memory", "review" if a.get("include_resolved") else "pending", "--json"]
+    if a.get("include_restricted"):
+        argv.append("--include-restricted")
+    return argv, None
+
+
+def _t_accept_queued_memory(a: dict):
+    argv = ["memory", "accept", a["id"], "--json"]
+    if a.get("title"):
+        argv += ["--title", a["title"]]
+    argv += _confirm_restricted_flag(a)
+    return argv, None
+
+
+def _t_reject_queued_memory(a: dict):
+    argv = ["memory", "reject", a["id"], "--json"]
+    if a.get("note"):
+        argv += ["--note", a["note"]]
+    return argv, None
+
+
 TRANSLATORS = {
     "search_memory": _t_search_memory,
     "list_notes": _t_list_notes,
@@ -502,6 +537,10 @@ TRANSLATORS = {
     "close_project": _t_close_project,
     "update_project_section": _t_update_project_section,
     "create_timeline_event": _t_create_timeline_event,
+    "queue_memory": _t_queue_memory,
+    "list_queued_memory": _t_list_queued_memory,
+    "accept_queued_memory": _t_accept_queued_memory,
+    "reject_queued_memory": _t_reject_queued_memory,
     # project_context is deliberately NOT a 1:1 CLI translation — see
     # _execute_project_context below and its own docstring for why.
     "project_context": None,
