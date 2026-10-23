@@ -81,6 +81,50 @@ class TestSearchRanking(unittest.TestCase):
         self.assertLessEqual(rank, 2, f"expected project-target in the top 2, got rank {rank}: {ids}")
 
 
+class TestTitleTier(unittest.TestCase):
+    """bm25() normalizes by the whole row's length, so a long enough body
+    sinks a title match despite TITLE_WEIGHT. Reproduces the live failure:
+    the backlog document titled "Cross-project next actions" ranked 12th for
+    "next actions" behind short handoffs with a "Next actions" heading."""
+
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        filler = " ".join(f"unrelated{i} filler{i} content{i}" for i in range(1500))
+        self.vault.write_note(
+            "30_PROJECTS", "_next-actions.md", id="document-target", type="document",
+            title="Cross-project next actions", body=f"The list. {filler}",
+        )
+        for i in range(12):
+            self.vault.write_note(
+                "30_PROJECTS/ACTIVE", f"handoff-{i}.md", id=f"handoff-{i}", type="document",
+                title=f"Handoff {i}",
+                body=f"## Next actions\n\nNext logical action for {i}.",
+            )
+        indexer.rebuild(self.config)
+
+    def tearDown(self):
+        self.vault.cleanup()
+
+    def test_long_note_whose_title_has_every_term_ranks_first(self):
+        ids = [r.id for r in search.search(self.config, "next actions", limit=8)]
+        self.assertEqual(ids[0], "document-target", ids)
+
+    def test_single_term_title_match_ranks_first(self):
+        ids = [r.id for r in search.search(self.config, "cross-project", limit=8)]
+        self.assertEqual(ids[0], "document-target", ids)
+
+    def test_body_matches_still_follow_the_title_match(self):
+        ids = [r.id for r in search.search(self.config, "next actions", limit=20)]
+        self.assertEqual(sorted(ids[1:]), sorted(f"handoff-{i}" for i in range(12)))
+
+    def test_partial_title_match_does_not_jump_the_queue(self):
+        # "next" is in the title but "logical" is not: no title-tier hit,
+        # so ordering falls back to the content tiers.
+        ids = [r.id for r in search.search(self.config, "next logical", limit=8)]
+        self.assertNotIn("document-target", ids[:1])
+
+
 class TestNaturalLanguageQuestions(unittest.TestCase):
     """Phase 5B regression: a full question ("Where did X finish?") must
     not fail just because most of its words are function words that don't
