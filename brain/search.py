@@ -101,6 +101,25 @@ def _run_match(conn, match_expr: str, limit: int, *, shortest_title_first: bool 
     ).fetchall()
 
 
+def _run_whole_title(conn, terms: list[str], limit: int):
+    """Notes whose entire title is one of the query's terms ("TRON" for
+    "status TRON"). Exact and case-insensitive on `notes.title`; the FTS
+    MATCH is only there so snippet() has a match to work with."""
+    placeholders = ",".join("?" for _ in terms)
+    return conn.execute(
+        f"""
+        SELECT n.id, n.type, n.status, n.title, n.path,
+               snippet(notes_fts, 2, '[', ']', '...', 10) AS snip
+        FROM notes_fts
+        JOIN notes n ON n.id = notes_fts.id
+        WHERE notes_fts MATCH ? AND lower(n.title) IN ({placeholders})
+        ORDER BY length(n.title)
+        LIMIT ?
+        """,
+        (f"title : ({_or_expr(terms)})", *(t.lower() for t in terms), limit),
+    ).fetchall()
+
+
 # Stage 2 (multi-user visibility): the index is discovery/ranking only, never
 # authoritative for a security decision — see brain/visibility.py. Candidate
 # ids come from the FTS query exactly as before; this module then fetches
@@ -130,6 +149,12 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
        mention the project somewhere and "finish" somewhere else (a RomM
        handoff first) above the project record. Not for two terms: one
        term left in a title is too loose ("next" matches "Nextcloud").
+    0c. With two or more terms: a note whose whole title is one of the
+       terms. Two-term questions name a subject plus a word about it
+       ("What is the status of TRON?" → status, TRON), and the subject's
+       own record was not on top; an exact one-word title is the safe
+       version of relaxing to one term, and needs no word list, so it
+       works for a question in any language.
     1. AND of every content term — most precise, right answer for a clean
        keyword query like "Family Command Center".
     2. AND with exactly one term dropped, tried once per term. Phase 5B
@@ -173,6 +198,9 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
                 relaxed = terms[:i] + terms[i + 1:]
                 _add(_run_match(conn, _title_expr(relaxed), fetch_limit - len(rows),
                                 shortest_title_first=True))
+
+        if len(rows) < fetch_limit and len(terms) > 1:
+            _add(_run_whole_title(conn, terms, fetch_limit - len(rows)))
 
         if len(rows) < fetch_limit and len(terms) > 1:
             _add(_run_match(conn, _and_expr(terms), fetch_limit - len(rows)))
