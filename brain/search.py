@@ -102,22 +102,42 @@ def _run_match(conn, match_expr: str, limit: int, *, shortest_title_first: bool 
 
 
 def _run_whole_title(conn, terms: list[str], limit: int):
-    """Notes whose entire title is one of the query's terms ("TRON" for
-    "status TRON"). Exact and case-insensitive on `notes.title`; the FTS
-    MATCH is only there so snippet() has a match to work with."""
+    """Notes whose entire title, or one entire alias, is one of the query's
+    terms ("TRON" for "status TRON", alias "fcc" for "fcc status"). Exact and
+    case-insensitive on `notes.title` and `note_aliases`; the FTS MATCH is
+    only there so snippet() has a match to work with. An index built before
+    `note_aliases` existed has no such table until its next write or
+    `brain index`, and then compares titles only."""
+    lowered = [t.lower() for t in terms]
     placeholders = ",".join("?" for _ in terms)
+    has_aliases = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'note_aliases'").fetchone()
+    alias_clause = (f" OR n.id IN (SELECT id FROM note_aliases WHERE alias IN ({placeholders}))"
+                    if has_aliases else "")
     return conn.execute(
         f"""
         SELECT n.id, n.type, n.status, n.title, n.path,
                snippet(notes_fts, 2, '[', ']', '...', 10) AS snip
         FROM notes_fts
         JOIN notes n ON n.id = notes_fts.id
-        WHERE notes_fts MATCH ? AND lower(n.title) IN ({placeholders})
+        WHERE notes_fts MATCH ? AND (lower(n.title) IN ({placeholders}){alias_clause})
         ORDER BY length(n.title)
         LIMIT ?
         """,
-        (f"title : ({_or_expr(terms)})", *(t.lower() for t in terms), limit),
+        (f"title : ({_or_expr(terms)})", *lowered, *(lowered if has_aliases else []), limit),
     ).fetchall()
+
+
+def _most_common_first(conn, terms: list[str]) -> list[int]:
+    """Indexes of `terms`, the one in the most notes first. The relaxed
+    tiers drop one term at a time and rank earlier drops higher, so the
+    commonest word goes first and the rarest, usually the subject, stays
+    longest: for "How does the Brain backup work?" dropping "backup" first
+    put a session-close note ("Brain" and "work"* as in "workflow") above
+    the notes about Brain backups."""
+    counts = [conn.execute("SELECT count(*) FROM notes_fts WHERE notes_fts MATCH ?",
+                           (_escape_term(t),)).fetchone()[0] for t in terms]
+    return sorted(range(len(terms)), key=lambda i: -counts[i])
 
 
 # Stage 2 (multi-user visibility): the index is discovery/ranking only, never
@@ -143,21 +163,23 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
        whole query is the most precise hit there is, so it comes first,
        shortest title first.
     0b. With three or more terms: every term but one in the title, tried
-       once per term, shortest title first. A question carries words that
+       once per term, the commonest term dropped first (see
+       _most_common_first), shortest title first within each. A question carries words that
        are not its subject: for "Where did Family Command Center finish?"
        no title holds "finish", and tier 1 then ranked long notes that
        mention the project somewhere and "finish" somewhere else (a RomM
        handoff first) above the project record. Not for two terms: one
        term left in a title is too loose ("next" matches "Nextcloud").
-    0c. With two or more terms: a note whose whole title is one of the
-       terms. Two-term questions name a subject plus a word about it
+    0c. With two or more terms: a note whose whole title, or one whole
+       alias, is one of the terms. Two-term questions name a subject plus a word about it
        ("What is the status of TRON?" → status, TRON), and the subject's
        own record was not on top; an exact one-word title is the safe
        version of relaxing to one term, and needs no word list, so it
        works for a question in any language.
     1. AND of every content term — most precise, right answer for a clean
        keyword query like "Family Command Center".
-    2. AND with exactly one term dropped, tried once per term. Phase 5B
+    2. AND with exactly one term dropped, tried once per term, commonest
+       first as in 0b. Phase 5B
        finding: a single rare/incidental word in an otherwise-good query
        (e.g. "finish" in "Where did Family Command Center finish?") can
        make tier 1 match nothing relevant, or make a full-OR match get
@@ -191,13 +213,14 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
 
         _add(_run_match(conn, _title_expr(terms), fetch_limit, shortest_title_first=True))
 
-        if len(terms) > 2:
-            for i in range(len(terms)):
-                if len(rows) >= fetch_limit:
-                    break
-                relaxed = terms[:i] + terms[i + 1:]
-                _add(_run_match(conn, _title_expr(relaxed), fetch_limit - len(rows),
-                                shortest_title_first=True))
+        drop_order = _most_common_first(conn, terms) if len(terms) > 2 else []
+
+        for i in drop_order:
+            if len(rows) >= fetch_limit:
+                break
+            relaxed = terms[:i] + terms[i + 1:]
+            _add(_run_match(conn, _title_expr(relaxed), fetch_limit - len(rows),
+                            shortest_title_first=True))
 
         if len(rows) < fetch_limit and len(terms) > 1:
             _add(_run_whole_title(conn, terms, fetch_limit - len(rows)))
@@ -205,12 +228,11 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
         if len(rows) < fetch_limit and len(terms) > 1:
             _add(_run_match(conn, _and_expr(terms), fetch_limit - len(rows)))
 
-        if len(rows) < fetch_limit and len(terms) > 2:
-            for i in range(len(terms)):
-                if len(rows) >= fetch_limit:
-                    break
-                relaxed = terms[:i] + terms[i + 1:]
-                _add(_run_match(conn, _and_expr(relaxed), fetch_limit - len(rows)))
+        for i in drop_order:
+            if len(rows) >= fetch_limit:
+                break
+            relaxed = terms[:i] + terms[i + 1:]
+            _add(_run_match(conn, _and_expr(relaxed), fetch_limit - len(rows)))
 
         if len(rows) < fetch_limit:
             _add(_run_match(conn, _or_expr(terms), fetch_limit - len(rows)))

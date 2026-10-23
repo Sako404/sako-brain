@@ -5,6 +5,22 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.22.1 — Search keeps the question's subject and matches whole aliases
+
+### Fixed
+
+- The relaxed tiers that drop one search term at a time now drop the
+  term found in the most notes first, so the rarest word, usually the
+  subject, is kept longest. "How does the Brain backup work?" put a
+  session-close decision first ("Brain" and "work" as in "workflow" in
+  its title) because "backup" was dropped before the others.
+- A note whose whole alias is one of the query's terms is promoted like a
+  note whose whole title is: "fcc status" and "Jaki jest status fcc?" now
+  put the project aliased `fcc` first. The index keeps each alias in a new
+  `note_aliases` table; an index built by an older version compares
+  titles only until its next `brain index`. Server-side: run `brain index`
+  once after upgrading.
+
 ## 0.22.0 — The pending-memory queue works from remote clients
 
 ### Added
