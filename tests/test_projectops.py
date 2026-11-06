@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from brain import frontmatter, projectops
-from brain.registry import load_registry
+from brain.registry import find_project, load_registry
 from tests.helpers import TempVault
 
 
@@ -370,6 +370,35 @@ class TestSetProjectName(unittest.TestCase):
         self.assertTrue(result.changed)
         self.assertIn("gadget", self._entries()["project-widget"].aliases)
         self.assertEqual(self._record().meta["aliases"].count("gadget"), 1)
+
+    def test_remove_alias_reaches_both_and_keeps_the_rest(self):
+        projectops.set_project_name(self.config, "project-widget", add_aliases=["gadget", "doohickey"])
+        result = projectops.set_project_name(self.config, "project-widget", remove_aliases=["gadget"])
+        self.assertTrue(result.changed)
+        self.assertEqual(result.removed_aliases, ["gadget"])
+        self.assertEqual(self._entries()["project-widget"].aliases, ["widget", "doohickey"])
+        self.assertEqual(self._record().meta["aliases"], ["widget", "doohickey"])
+        self.assertIsNone(find_project(self.config, "gadget"))
+        self.assertEqual(self._entries()["project-other"].aliases, ["other"])
+
+    def test_remove_alias_held_only_by_the_record(self):
+        record = self._record()
+        record.meta["aliases"] = ["widget", "stale"]
+        self._record_path().write_text(frontmatter.render(record), encoding="utf-8")
+        result = projectops.set_project_name(self.config, "project-widget", remove_aliases=["stale"])
+        self.assertEqual(result.removed_aliases, ["stale"])
+        self.assertNotIn("stale", self._record().meta["aliases"])
+
+    def test_removing_an_absent_alias_is_a_no_op(self):
+        before = self._record_path().read_text(encoding="utf-8")
+        result = projectops.set_project_name(self.config, "project-widget", remove_aliases=["absent"])
+        self.assertFalse(result.changed)
+        self.assertEqual(self._record_path().read_text(encoding="utf-8"), before)
+
+    def test_adding_and_removing_the_same_alias_is_refused(self):
+        with self.assertRaises(projectops.ProjectWriteError):
+            projectops.set_project_name(self.config, "project-widget", add_aliases=["x"], remove_aliases=["x"])
+        self.assertNotIn("x", self._entries()["project-widget"].aliases)
 
     def test_rerun_is_a_no_op(self):
         projectops.set_project_name(self.config, "project-widget", "Gadget", ["gadget"])

@@ -5,6 +5,7 @@ Direct unit coverage of the shared functions themselves; tests/test_cli_*
 and tests/test_mcp_server.py cover each transport's actual wiring."""
 from __future__ import annotations
 
+import datetime as dt
 import unittest
 
 from brain import identity, rolepolicy, validate, writepolicy
@@ -63,6 +64,7 @@ class TestVendorTokenShapes(unittest.TestCase):
     def test_doctor_flags_each_shape_too(self):
         class FakeNote:
             path = "note.md"
+            meta = {}
 
         for vendor, token in TOKEN_SHAPES.items():
             with self.subTest(vendor=vendor):
@@ -79,6 +81,38 @@ class TestVendorTokenShapes(unittest.TestCase):
             "eyJ alone, and eyJabc.notatoken.value",
             "decision-2026-11-06-github_pat-format",
         )
+
+
+class TestDoctorScansFrontmatter(unittest.TestCase):
+    class FakeNote:
+        path = "note.md"
+        body = "clean\n"
+
+    def _problems(self, meta):
+        note = self.FakeNote()
+        note.meta = meta
+        return validate.check_secrets([note])
+
+    def test_string_field_is_flagged_by_name_without_the_value(self):
+        token = TOKEN_SHAPES["GitHub classic"]
+        problems = self._problems({"source": f"copied from {token}"})
+        self.assertEqual([p.check for p in problems], ["secret_pattern"])
+        self.assertIn("source", problems[0].message)
+        self.assertNotIn(token, problems[0].message)
+
+    def test_nested_values_are_scanned(self):
+        token = TOKEN_SHAPES["Slack"]
+        self.assertEqual(len(self._problems({"tags": ["ok", token]})), 1)
+        self.assertEqual(len(self._problems({"extra": {"inner": token}})), 1)
+
+    def test_a_field_named_like_a_credential_is_flagged(self):
+        self.assertEqual(len(self._problems({"password": "hunter2hunter2"})), 1)
+
+    def test_ordinary_frontmatter_is_clean(self):
+        self.assertEqual(self._problems({
+            "id": "project-x", "type": "project", "created": dt.date(2026, 1, 1),
+            "aliases": ["x", "task-force"], "audience": [], "has_git": True, "source": "",
+        }), [])
 
 
 class TestRequireRestrictedConfirmation(unittest.TestCase):

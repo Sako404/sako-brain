@@ -192,6 +192,14 @@ class TestCliProjectUpdate(unittest.TestCase):
         rc, _ = run_cli(["update", "knowledge-plain-note", "--set-json", 'aliases=["plain"]'], self.vault)
         self.assertEqual(rc, 0)
 
+    def test_remove_alias_through_the_cli(self):
+        run_cli(["project", "update", "project-widget", "--add-alias", "gadget"], self.vault)
+        rc, out = run_cli(["project", "update", "project-widget", "--remove-alias", "gadget", "--json"], self.vault)
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["name_change"]["removed_aliases"], ["gadget"])
+        rc, _ = run_cli(["project", "show", "gadget"], self.vault)
+        self.assertNotEqual(rc, 0)
+
     def test_rename_secret_is_refused(self):
         secret = "AKIAABCDEFGHIJKLMNOP"  # AWS-key-shaped, see test_cli_write_security
         for flag in ("--name", "--add-alias"):
@@ -199,6 +207,62 @@ class TestCliProjectUpdate(unittest.TestCase):
             self.assertEqual(rc, 1)
         entry = {e.id: e for e in load_registry(self.config)}["project-widget"]
         self.assertEqual(entry.name, "Widget")
+
+
+class TestCliNoteTitle(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        rc, out = run_cli(["note", "create", "--type", "knowledge", "--title", "Plain note", "--json"], self.vault)
+        self.assertEqual(rc, 0)
+        self.note_id = "knowledge-plain-note"
+        run_cli(["project", "create", "--id", "project-widget", "--name", "Widget", "--path", "/a"], self.vault)
+
+    def _note(self):
+        return frontmatter.parse_file(self.vault.root / "60_KNOWLEDGE" / f"{self.note_id}.md")
+
+    def _run_err(self, argv):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, _ = run_cli(argv, self.vault)
+        return rc, err.getvalue()
+
+    def test_title_flag_changes_the_heading_and_search(self):
+        rc, _ = run_cli(["update", self.note_id, "--title", "Better name"], self.vault)
+        self.assertEqual(rc, 0)
+        self.assertEqual(self._note().title, "Better name")
+        rc, out = run_cli(["search", "Better name"], self.vault)
+        self.assertIn(self.note_id, out)
+
+    def test_set_title_is_refused_and_points_to_the_flag(self):
+        before = self._note().body
+        rc, err = self._run_err(["update", self.note_id, "--set", "title=Better name"])
+        self.assertEqual(rc, 1)
+        self.assertIn("--title", err)
+        self.assertEqual(self._note().body, before)
+        self.assertNotIn("title", self._note().meta)
+
+    def test_resetting_an_existing_title_field_stays_allowed(self):
+        path = self.vault.root / "60_KNOWLEDGE" / f"{self.note_id}.md"
+        note = frontmatter.parse_file(path)
+        note.meta["title"] = "Old field"
+        path.write_text(frontmatter.render(note), encoding="utf-8")
+        rc, _ = run_cli(["update", self.note_id, "--set", "title=Old field"], self.vault)
+        self.assertEqual(rc, 0)
+
+    def test_title_flag_on_a_project_points_to_name(self):
+        rc, err = self._run_err(["update", "project-widget", "--title", "Gadget"])
+        self.assertEqual(rc, 1)
+        self.assertIn("--name", err)
+        self.assertEqual({e.id: e for e in load_registry(self.config)}["project-widget"].name, "Widget")
+
+    def test_title_must_be_one_line_and_free_of_secrets(self):
+        before = self._note().body
+        for bad in ("", "Two\nlines", "AKIAABCDEFGHIJKLMNOP"):
+            with self.subTest(bad=bad):
+                rc, _ = self._run_err(["update", self.note_id, "--title", bad])
+                self.assertEqual(rc, 1)
+        self.assertEqual(self._note().body, before)
 
 
 class TestCliProjectClose(unittest.TestCase):

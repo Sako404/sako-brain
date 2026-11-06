@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.24.0 — Remove an alias, change a note's title, and doctor reads frontmatter
+
+### Added
+
+- `brain project update <id> --remove-alias old` removes an alias from the
+  record and the registry entry together.
+- `brain update <id> --title "New title"` rewrites a note's heading, which is
+  where titles live. For a project, use `brain project update --name`.
+
+### Changed
+
+- `brain doctor`'s `secret_pattern` check now also scans frontmatter, naming the
+  field and never the value. It may flag notes written earlier; remove and
+  rotate those.
+- `--set title=` is refused on every note type and points to `--title`. It
+  reported success while the title stayed unchanged. Re-setting a value the
+  field already holds stays allowed.
+
+These commands are CLI only; no MCP tool changes.
+
 ## 0.23.1 — Vendor tokens are refused, and `--set` cannot fake a rename
 
 ### Fixed

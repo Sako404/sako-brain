@@ -244,9 +244,34 @@ def check_stale_validity(notes) -> list[Problem]:
     return problems
 
 
+def _frontmatter_values(key: str, value):
+    """Yield (top-level field, text) for every string a field holds. The field
+    name goes into the text because a pattern like `password: x` needs it."""
+    if isinstance(value, str):
+        yield key, f"{key}: {value}"
+    elif isinstance(value, dict):
+        for inner_key, inner in value.items():
+            for _, text in _frontmatter_values(str(inner_key), inner):
+                yield key, text
+    elif isinstance(value, (list, tuple)):
+        for inner in value:
+            for _, text in _frontmatter_values(key, inner):
+                yield key, text
+
+
 def check_secrets(notes) -> list[Problem]:
     problems = []
     for n in notes:
+        for key, value in n.meta.items():
+            for field, text in _frontmatter_values(str(key), value):
+                for line in text.splitlines():
+                    for label, pattern in SECRET_PATTERNS:
+                        if pattern.search(line):
+                            problems.append(Problem(
+                                "secret_pattern",
+                                f"{n.path}: frontmatter field '{field}': possible {label} found "
+                                "— remove and rotate",
+                            ))
         lines = n.body.splitlines()
         for i, line in enumerate(lines, start=1):
             for label, pattern in SECRET_PATTERNS:
