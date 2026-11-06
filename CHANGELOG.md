@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.23.1 — Vendor tokens are refused, and `--set` cannot fake a rename
+
+### Fixed
+
+- The write policy and `brain doctor` now recognise tokens that stand on their
+  own: GitHub, Slack, Stripe live keys, Google, Anthropic, OpenAI, GitLab, npm,
+  Hugging Face and JSON Web Tokens. Before, a pasted token was only caught next
+  to a word like `api_key=` or `Bearer`, so these reached the vault unnoticed.
+  `brain doctor` may now flag notes written earlier; remove and rotate those.
+- On a project record, `--set name=`, `--set title=` and `--set-json aliases=`
+  are refused and point to `--name` and `--add-alias`. They reported success
+  while the listing, the title and alias lookups stayed unchanged.
+
 ## 0.23.0 — Rename a project
 
 ### Added

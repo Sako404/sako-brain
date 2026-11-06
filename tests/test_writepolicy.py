@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import unittest
 
-from brain import identity, rolepolicy, writepolicy
+from brain import identity, rolepolicy, validate, writepolicy
 from tests.helpers import TempVault
 
 
@@ -33,6 +33,52 @@ class TestScanForSecrets(unittest.TestCase):
             self.fail("expected WritePolicyError")
         except writepolicy.WritePolicyError as exc:
             self.assertNotIn(secret, str(exc))
+
+
+# Built at runtime so no credential-shaped literal sits in the repository.
+TOKEN_SHAPES = {
+    "GitHub classic": "ghp_" + "a1" * 18,
+    "GitHub server": "ghs_" + "a1" * 18,
+    "GitHub fine-grained": "github_pat_" + "a1" * 20,
+    "Slack": "xoxb-" + "1" * 12 + "-abc",
+    "Stripe": "sk_" + "live_" + "a1" * 12,
+    "Google": "AIza" + "a1" * 17 + "a",
+    "Anthropic": "sk-" + "ant-" + "a1" * 15,
+    "OpenAI": "sk-" + "proj-" + "a1" * 15,
+    "GitLab": "glpat-" + "a1" * 12,
+    "npm": "npm_" + "a1" * 18,
+    "Hugging Face": "hf_" + "a1" * 17,
+    "JWT": "eyJ" + "a1" * 8 + ".eyJ" + "a1" * 8 + "." + "a1" * 8,
+}
+
+
+class TestVendorTokenShapes(unittest.TestCase):
+    def test_each_shape_is_refused_without_echoing_it(self):
+        for vendor, token in TOKEN_SHAPES.items():
+            with self.subTest(vendor=vendor):
+                with self.assertRaises(writepolicy.WritePolicyError) as caught:
+                    writepolicy.scan_for_secrets(f"the token is {token} for now")
+                self.assertNotIn(token, str(caught.exception))
+
+    def test_doctor_flags_each_shape_too(self):
+        class FakeNote:
+            path = "note.md"
+
+        for vendor, token in TOKEN_SHAPES.items():
+            with self.subTest(vendor=vendor):
+                note = FakeNote()
+                note.body = f"token {token}\n"
+                self.assertEqual([p.check for p in validate.check_secrets([note])], ["secret_pattern"])
+
+    def test_ordinary_text_with_similar_prefixes_is_allowed(self):
+        writepolicy.scan_for_secrets(
+            "task-assessment-for-the-new-server-migration-plan",
+            "risk-assessment-for-the-new-server-migration-plan",
+            "the ghp_ prefix, a ghp_shorttoken, and xoxb- on their own",
+            "sk_live_ alone, AIza alone, glpat- alone, npm_install_packages, hf_model",
+            "eyJ alone, and eyJabc.notatoken.value",
+            "decision-2026-11-06-github_pat-format",
+        )
 
 
 class TestRequireRestrictedConfirmation(unittest.TestCase):

@@ -22,6 +22,19 @@ SECRET_PATTERNS = [
     ("password assignment", re.compile(r"(?i)\bpassword\b\s*[:=]\s*['\"]?\S{4,}")),
     ("bearer token", re.compile(r"(?i)bearer\s+[A-Za-z0-9_\-\.]{20,}")),
     ("restic/backup credential reference", re.compile(r"(?i)\bRESTIC_PASSWORD\b\s*[:=]")),
+    # Tokens that are recognisable on their own, with no `key=` in front of
+    # them. Each needs its vendor prefix and a token-length tail, so prose
+    # that merely names a prefix still passes.
+    ("GitHub token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
+    ("GitHub fine-grained token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b")),
+    ("Slack token", re.compile(r"\bxox[abeoprs]-[A-Za-z0-9-]{10,}\b")),
+    ("Stripe live key", re.compile(r"\b[sr]k_live_[A-Za-z0-9]{16,}\b")),
+    ("Google API key", re.compile(r"\bAIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])")),
+    ("Anthropic or OpenAI key", re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}")),
+    ("GitLab token", re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}")),
+    ("npm token", re.compile(r"\bnpm_[A-Za-z0-9]{36,}\b")),
+    ("Hugging Face token", re.compile(r"\bhf_[A-Za-z0-9]{30,}\b")),
+    ("JSON Web Token", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")),
 ]
 
 ALLOWED_SENSITIVITY = {"normal", "private", "restricted"}
