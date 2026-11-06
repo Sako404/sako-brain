@@ -757,6 +757,141 @@ def _set_project_path_locked(config: Config, project_id: str, new_path: str) -> 
                             registry_updated=True, index_updated=index_updated)
 
 
+@dataclass
+class NameChangeResult:
+    id: str
+    old_name: str
+    new_name: str
+    added_aliases: list[str]
+    record_path: Path
+    # False when the record and the registry already had this name and these
+    # aliases, so nothing was written.
+    changed: bool
+    index_updated: bool = True
+
+
+def _with_heading(body: str, name: str) -> str:
+    """Set the heading `Note.title` reads, which is the first heading of any
+    level. A first heading below level 1 is a section, not a title, so a new
+    title goes above it."""
+    lines = body.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if not line.strip().startswith("#"):
+            continue
+        if line.startswith("# "):
+            ending = line[len(line.rstrip("\r\n")):]
+            lines[i] = f"# {name}{ending}"
+            return "".join(lines)
+        break
+    rest = body.lstrip("\n")
+    return f"{body[:len(body) - len(rest)]}# {name}\n\n{rest}"
+
+
+def set_project_name(config: Config, project_id: str, new_name: str | None = None,
+                     add_aliases: list[str] | None = None) -> NameChangeResult:
+    """Change a project's display name and/or add aliases, in the record AND
+    its registry entry, together.
+
+    Listings read the name from the registry, search reads the title from the
+    record's heading, and project commands resolve aliases from the registry,
+    so an edit to one place leaves the others disagreeing. The id does not
+    change: other notes refer to it. Same lock, owner check and journal as
+    `set_project_path`, and re-running it is a no-op."""
+    with project_write_lock(config):
+        return _set_project_name_locked(config, project_id, new_name, add_aliases or [])
+
+
+def _set_project_name_locked(config: Config, project_id: str, new_name: str | None,
+                             add_aliases: list[str]) -> NameChangeResult:
+    requested_id = project_id
+    missing = f"no project record with id or alias '{requested_id}'"
+    entry = find_project(config, project_id)
+    if entry is None:
+        raise ProjectWriteError(missing)
+    project_id = entry.id
+
+    if new_name is not None:
+        new_name = new_name.strip()
+        if not new_name or "\n" in new_name or "\r" in new_name:
+            raise ProjectWriteError("a project name must be one non-empty line")
+    aliases = []
+    for alias in add_aliases:
+        alias = alias.strip()
+        if not alias or "\n" in alias or "\r" in alias:
+            raise ProjectWriteError("an alias must be one non-empty line")
+        if alias not in aliases:
+            aliases.append(alias)
+
+    principal_id = config.acting_principal
+    try:
+        record_path = resolve_write_target(config, project_id, principal_id)
+    except FileNotFoundError:
+        raise ProjectWriteError(missing) from None
+    except (OSError, frontmatter.FrontmatterError):
+        raise ProjectWriteError(PATH_WRITE_DENIED) from None
+
+    note = frontmatter.parse_file(record_path)
+    if not visibility.is_owner(config, principal_id, note.meta):
+        current_owner, _ = visibility.owner_and_audience(note.meta)
+        audit.log_event(config, event="note.write.denied", principal_id=principal_id,
+                         **audit.caller_provenance(config),
+                         detail=f"id={project_id} owner={current_owner}")
+        raise ProjectWriteError(PATH_WRITE_DENIED)
+    _require_vault_paths(config, record_path, config.registry_path)
+
+    # An alias that also named another project would make it resolve to
+    # whichever entry comes first.
+    for other in load_registry(config):
+        if other.id != project_id and any(a == other.id or a in (other.aliases or []) for a in aliases):
+            raise ProjectWriteError("an alias is already used by another project")
+
+    old_name = entry.name or ""
+    name = new_name if new_name is not None else old_name
+    new_body = _with_heading(note.body, name) if new_name is not None else note.body
+    registry_aliases = list(entry.aliases or [])
+    record_aliases = note.list_field("aliases")
+    added = [a for a in aliases if a not in registry_aliases or a not in record_aliases]
+    if name == old_name and new_body == note.body and not added:
+        return NameChangeResult(id=project_id, old_name=old_name, new_name=name, added_aliases=[],
+                                record_path=record_path, changed=False)
+
+    journal = _Journal()
+    try:
+        journal.restore_text_of(record_path)
+        note.body = new_body
+        note.meta["aliases"] = record_aliases + [a for a in aliases if a not in record_aliases]
+        note.meta["updated"] = dt.date.today().isoformat()
+        record_path.write_text(frontmatter.render(note), encoding="utf-8")
+
+        journal.restore_text_of(config.registry_path)
+        set_registry_fields(config, project_id, name=name,
+                            aliases=registry_aliases + [a for a in aliases if a not in registry_aliases],
+                            updated=note.meta["updated"])
+    except Exception as exc:  # noqa: BLE001 — every step's failure is handled identically
+        undo_failures = journal.rollback()
+        audit.log_event(config, event="project.name_change.failed", principal_id=principal_id,
+                         **audit.caller_provenance(config),
+                         detail=f"id={project_id} rolled_back={not undo_failures}")
+        outcome = "rollback incomplete" if undo_failures else "was rolled back"
+        suffix = (f" Not restored: {' '.join(undo_failures)} Re-run this exact command "
+                  "to converge, then `brain doctor`.") if undo_failures else ""
+        raise ProjectWriteError(
+            f"name change for '{project_id}' failed; {outcome} ({exc}).{suffix}"
+        ) from exc
+
+    index_updated = True
+    try:
+        indexer.index_note(config, record_path)
+    except Exception:  # noqa: BLE001 — a cache write, not the record
+        index_updated = False
+
+    audit.log_event(config, event="note.write", principal_id=principal_id,
+                     **audit.caller_provenance(config),
+                     detail=f"id={project_id} name_changed={name != old_name} aliases_added={len(added)}")
+    return NameChangeResult(id=project_id, old_name=old_name, new_name=name, added_aliases=added,
+                            record_path=record_path, changed=True, index_updated=index_updated)
+
+
 # Extracted from what /project-sync already does today via a direct Edit on
 # specific named body sections — never the whole body, never an arbitrary
 # one. Restricted to the sections that skill actually touches; "Decisions"

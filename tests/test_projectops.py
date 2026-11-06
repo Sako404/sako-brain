@@ -5,6 +5,7 @@ apart after any of these calls."""
 from __future__ import annotations
 
 import dataclasses
+import sqlite3
 import unittest
 from unittest.mock import patch
 
@@ -310,6 +311,100 @@ class TestSetProjectPath(unittest.TestCase):
         self.assertEqual((self.config.projects_dir / "ACTIVE" / "project-widget.md").read_bytes(),
                          record_before)
         self.assertEqual(self.config.registry_path.read_bytes(), registry_before)
+
+
+class TestSetProjectName(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.config = self.vault.config()
+        projectops.create_project(self.config, id="project-widget", name="Widget",
+                                  path="/old/widget", aliases=["widget"])
+        projectops.create_project(self.config, id="project-other", name="Other",
+                                  path="/old/other", aliases=["other"])
+
+    def _record_path(self):
+        return self.config.projects_dir / "ACTIVE" / "project-widget.md"
+
+    def _record(self):
+        return frontmatter.parse_file(self._record_path())
+
+    def _entries(self):
+        return {e.id: e for e in load_registry(self.config)}
+
+    def test_name_changes_registry_and_title_only(self):
+        before = self._record().body
+        result = projectops.set_project_name(self.config, "project-widget", "Gadget")
+        self.assertTrue(result.changed)
+        self.assertEqual(self._entries()["project-widget"].name, "Gadget")
+        self.assertEqual(self._record().title, "Gadget")
+        self.assertEqual(self._record().body, before.replace("# Widget", "# Gadget", 1))
+        self.assertEqual(self._entries()["project-other"].name, "Other")
+
+    def test_id_and_file_do_not_change(self):
+        result = projectops.set_project_name(self.config, "widget", "Gadget")
+        self.assertEqual(result.id, "project-widget")
+        self.assertTrue(self._record_path().exists())
+        self.assertEqual(self._record().meta["id"], "project-widget")
+
+    def test_old_name_of_the_search_index_is_replaced(self):
+        projectops.set_project_name(self.config, "project-widget", "Gadget")
+        conn = sqlite3.connect(self.config.db_path)
+        try:
+            title = conn.execute("SELECT title FROM notes WHERE id='project-widget'").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(title, "Gadget")
+
+    def test_aliases_reach_both_and_keep_existing(self):
+        result = projectops.set_project_name(self.config, "project-widget", add_aliases=["gadget", "gadget"])
+        self.assertEqual(result.added_aliases, ["gadget"])
+        self.assertEqual(self._entries()["project-widget"].aliases, ["widget", "gadget"])
+        self.assertEqual(self._record().meta["aliases"], ["widget", "gadget"])
+        self.assertEqual(self._entries()["project-widget"].name, "Widget")
+
+    def test_alias_only_in_the_record_reaches_the_registry(self):
+        record = self._record()
+        record.meta["aliases"] = ["widget", "gadget"]
+        self._record_path().write_text(frontmatter.render(record), encoding="utf-8")
+        result = projectops.set_project_name(self.config, "project-widget", add_aliases=["gadget"])
+        self.assertTrue(result.changed)
+        self.assertIn("gadget", self._entries()["project-widget"].aliases)
+        self.assertEqual(self._record().meta["aliases"].count("gadget"), 1)
+
+    def test_rerun_is_a_no_op(self):
+        projectops.set_project_name(self.config, "project-widget", "Gadget", ["gadget"])
+        before = self._record_path().read_text(encoding="utf-8")
+        result = projectops.set_project_name(self.config, "project-widget", "Gadget", ["gadget"])
+        self.assertFalse(result.changed)
+        self.assertEqual(self._record_path().read_text(encoding="utf-8"), before)
+
+    def test_alias_of_another_project_is_refused(self):
+        for taken in ("other", "project-other"):
+            with self.assertRaises(projectops.ProjectWriteError):
+                projectops.set_project_name(self.config, "project-widget", "Gadget", [taken])
+        self.assertEqual(self._entries()["project-widget"].name, "Widget")
+        self.assertEqual(self._record().title, "Widget")
+
+    def test_multi_line_or_empty_name_is_refused(self):
+        for bad in ("", "   ", "Gadget\n## Next actions"):
+            with self.assertRaises(projectops.ProjectWriteError):
+                projectops.set_project_name(self.config, "project-widget", bad)
+        self.assertEqual(self._record().title, "Widget")
+
+    def test_record_without_a_title_gets_one_above_its_sections(self):
+        record = self._record()
+        record.body = "## Purpose\n\nText.\n"
+        self._record_path().write_text(frontmatter.render(record), encoding="utf-8")
+        projectops.set_project_name(self.config, "project-widget", "Gadget")
+        self.assertEqual(self._record().body.strip(), "# Gadget\n\n## Purpose\n\nText.")
+
+    def test_registry_failure_restores_the_record(self):
+        before = self._record_path().read_text(encoding="utf-8")
+        with patch.object(projectops, "set_registry_fields", side_effect=OSError("disk")):
+            with self.assertRaises(projectops.ProjectWriteError):
+                projectops.set_project_name(self.config, "project-widget", "Gadget")
+        self.assertEqual(self._record_path().read_text(encoding="utf-8"), before)
+        self.assertEqual(self._entries()["project-widget"].name, "Widget")
 
 
 class TestUpdateSection(unittest.TestCase):

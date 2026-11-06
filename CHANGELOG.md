@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.23.0 — Rename a project
+
+### Added
+
+- `brain project update <id> --name "New name" --add-alias new-name` renames a
+  project and adds aliases. Both reach the record and the registry entry
+  together, or neither does, so listings, search titles and project lookups
+  agree. The id stays the same. An alias used by another project is refused.
+  CLI only for now; no MCP tool.
+
 ## 0.22.1 — Search keeps the question's subject and matches whole aliases
 
 ### Fixed
