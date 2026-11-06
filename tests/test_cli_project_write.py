@@ -171,6 +171,27 @@ class TestCliProjectUpdate(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("Gadget", out)
 
+    def test_generic_set_cannot_fake_a_rename(self):
+        record_path = self.config.projects_dir / "ACTIVE" / "project-widget.md"
+        before = record_path.read_text(encoding="utf-8")
+        for argv in (["project", "update", "project-widget", "--set", "name=Gadget"],
+                     ["project", "update", "project-widget", "--set", "title=Gadget"],
+                     ["update", "project-widget", "--set", "name=Gadget"],
+                     ["update", "project-widget", "--set", "title=Gadget"],
+                     ["update", "project-widget", "--set-json", 'aliases=["gadget"]']):
+            with self.subTest(argv=argv):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    rc, _ = run_cli(argv, self.vault)
+                self.assertEqual(rc, 1)
+                self.assertIn("--add-alias" if "aliases" in argv[-1] else "--name", err.getvalue())
+        self.assertEqual(record_path.read_text(encoding="utf-8"), before)
+
+    def test_aliases_on_other_notes_are_still_settable(self):
+        run_cli(["note", "create", "--type", "knowledge", "--title", "Plain note"], self.vault)
+        rc, _ = run_cli(["update", "knowledge-plain-note", "--set-json", 'aliases=["plain"]'], self.vault)
+        self.assertEqual(rc, 0)
+
     def test_rename_secret_is_refused(self):
         secret = "AKIAABCDEFGHIJKLMNOP"  # AWS-key-shaped, see test_cli_write_security
         for flag in ("--name", "--add-alias"):

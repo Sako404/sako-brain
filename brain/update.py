@@ -33,14 +33,18 @@ class UpdateError(ValueError):
 # note.write.denied) — both are refused the same way.
 _SHARING_FIELDS = {"owner_principal", "audience"}
 
-# On a project record these two fields are mirrored in the registry (and
-# status also decides the record's folder), so a frontmatter-only edit here
-# leaves the record and the registry disagreeing. Changing them must go
-# through projectops.set_project_status / set_project_path, which keep both
-# in sync. Re-setting the current value is a harmless no-op and is allowed.
+# On a project record these fields live in the registry or the heading as
+# well (and status also decides the record's folder), so a frontmatter-only
+# edit leaves them disagreeing while reporting success. Changing them must go
+# through projectops, which keeps every copy in sync. `name` and `title` are
+# not read from frontmatter at all. Re-setting the current value is a harmless
+# no-op and is allowed.
 _PROJECT_SYNCED_FIELDS = {
     "status": "`brain project update --status` (MCP: update_project_status)",
     "path": "`brain project update --path` (MCP: update_project_path)",
+    "name": "`brain project update --name`",
+    "title": "`brain project update --name`",
+    "aliases": "`brain project update --add-alias`",
 }
 
 
