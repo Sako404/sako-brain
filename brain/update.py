@@ -205,15 +205,17 @@ def audit_ambiguous_id(config: Config, note_id: str, paths: list[Path],
 
 
 def update_memory(config: Config, note_id: str, set_fields: dict | None = None,
-                   append_text: str | None = None, principal_id: str | None = None) -> Path:
+                   append_text: str | None = None, principal_id: str | None = None,
+                   title: str | None = None) -> Path:
     from .projectops import project_write_lock
 
     with project_write_lock(config):
-        return _update_memory_locked(config, note_id, set_fields, append_text, principal_id)
+        return _update_memory_locked(config, note_id, set_fields, append_text, principal_id, title)
 
 
 def _update_memory_locked(config: Config, note_id: str, set_fields: dict | None,
-                          append_text: str | None, principal_id: str | None) -> Path:
+                          append_text: str | None, principal_id: str | None,
+                          title: str | None = None) -> Path:
     if principal_id is None:
         principal_id = config.acting_principal
     set_fields = set_fields or {}
@@ -243,6 +245,23 @@ def _update_memory_locked(config: Config, note_id: str, set_fields: dict | None,
                     f"'{key}' of a project record is kept in sync with the registry; "
                     f"change it with {how}. Nothing was modified."
                 )
+        if title is not None:
+            raise UpdateError(
+                "a project's title is its name, kept in sync with the registry; change it "
+                "with `brain project update --name`. Nothing was modified."
+            )
+
+    # Nothing reads a `title:` field: Note.title comes from the first heading.
+    if "title" in set_fields and set_fields["title"] != note.meta.get("title"):
+        raise UpdateError(
+            "a note's title is its first heading, not a frontmatter field; change it "
+            "with `brain update --title`. Nothing was modified."
+        )
+    if title is not None:
+        title = title.strip()
+        if not title or "\n" in title or "\r" in title:
+            raise UpdateError("a title must be one non-empty line. Nothing was modified.")
+        note.body = frontmatter.with_title(note.body, title)
 
     for key, value in set_fields.items():
         if key in {"id", "created"}:

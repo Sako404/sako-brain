@@ -763,6 +763,7 @@ class NameChangeResult:
     old_name: str
     new_name: str
     added_aliases: list[str]
+    removed_aliases: list[str]
     record_path: Path
     # False when the record and the registry already had this name and these
     # aliases, so nothing was written.
@@ -770,26 +771,10 @@ class NameChangeResult:
     index_updated: bool = True
 
 
-def _with_heading(body: str, name: str) -> str:
-    """Set the heading `Note.title` reads, which is the first heading of any
-    level. A first heading below level 1 is a section, not a title, so a new
-    title goes above it."""
-    lines = body.splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        if not line.strip().startswith("#"):
-            continue
-        if line.startswith("# "):
-            ending = line[len(line.rstrip("\r\n")):]
-            lines[i] = f"# {name}{ending}"
-            return "".join(lines)
-        break
-    rest = body.lstrip("\n")
-    return f"{body[:len(body) - len(rest)]}# {name}\n\n{rest}"
-
-
 def set_project_name(config: Config, project_id: str, new_name: str | None = None,
-                     add_aliases: list[str] | None = None) -> NameChangeResult:
-    """Change a project's display name and/or add aliases, in the record AND
+                     add_aliases: list[str] | None = None,
+                     remove_aliases: list[str] | None = None) -> NameChangeResult:
+    """Change a project's display name and/or its aliases, in the record AND
     its registry entry, together.
 
     Listings read the name from the registry, search reads the title from the
@@ -798,11 +783,12 @@ def set_project_name(config: Config, project_id: str, new_name: str | None = Non
     change: other notes refer to it. Same lock, owner check and journal as
     `set_project_path`, and re-running it is a no-op."""
     with project_write_lock(config):
-        return _set_project_name_locked(config, project_id, new_name, add_aliases or [])
+        return _set_project_name_locked(config, project_id, new_name, add_aliases or [],
+                                        remove_aliases or [])
 
 
 def _set_project_name_locked(config: Config, project_id: str, new_name: str | None,
-                             add_aliases: list[str]) -> NameChangeResult:
+                             add_aliases: list[str], remove_aliases: list[str]) -> NameChangeResult:
     requested_id = project_id
     missing = f"no project record with id or alias '{requested_id}'"
     entry = find_project(config, project_id)
@@ -821,6 +807,9 @@ def _set_project_name_locked(config: Config, project_id: str, new_name: str | No
             raise ProjectWriteError("an alias must be one non-empty line")
         if alias not in aliases:
             aliases.append(alias)
+    removing = {alias.strip() for alias in remove_aliases}
+    if removing & set(aliases):
+        raise ProjectWriteError("an alias cannot be both added and removed")
 
     principal_id = config.acting_principal
     try:
@@ -847,25 +836,28 @@ def _set_project_name_locked(config: Config, project_id: str, new_name: str | No
 
     old_name = entry.name or ""
     name = new_name if new_name is not None else old_name
-    new_body = _with_heading(note.body, name) if new_name is not None else note.body
+    new_body = frontmatter.with_title(note.body, name) if new_name is not None else note.body
     registry_aliases = list(entry.aliases or [])
     record_aliases = note.list_field("aliases")
     added = [a for a in aliases if a not in registry_aliases or a not in record_aliases]
-    if name == old_name and new_body == note.body and not added:
+    removed = sorted(a for a in removing if a in registry_aliases or a in record_aliases)
+    if name == old_name and new_body == note.body and not added and not removed:
         return NameChangeResult(id=project_id, old_name=old_name, new_name=name, added_aliases=[],
-                                record_path=record_path, changed=False)
+                                removed_aliases=[], record_path=record_path, changed=False)
 
     journal = _Journal()
     try:
         journal.restore_text_of(record_path)
         note.body = new_body
-        note.meta["aliases"] = record_aliases + [a for a in aliases if a not in record_aliases]
+        note.meta["aliases"] = ([a for a in record_aliases if a not in removing]
+                                + [a for a in aliases if a not in record_aliases])
         note.meta["updated"] = dt.date.today().isoformat()
         record_path.write_text(frontmatter.render(note), encoding="utf-8")
 
         journal.restore_text_of(config.registry_path)
         set_registry_fields(config, project_id, name=name,
-                            aliases=registry_aliases + [a for a in aliases if a not in registry_aliases],
+                            aliases=([a for a in registry_aliases if a not in removing]
+                                     + [a for a in aliases if a not in registry_aliases]),
                             updated=note.meta["updated"])
     except Exception as exc:  # noqa: BLE001 — every step's failure is handled identically
         undo_failures = journal.rollback()
@@ -887,9 +879,11 @@ def _set_project_name_locked(config: Config, project_id: str, new_name: str | No
 
     audit.log_event(config, event="note.write", principal_id=principal_id,
                      **audit.caller_provenance(config),
-                     detail=f"id={project_id} name_changed={name != old_name} aliases_added={len(added)}")
+                     detail=f"id={project_id} name_changed={name != old_name} "
+                            f"aliases_added={len(added)} aliases_removed={len(removed)}")
     return NameChangeResult(id=project_id, old_name=old_name, new_name=name, added_aliases=added,
-                            record_path=record_path, changed=True, index_updated=index_updated)
+                            removed_aliases=removed, record_path=record_path, changed=True,
+                            index_updated=index_updated)
 
 
 # Extracted from what /project-sync already does today via a direct Edit on

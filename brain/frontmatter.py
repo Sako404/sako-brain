@@ -63,6 +63,23 @@ class Note:
         return list(value)
 
 
+def with_title(body: str, title: str) -> str:
+    """Set the heading `Note.title` reads, which is the first heading of any
+    level. A first heading below level 1 is a section, not a title, so a new
+    title goes above it."""
+    lines = body.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if not line.strip().startswith("#"):
+            continue
+        if line.startswith("# "):
+            ending = line[len(line.rstrip("\r\n")):]
+            lines[i] = f"# {title}{ending}"
+            return "".join(lines)
+        break
+    rest = body.lstrip("\n")
+    return f"{body[:len(body) - len(rest)]}# {title}\n\n{rest}"
+
+
 def parse_text(text: str, path: Path) -> Note:
     if text.startswith(BOM):
         text = text[len(BOM):]

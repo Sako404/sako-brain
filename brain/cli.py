@@ -246,10 +246,11 @@ def cmd_update(config: Config, args) -> int:
                                                      getattr(args, "confirm_restricted", False))
     if "audience" in set_fields:
         rolepolicy.require_audience_allowed(config, config.acting_principal, set_fields["audience"])
-    writepolicy.scan_for_secrets(args.append_text or "", *(str(v) for v in set_fields.values()))
+    title = getattr(args, "title", None)
+    writepolicy.scan_for_secrets(args.append_text or "", title or "", *(str(v) for v in set_fields.values()))
     try:
         path = update_mod.update_memory(
-            config, args.id, set_fields=set_fields or None, append_text=args.append_text,
+            config, args.id, set_fields=set_fields or None, append_text=args.append_text, title=title,
         )
     except FileNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -394,6 +395,7 @@ def cmd_project_update(config: Config, args) -> int:
     new_path = getattr(args, "path", None)
     new_name = getattr(args, "name", None)
     add_aliases = getattr(args, "add_alias", None) or []
+    remove_aliases = getattr(args, "remove_alias", None) or []
     writepolicy.scan_for_secrets(args.append_text or "", new_path or "", new_name or "", *add_aliases,
                                  *(str(v) for v in set_fields.values()))
 
@@ -451,15 +453,15 @@ def cmd_project_update(config: Config, args) -> int:
             lines.append("WARNING: the record and registry are correct, but the search "
                           "index could not be updated — run `brain index`.")
 
-    if new_name is not None or add_aliases:
+    if new_name is not None or add_aliases or remove_aliases:
         try:
-            r = projectops.set_project_name(config, args.id, new_name, add_aliases)
+            r = projectops.set_project_name(config, args.id, new_name, add_aliases, remove_aliases)
         except projectops.ProjectWriteError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
         name_change = {
             "old_name": r.old_name, "new_name": r.new_name, "added_aliases": r.added_aliases,
-            "changed": r.changed, "index_updated": r.index_updated,
+            "removed_aliases": r.removed_aliases, "changed": r.changed, "index_updated": r.index_updated,
             "updated_path": str(r.record_path.relative_to(config.brain_root)),
         }
         if not r.changed:
@@ -469,6 +471,8 @@ def cmd_project_update(config: Config, args) -> int:
                 lines.append(f"Name: {r.old_name} -> {r.new_name}")
             if r.added_aliases:
                 lines.append(f"Aliases added: {', '.join(r.added_aliases)}")
+            if r.removed_aliases:
+                lines.append(f"Aliases removed: {', '.join(r.removed_aliases)}")
             lines.append("Registry updated: True")
         if not r.index_updated:
             lines.append("WARNING: the record and registry are correct, but the search "
@@ -486,7 +490,7 @@ def cmd_project_update(config: Config, args) -> int:
         lines.append(f"Updated: {path.relative_to(config.brain_root)}")
 
     if not lines:
-        print("Nothing to do — pass --status, --path, --name, --add-alias, --set, "
+        print("Nothing to do — pass --status, --path, --name, --add-alias, --remove-alias, --set, "
               "and/or --append-text.", file=sys.stderr)
         return 2
     if getattr(args, "json", False):
@@ -1718,6 +1722,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_update.add_argument("--set-json", nargs="*", action="extend", default=[], metavar="KEY=JSON",
                           dest="set_json",
                           help="Frontmatter field to set from a JSON value (e.g. a list), repeatable")
+    p_update.add_argument("--title", default=None,
+                          help="New title — rewrites the note's heading, which is where titles live. "
+                               "For a project use `brain project update --name`")
     p_update.add_argument("--append-text", default=None, help="Text appended as a new dated '## Update' section")
     p_update.add_argument("--confirm-restricted", action="store_true", dest="confirm_restricted",
                           help="Required when --set sensitivity=restricted. Never set this on a "
@@ -1772,6 +1779,8 @@ def build_parser() -> argparse.ArgumentParser:
                                        "registry entry in the same call. The id does not change")
     p_project_update.add_argument("--add-alias", nargs="+", action="extend", default=[], metavar="ALIAS",
                                   help="Alias to add to the record and the registry entry, repeatable")
+    p_project_update.add_argument("--remove-alias", nargs="+", action="extend", default=[], metavar="ALIAS",
+                                  help="Alias to remove from the record and the registry entry, repeatable")
     p_project_update.add_argument("--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE",
                                   help="Other frontmatter field to set, repeatable (not 'status' or "
                                        "'path' — use --status / --path)")

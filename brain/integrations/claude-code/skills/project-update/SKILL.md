@@ -23,7 +23,7 @@ back to editing the vault directly.**
 2. Apply the update:
    - **The project was renamed:** `brain project update <id> --name "New
      name" --add-alias new-name`. Do this rather than `--set name=...`, which
-     reaches neither listings nor the record's title. The id does not change.
+     is refused. The id does not change. `--remove-alias old` removes an alias.
    - **Where the project stands changed** (something now works, broke,
      got fixed, deployed, blocked; the next step moved): `brain project
      section-update <id> --section "Current state" --mode replace
