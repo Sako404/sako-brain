@@ -392,12 +392,15 @@ def cmd_project_update(config: Config, args) -> int:
     if "audience" in set_fields:
         rolepolicy.require_audience_allowed(config, config.acting_principal, set_fields["audience"])
     new_path = getattr(args, "path", None)
-    writepolicy.scan_for_secrets(args.append_text or "", new_path or "",
+    new_name = getattr(args, "name", None)
+    add_aliases = getattr(args, "add_alias", None) or []
+    writepolicy.scan_for_secrets(args.append_text or "", new_path or "", new_name or "", *add_aliases,
                                  *(str(v) for v in set_fields.values()))
 
     lines = []
     status_change = None
     path_change = None
+    name_change = None
     updated_path = None
     if args.status:
         try:
@@ -448,6 +451,29 @@ def cmd_project_update(config: Config, args) -> int:
             lines.append("WARNING: the record and registry are correct, but the search "
                           "index could not be updated — run `brain index`.")
 
+    if new_name is not None or add_aliases:
+        try:
+            r = projectops.set_project_name(config, args.id, new_name, add_aliases)
+        except projectops.ProjectWriteError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        name_change = {
+            "old_name": r.old_name, "new_name": r.new_name, "added_aliases": r.added_aliases,
+            "changed": r.changed, "index_updated": r.index_updated,
+            "updated_path": str(r.record_path.relative_to(config.brain_root)),
+        }
+        if not r.changed:
+            lines.append("Name and aliases: already set — nothing to change")
+        else:
+            if r.old_name != r.new_name:
+                lines.append(f"Name: {r.old_name} -> {r.new_name}")
+            if r.added_aliases:
+                lines.append(f"Aliases added: {', '.join(r.added_aliases)}")
+            lines.append("Registry updated: True")
+        if not r.index_updated:
+            lines.append("WARNING: the record and registry are correct, but the search "
+                          "index could not be updated — run `brain index`.")
+
     if set_fields or args.append_text:
         try:
             path = update_mod.update_memory(
@@ -460,12 +486,13 @@ def cmd_project_update(config: Config, args) -> int:
         lines.append(f"Updated: {path.relative_to(config.brain_root)}")
 
     if not lines:
-        print("Nothing to do — pass --status, --path, --set, and/or --append-text.", file=sys.stderr)
+        print("Nothing to do — pass --status, --path, --name, --add-alias, --set, "
+              "and/or --append-text.", file=sys.stderr)
         return 2
     if getattr(args, "json", False):
         print(json.dumps({
             "id": args.id, "status_change": status_change, "path_change": path_change,
-            "updated_path": updated_path,
+            "name_change": name_change, "updated_path": updated_path,
         }, indent=2, ensure_ascii=False))
         return 0
     print("\n".join(lines))
@@ -1740,6 +1767,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_project_update.add_argument("--path", default=None,
                                   help="New absolute working-directory path — updates the record "
                                        "and the registry entry in the same call")
+    p_project_update.add_argument("--name", default=None,
+                                  help="New display name — updates the record's title and the "
+                                       "registry entry in the same call. The id does not change")
+    p_project_update.add_argument("--add-alias", nargs="+", action="extend", default=[], metavar="ALIAS",
+                                  help="Alias to add to the record and the registry entry, repeatable")
     p_project_update.add_argument("--set", nargs="*", action="extend", default=[], metavar="KEY=VALUE",
                                   help="Other frontmatter field to set, repeatable (not 'status' or "
                                        "'path' — use --status / --path)")

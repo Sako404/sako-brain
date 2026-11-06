@@ -153,6 +153,32 @@ class TestCliProjectUpdate(unittest.TestCase):
         rc, out = run_cli(["project", "update", "project-widget", "--path", "b"], self.vault)
         self.assertEqual(rc, 1)
 
+    def test_rename_syncs_listing_title_and_alias(self):
+        rc, out = run_cli(["project", "update", "project-widget", "--name", "Gadget",
+                           "--add-alias", "gadget", "--json"], self.vault)
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["name_change"]["old_name"], "Widget")
+        self.assertEqual(payload["name_change"]["new_name"], "Gadget")
+        self.assertEqual(payload["name_change"]["added_aliases"], ["gadget"])
+        entry = {e.id: e for e in load_registry(self.config)}["project-widget"]
+        self.assertEqual(entry.name, "Gadget")
+        self.assertIn("gadget", entry.aliases)
+        record = frontmatter.parse_file(self.config.projects_dir / "ACTIVE" / "project-widget.md")
+        self.assertEqual(record.title, "Gadget")
+        self.assertIn("gadget", record.meta["aliases"])
+        rc, out = run_cli(["project", "show", "gadget"], self.vault)
+        self.assertEqual(rc, 0)
+        self.assertIn("Gadget", out)
+
+    def test_rename_secret_is_refused(self):
+        secret = "AKIAABCDEFGHIJKLMNOP"  # AWS-key-shaped, see test_cli_write_security
+        for flag in ("--name", "--add-alias"):
+            rc, _ = run_cli(["project", "update", "project-widget", flag, secret], self.vault)
+            self.assertEqual(rc, 1)
+        entry = {e.id: e for e in load_registry(self.config)}["project-widget"]
+        self.assertEqual(entry.name, "Widget")
+
 
 class TestCliProjectClose(unittest.TestCase):
     def setUp(self):

@@ -21,6 +21,9 @@ back to editing the vault directly.**
    the id). Read the existing record before editing — don't overwrite
    sections you haven't been told to change.
 2. Apply the update:
+   - **The project was renamed:** `brain project update <id> --name "New
+     name" --add-alias new-name`. Do this rather than `--set name=...`, which
+     reaches neither listings nor the record's title. The id does not change.
    - **Where the project stands changed** (something now works, broke,
      got fixed, deployed, blocked; the next step moved): `brain project
      section-update <id> --section "Current state" --mode replace
