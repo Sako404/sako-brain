@@ -108,6 +108,49 @@ class TestMemoryQueue(unittest.TestCase):
 
 
 
+class TestMemoryQueueNoteType(unittest.TestCase):
+    def setUp(self):
+        self.vault = TempVault()
+        self.addCleanup(self.vault.cleanup)
+        self.config = self.vault.config()
+
+    def _queue_with_type(self, proposed_type: str) -> str:
+        """An entry as an older release stored it, before add() checked the type."""
+        entry = memoryqueue.add(self.config, candidate_fact="Queued before the check")
+        entries = memoryqueue._load(self.config)
+        entries[0]["proposed_type"] = proposed_type
+        memoryqueue._save(self.config, entries)
+        return entry.id
+
+    def test_add_refuses_unknown_type_and_queues_nothing(self):
+        with self.assertRaisesRegex(memoryqueue.MemoryQueueError, "unknown proposed_type 'project-update'"):
+            memoryqueue.add(self.config, candidate_fact="x", proposed_type="project-update")
+        self.assertEqual(memoryqueue.list_all(self.config), [])
+
+    def test_accept_writes_stored_unknown_type_as_fact(self):
+        entry_id = self._queue_with_type("project-update")
+        accepted = memoryqueue.accept(self.config, entry_id)
+        self.assertEqual(accepted.status, "accepted")
+        content = (self.config.brain_root / accepted.written_to).read_text()
+        self.assertIn("type: fact", content)
+        self.assertIn("Queued before the check", content)
+        # What was proposed stays on the entry for history.
+        self.assertEqual(accepted.proposed_type, "project-update")
+
+    def test_accept_keeps_a_known_type(self):
+        entry = memoryqueue.add(self.config, candidate_fact="An idea", proposed_type="idea")
+        accepted = memoryqueue.accept(self.config, entry.id)
+        self.assertIn("type: idea", (self.config.brain_root / accepted.written_to).read_text())
+
+    def test_accept_refuses_cleanly_when_vocabulary_has_no_fact(self):
+        entry_id = self._queue_with_type("project-update")
+        vocabulary = dataclasses.replace(self.config.vocabulary, note_types=("project", "decision"))
+        config = dataclasses.replace(self.config, vocabulary=vocabulary)
+        with self.assertRaisesRegex(memoryqueue.MemoryQueueError, "unknown proposed_type"):
+            memoryqueue.accept(config, entry_id)
+        self.assertEqual(memoryqueue.get(self.config, entry_id).status, "pending")
+
+
 class TestMemoryQueueOwnership(unittest.TestCase):
     """v0.22.0: entries belong to whoever queued them and are read through
     visibility.py, so the queue is safe to reach through the dispatcher."""

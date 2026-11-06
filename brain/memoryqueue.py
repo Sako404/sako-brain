@@ -123,6 +123,19 @@ def _save(config: Config, entries: list[dict]) -> None:
     path.write_text(QUEUE_HEADER + "\n" + body, encoding="utf-8")
 
 
+def _note_type_for_accept(config: Config, entry: PendingEntry) -> str:
+    """The note type to write. An entry queued before add() checked the type
+    can hold a name capture refuses, such as `project-update`; it is written
+    as a fact, so a valid proposal can still be accepted."""
+    allowed = config.vocabulary.note_types
+    if entry.proposed_type in allowed:
+        return entry.proposed_type
+    if "fact" in allowed:
+        return "fact"
+    raise MemoryQueueError(
+        f"unknown proposed_type '{entry.proposed_type}', must be one of {sorted(allowed)}")
+
+
 def add(config: Config, *, candidate_fact: str, entities: list[str] | None = None,
         source: str = "", source_date: str = "", proposed_destination: str = "",
         proposed_type: str = "fact", sensitivity: str = "normal",
@@ -133,6 +146,10 @@ def add(config: Config, *, candidate_fact: str, entities: list[str] | None = Non
     allowed), the same as for `remember`."""
     if sensitivity not in {"normal", "private", "restricted"}:
         raise MemoryQueueError(f"invalid sensitivity '{sensitivity}'")
+    allowed_types = config.vocabulary.note_types
+    if proposed_type not in allowed_types:
+        raise MemoryQueueError(
+            f"unknown proposed_type '{proposed_type}', must be one of {sorted(allowed_types)}")
     owner = visibility.id_to_ref(config.acting_principal)
     try:
         visibility.owner_and_audience({"owner_principal": owner, "audience": list(audience or [])})
@@ -224,7 +241,7 @@ def accept(config: Config, entry_id: str, title: str | None = None,
             config, config.acting_principal, entry.sensitivity, confirm_restricted)
         dest = capture.capture(
             config,
-            type_=entry.proposed_type,
+            type_=_note_type_for_accept(config, entry),
             title=title or entry.candidate_fact[:80],
             text=entry.candidate_fact,
             people=[x for x in entry.entities if x.startswith("person-")],

@@ -5,6 +5,18 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.24.1 — A queued note with an unknown type no longer crashes accept
+
+### Fixed
+
+- `brain memory add` and `queue_memory` refuse a proposed type outside the
+  vault's note types and name the allowed ones. They used to queue it, and
+  accept then failed with a traceback.
+- `brain memory accept` and `accept_queued_memory` write an entry already
+  queued with an unknown type as a `fact`, and the entry keeps the type that
+  was proposed. A vault without the `fact` type gets a plain refusal and the
+  entry stays pending.
+
 ## 0.24.0 — Remove an alias, change a note's title, and doctor reads frontmatter
 
 ### Added
