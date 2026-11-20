@@ -271,6 +271,9 @@ def _t_get_context(a: dict):
     argv = ["context", a["query"], "--json", "--limit", str(a.get("limit", 10))]
     if a.get("include_restricted"):
         argv.append("--restricted")
+    for flag in ("type", "tag"):  # only when supplied, as for list_notes
+        if a.get(flag):
+            argv += [f"--{flag}", str(a[flag])]
     return argv, None
 
 

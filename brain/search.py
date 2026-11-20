@@ -80,7 +80,26 @@ BODY_WEIGHT = 1.0
 TAGS_WEIGHT = 3.0
 
 
-def _run_match(conn, match_expr: str, limit: int, *, shortest_title_first: bool = False):
+def _filter_sql(type_: str | None, tag: str | None) -> tuple[str, list]:
+    """Extra WHERE terms for an optional type/tag filter, in the SQL so that
+    every relevance tier searches only matching notes (filtering afterwards
+    would leave too few once the over-fetch is used up). Same meaning as
+    `brain list --type/--tag`: exact type, and tag present in the note's
+    `tags:` list. The index only narrows the candidates; search() checks both
+    again against the note's own frontmatter."""
+    clauses, params = [], []
+    if type_:
+        clauses.append("n.type = ?")
+        params.append(type_)
+    if tag:
+        esc = tag.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        clauses.append("(',' || n.tags || ',') LIKE ? ESCAPE '\\'")
+        params.append(f"%,{esc},%")
+    return "".join(f" AND {c}" for c in clauses), params
+
+
+def _run_match(conn, match_expr: str, limit: int, *, shortest_title_first: bool = False,
+               flt: tuple[str, list] = ("", [])):
     # Title tier only: among notes whose title holds every term, the shortest
     # title is the one most *about* the query ("TRON" before "Decision: TRON
     # modules enable CLI command"), and bm25() cannot tell, since its length
@@ -93,15 +112,15 @@ def _run_match(conn, match_expr: str, limit: int, *, shortest_title_first: bool 
                snippet(notes_fts, 2, '[', ']', '...', 10) AS snip
         FROM notes_fts
         JOIN notes n ON n.id = notes_fts.id
-        WHERE notes_fts MATCH ?
+        WHERE notes_fts MATCH ?{flt[0]}
         ORDER BY {order}bm25(notes_fts, ?, ?, ?, ?)
         LIMIT ?
         """,
-        (match_expr, ID_WEIGHT, TITLE_WEIGHT, BODY_WEIGHT, TAGS_WEIGHT, limit),
+        (match_expr, *flt[1], ID_WEIGHT, TITLE_WEIGHT, BODY_WEIGHT, TAGS_WEIGHT, limit),
     ).fetchall()
 
 
-def _run_whole_title(conn, terms: list[str], limit: int):
+def _run_whole_title(conn, terms: list[str], limit: int, flt: tuple[str, list] = ("", [])):
     """Notes whose entire title, or one entire alias, is one of the query's
     terms ("TRON" for "status TRON", alias "fcc" for "fcc status"). Exact and
     case-insensitive on `notes.title` and `note_aliases`; the FTS MATCH is
@@ -120,11 +139,11 @@ def _run_whole_title(conn, terms: list[str], limit: int):
                snippet(notes_fts, 2, '[', ']', '...', 10) AS snip
         FROM notes_fts
         JOIN notes n ON n.id = notes_fts.id
-        WHERE notes_fts MATCH ? AND (lower(n.title) IN ({placeholders}){alias_clause})
+        WHERE notes_fts MATCH ? AND (lower(n.title) IN ({placeholders}){alias_clause}){flt[0]}
         ORDER BY length(n.title)
         LIMIT ?
         """,
-        (f"title : ({_or_expr(terms)})", *lowered, *(lowered if has_aliases else []), limit),
+        (f"title : ({_or_expr(terms)})", *lowered, *(lowered if has_aliases else []), *flt[1], limit),
     ).fetchall()
 
 
@@ -152,7 +171,8 @@ def _most_common_first(conn, terms: list[str]) -> list[int]:
 _OVERFETCH = 4
 
 
-def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
+def search(config: Config, query: str, limit: int = 20, *, type: str | None = None,
+           tag: str | None = None) -> list[SearchResult]:
     """Tiered query relaxation, strictest first:
 
     0. Every content term in the title. bm25() normalizes by the length of
@@ -197,6 +217,7 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
     terms = _clean_terms(query)
     if not terms:
         return []
+    flt = _filter_sql(type, tag)
 
     fetch_limit = limit * _OVERFETCH
 
@@ -211,7 +232,7 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
                     seen.add(r["id"])
                     rows.append(r)
 
-        _add(_run_match(conn, _title_expr(terms), fetch_limit, shortest_title_first=True))
+        _add(_run_match(conn, _title_expr(terms), fetch_limit, shortest_title_first=True, flt=flt))
 
         drop_order = _most_common_first(conn, terms) if len(terms) > 2 else []
 
@@ -220,22 +241,22 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
                 break
             relaxed = terms[:i] + terms[i + 1:]
             _add(_run_match(conn, _title_expr(relaxed), fetch_limit - len(rows),
-                            shortest_title_first=True))
+                            shortest_title_first=True, flt=flt))
 
         if len(rows) < fetch_limit and len(terms) > 1:
-            _add(_run_whole_title(conn, terms, fetch_limit - len(rows)))
+            _add(_run_whole_title(conn, terms, fetch_limit - len(rows), flt))
 
         if len(rows) < fetch_limit and len(terms) > 1:
-            _add(_run_match(conn, _and_expr(terms), fetch_limit - len(rows)))
+            _add(_run_match(conn, _and_expr(terms), fetch_limit - len(rows), flt=flt))
 
         for i in drop_order:
             if len(rows) >= fetch_limit:
                 break
             relaxed = terms[:i] + terms[i + 1:]
-            _add(_run_match(conn, _and_expr(relaxed), fetch_limit - len(rows)))
+            _add(_run_match(conn, _and_expr(relaxed), fetch_limit - len(rows), flt=flt))
 
         if len(rows) < fetch_limit:
-            _add(_run_match(conn, _or_expr(terms), fetch_limit - len(rows)))
+            _add(_run_match(conn, _or_expr(terms), fetch_limit - len(rows), flt=flt))
 
         rows = rows[:fetch_limit]
     finally:
@@ -253,6 +274,10 @@ def search(config: Config, query: str, limit: int = 20) -> list[SearchResult]:
         except (frontmatter.FrontmatterError, OSError):
             continue
         if not visibility.can_view_note(config, config.acting_principal, note):
+            continue
+        if type and (note.type or "") != type:
+            continue
+        if tag and tag not in note.list_field("tags"):
             continue
         results.append(SearchResult(r["id"], r["type"], r["status"], r["title"], r["path"], r["snip"]))
 

@@ -84,6 +84,33 @@ class TestContextCommand(unittest.TestCase):
         _, opted_in = run_cli(["context", "descaling", "--json", "--restricted"], self.vault)
         self.assertIn("fact-restricted-thing", [n["id"] for n in json.loads(opted_in)["notes"]])
 
+    def test_type_and_tag_filters(self):
+        self.vault.write_note("40_DECISIONS", "kettle-decision.md", id="decision-kettle", type="decision",
+                              title="Decision: descale the kettle monthly", body="Vinegar works.",
+                              tags=["home"])
+        indexer.rebuild(self.config)
+        rc, out = run_cli(["context", "kettle", "--json", "--type", "decision"], self.vault)
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual([n["id"] for n in payload["notes"]], ["decision-kettle"])
+        self.assertEqual(set(payload), {"query", "notes", "projects", "timeline", "restricted_omitted"})
+        rc, out = run_cli(["context", "kettle", "--json", "--tag", "home"], self.vault)
+        self.assertEqual([n["id"] for n in json.loads(out)["notes"]], ["decision-kettle"])
+
+    def test_unknown_type_is_refused_like_brain_list(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc, _ = run_cli(["context", "kettle", "--json", "--type", "kettles"], self.vault)
+        self.assertEqual(rc, 2)
+        self.assertIn("unknown type", err.getvalue())
+
+    def test_question_without_subject_words_finds_nothing(self):
+        rc, out = run_cli(["context", "what is it?", "--json"], self.vault)
+        self.assertEqual(rc, 0)
+        self.assertEqual(json.loads(out)["notes"], [])
+        rc, out = run_cli(["context", "what is it?"], self.vault)
+        self.assertIn("No context found.", out)
+
     def test_reports_missing_index_instead_of_crashing(self):
         self.config.db_path.unlink()
         rc, _ = run_cli(["context", "anything", "--json"], self.vault)
