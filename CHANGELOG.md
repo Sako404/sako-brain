@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
-## Unreleased — `brain context` matches projects and events by whole words, and filters by type and tag
+## 0.25.0 — `brain context` matches projects and events by whole words, and filters by type and tag
 
 ### Fixed
 
