@@ -24,11 +24,18 @@ command line and configuration format may change between minor versions.
   question needs one shared word if it has one subject word, two otherwise.
   Words that ask about state ("status", "next", "dalej") never pick a project
   or an event on their own.
-- A question with no subject words left (only function words or single
-  letters, e.g. "what is it?", "jak to jest?") returns an empty context
-  instead of arbitrary notes. Polish function words and one-character tokens
-  are dropped from the question before the note search; English questions
-  reach the search as before. `brain search` is unchanged.
+- A question with no subject words left (only function words, auxiliary
+  verbs or single letters, e.g. "what is it?", "jak to zrobić?") returns an
+  empty context instead of arbitrary notes. Polish function words, Polish
+  auxiliary verbs and one-character tokens are dropped from the question
+  before the note search; English questions reach the search as before.
+  `brain search` is unchanged.
+- A note is returned only if its title, aliases, text or tags contain the
+  question's subject words: all of a one-word question, at least two of a
+  longer one, compared as whole words. The search's loosest tier returns a
+  note for any single word or shared stem, so "pogoda w Londynie jutro"
+  listed every note that says "jutro" and "recipe for pancakes" every note
+  that says "recipient".
 
 ### Added
 

@@ -211,6 +211,54 @@ class TestTimelineMatching(Base):
         self.assertEqual(self.event_ids("ORBIT", include_timeline=False), [])
 
 
+class TestNotesNeedEvidence(Base):
+    """A note is kept only if the question's subject words are in it: all of a
+    one-word subject, at least two of a longer one. The search's loosest tier
+    returns notes for any single word, or a shared stem."""
+
+    def setUp(self):
+        super().setUp()
+        w = self.vault.write_note
+        w("60_KNOWLEDGE", "k-deploy.md", id="knowledge-deploy", type="knowledge",
+          title="Deploy notes", body="Jutro wdrożenie. Release goes out tomorrow.")
+        w("60_KNOWLEDGE", "k-recipient.md", id="knowledge-recipient", type="knowledge",
+          title="Mail recipients", body="Every recipient gets a copy.")
+        w("60_KNOWLEDGE", "k-howto.md", id="knowledge-howto", type="knowledge",
+          title="Lista rzeczy", body="Trzeba to zrobić jutro, można zrobić teraz.")
+        w("60_KNOWLEDGE", "k-orbit-backup.md", id="knowledge-orbit-backup", type="knowledge",
+          title="ORBIT backupu konfiguracja", body="Kopia ORBIT co noc.")
+        alias_note = self.vault.root / "60_KNOWLEDGE" / "k-alias.md"
+        alias_note.write_text("---\nid: knowledge-alias\ntype: knowledge\nstatus: current\n"
+                              "created: 2026-01-01\nupdated: 2026-01-01\naliases: [zephyrine]\n---\n"
+                              "# Weather station\n\nA small station on the roof.\n")
+        indexer.rebuild(self.config)
+
+    def ids(self, q, **kw):
+        return [n.id for n in self.ctx(q, **kw).notes]
+
+    def test_polish_auxiliary_verbs_are_not_a_subject(self):
+        self.assertEqual(self.ids("jak to zrobić?"), [])
+        self.assertEqual(self.ids("co trzeba zrobić?"), [])
+
+    def test_one_shared_word_of_a_longer_question_is_not_enough(self):
+        self.assertEqual(self.ids("pogoda w Londynie jutro"), [])  # only "jutro" is in a note
+        self.assertEqual(self.ids("recipe for pancakes"), [])  # "recipient" shares only a stem
+
+    def test_real_matches_are_kept(self):
+        self.assertIn("knowledge-deploy", self.ids("release tomorrow"))
+        self.assertIn("knowledge-orbit-backup", self.ids("ORBIT backup"))  # Polish ending: backupu
+        self.assertIn("knowledge-recipient", self.ids("recipient"))  # one-word question, the word itself
+        self.assertEqual(self.ids("zephyrine"), ["knowledge-alias"])  # found through an alias only
+        self.assertIn("project-orbit", self.ids("What is the status of ORBIT?"))  # status word is not required
+
+    def test_evidence_function(self):
+        self.assertTrue(context.has_evidence(["orbit"], "ORBIT, the engine"))
+        self.assertTrue(context.has_evidence(["orbit", "backup", "night"], "backupu ORBIT"))
+        self.assertFalse(context.has_evidence(["orbit", "backup"], "ORBIT only"))
+        self.assertFalse(context.has_evidence(["recipe"], "recipient"))
+        self.assertFalse(context.has_evidence([], "anything"))
+
+
 class TestSearchQuery(unittest.TestCase):
     def test_english_questions_reach_search_unchanged_in_effect(self):
         # every word `brain search` would have kept is still there, in order
@@ -221,6 +269,15 @@ class TestSearchQuery(unittest.TestCase):
         self.assertEqual(context.search_query("Jaki jest status TRON?"), "status TRON")
         self.assertEqual(context.search_query("Co dalej ze Smoke & Steel?"), "dalej Smoke Steel")
         self.assertEqual(context.search_query("a i o"), "")
+
+    def test_technology_names(self):
+        self.assertEqual(context.search_query("Node.js and C++ in next.js 14"), "Node.js next.js 14")
+        self.assertEqual(context.search_query("upgrade to v0.24.1 on the S10"), "upgrade v0.24.1 S10")
+        self.assertEqual(context.search_query("SEO for e-commerce"), "SEO e-commerce")
+        self.assertEqual(context.search_query("AI agent with MCP"), "AI agent MCP")
+        self.assertTrue(context.has_evidence(context.subject_words("Node.js 14 upgrade"), "Upgrade to Node.js 14."))
+        # one-letter names carry no subject on their own (before, "c"* matched nearly every note)
+        self.assertEqual(context.search_query("C# or R?"), "")
 
     def test_hyphenated_and_dotted_words_are_kept_whole(self):
         self.assertEqual(context.search_query("pre-release of marcin.example"), "pre-release marcin.example")

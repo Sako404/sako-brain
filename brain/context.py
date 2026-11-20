@@ -146,6 +146,9 @@ _PL_STOPWORDS = frozenset({
     "jakie", "co", "kto", "gdzie", "kiedy", "dlaczego", "czemu", "ktory", "ktora",
     "ktore", "oraz", "albo", "lub", "ale", "nie", "tak", "juz", "jeszcze", "mi",
     "mnie", "ja", "ty", "on", "ona", "my", "wy", "oni", "moj", "moja", "moje",
+    # the Polish counterparts of the "do/did/done/be/been" the English list has
+    "zrobic", "robic", "zrobione", "zrobil", "zrobila", "miec", "ma", "mam", "masz",
+    "maja", "moze", "mozna", "moge", "trzeba", "musze", "chce", "chcesz", "wiem", "wiesz",
 })
 _EN_EXTRA = frozenset({"can", "could", "should", "would", "will", "please", "there",
                        "here", "into", "not", "no", "my", "any", "some", "all"})
@@ -192,6 +195,37 @@ def _same_word(a: str, b: str) -> bool:
         return True
     short, long_ = sorted((a, b), key=len)
     return len(short) >= 5 and long_.startswith(short) and len(long_) - len(short) <= 3
+
+
+def subject_words(query: str) -> list[str]:
+    """Distinct words that say what the question is about: content words
+    without the status words and the generic word "project"."""
+    seen = []
+    for w in content_words(query):
+        if w not in _META_WORDS and w not in _GENERIC_PROJECT_WORDS and w not in seen:
+            seen.append(w)
+    return seen
+
+
+def has_evidence(subject: list[str], text: str) -> bool:
+    """Whether a note's text backs the question: every subject word of a
+    one-word question, at least two of a longer one, found as whole words
+    (or with a short ending, see _same_word). The search's loosest tier
+    returns a note for any single word, even one only sharing a stem
+    ("recipe" -> "recipient"), so "weather in London tomorrow" listed every
+    note that says "tomorrow"."""
+    if not subject:
+        return False
+    need = min(2, len(subject))
+    words = set(_words(text))
+    long_words = [x for x in words if len(x) >= 5]  # only these can match with an ending
+    hits = 0
+    for w in subject:
+        if w in words or (len(w) >= 5 and any(_same_word(w, x) for x in long_words)):
+            hits += 1
+            if hits >= need:
+                return True
+    return False
 
 
 def _contains_phrase(phrase: list[str], words: list[str]) -> bool:
@@ -285,6 +319,7 @@ def get_context(config: Config, query: str, limit: int = 10,
     q = search_query(query)
     if not q:
         return result
+    subject = subject_words(query) or content_words(query)
 
     conn = connect(config)
     try:
@@ -295,6 +330,10 @@ def get_context(config: Config, query: str, limit: int = 10,
             row = conn.execute("SELECT * FROM notes WHERE id = ?", (r.id,)).fetchone()
             if row is None:
                 continue
+            fts_row = conn.execute("SELECT title, body, tags FROM notes_fts WHERE id = ?", (r.id,)).fetchone()
+            if fts_row is not None and not has_evidence(
+                    subject, " ".join(fts_row[k] or "" for k in ("title", "body", "tags"))):
+                continue
             sensitivity = row["sensitivity"] or "normal"
             if sensitivity == "restricted" and not include_restricted:
                 result.restricted_omitted += 1
@@ -302,7 +341,6 @@ def get_context(config: Config, query: str, limit: int = 10,
 
             snippet = r.snippet
             snippet_from_latest_section = False
-            fts_row = conn.execute("SELECT body FROM notes_fts WHERE id = ?", (r.id,)).fetchone()
             if fts_row is not None:
                 latest_section = _latest_dated_section(fts_row["body"] or "")
                 if latest_section:
