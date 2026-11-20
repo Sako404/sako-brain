@@ -191,13 +191,15 @@ def tool_list_notes(config: Config, type: str | None = None, status: str | None 
 
 def tool_get_context(config: Config, query: str, limit: int = 10,
                       include_projects: bool = True, include_timeline: bool = True,
-                      include_restricted: bool = False) -> dict:
+                      include_restricted: bool = False, type: str | None = None,
+                      tag: str | None = None) -> dict:
     """Higher-level context retrieval: search + rank + concise structured
     results (id/title/snippet/provenance/current-vs-historical), never full
     note bodies. Restricted notes excluded unless include_restricted=true."""
     result = context_mod.get_context(
         config, query, limit=limit, include_projects=include_projects,
         include_timeline=include_timeline, include_restricted=include_restricted,
+        type=type or None, tag=tag or None,
     )
     return result.to_dict()
 
@@ -600,6 +602,8 @@ TOOLS = {
             "include_projects": {"type": "boolean"},
             "include_timeline": {"type": "boolean"},
             "include_restricted": {"type": "boolean", "description": "Default false — set true only when restricted content is directly relevant and intended"},
+            "type": {"type": "string", "description": "only notes of this type, as in list_notes (e.g. knowledge | decision); projects/timeline are kept only for type project/event"},
+            "tag": {"type": "string", "description": "only notes whose `tags:` list contains this tag, as in list_notes; leaves projects/timeline empty"},
         },
         "required": ["query"],
     }),

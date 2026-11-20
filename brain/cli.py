@@ -119,10 +119,14 @@ def cmd_context(config: Config, args) -> int:
         print("Search index not built yet. Run 'brain index' first.", file=sys.stderr)
         return 1
 
-    result = context_mod.get_context(
-        config, args.query, limit=args.limit,
-        include_restricted=args.restricted,
-    )
+    try:
+        result = context_mod.get_context(
+            config, args.query, limit=args.limit,
+            include_restricted=args.restricted, type=args.type, tag=args.tag,
+        )
+    except listing.ListingError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
 
     if args.json:
         print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
@@ -1683,6 +1687,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_context.add_argument("query")
     p_context.add_argument("--limit", type=int, default=10)
     p_context.add_argument("--json", action="store_true", help="Emit JSON on stdout")
+    p_context.add_argument("--type", help="only notes of this type, as in `brain list --type`; "
+                                          "projects/timeline are kept only for type project/event")
+    p_context.add_argument("--tag", help="only notes whose `tags:` list contains this tag, as in "
+                                         "`brain list --tag`; leaves projects/timeline empty")
     p_context.add_argument("--restricted", action="store_true",
                            help="Include sensitivity: restricted notes (excluded by default)")
 

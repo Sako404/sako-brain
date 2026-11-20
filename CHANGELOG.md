@@ -5,6 +5,40 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## Unreleased — `brain context` matches projects and events by whole words, and filters by type and tag
+
+### Fixed
+
+- `brain context` / `get_context` listed projects and timeline events whose
+  id, name, alias or title merely *contained* a query word: "a" is inside
+  many names, so a question such as "Design a website for a client" listed
+  nearly every registered project and the ten newest events, while
+  "Jaki jest status TRON?" listed no project at all ("tron?" was compared
+  with the punctuation). Words are now compared whole, ignoring case,
+  diacritics and punctuation, without English or Polish function words. A
+  project named outright (its whole name, an alias or its id slug) is listed
+  without the projects that only share a word with the question; otherwise a
+  shared word of three or more letters still matches, as before. Timeline
+  events for a named project are those that name it, narrowed to the ones
+  that also share the question's other words when there are any; an unnamed
+  question needs one shared word if it has one subject word, two otherwise.
+  Words that ask about state ("status", "next", "dalej") never pick a project
+  or an event on their own.
+- A question with no subject words left (only function words or single
+  letters, e.g. "what is it?", "jak to jest?") returns an empty context
+  instead of arbitrary notes. Polish function words and one-character tokens
+  are dropped from the question before the note search; English questions
+  reach the search as before. `brain search` is unchanged.
+
+### Added
+
+- `brain context --type T` / `--tag G`, and `type` / `tag` on the
+  `get_context` MCP tool: the same exact type and tag filters as
+  `brain list`, applied inside the search so every relevance tier sees only
+  matching notes. With `--type`, the projects section is kept only for type
+  `project` and the timeline only for type `event`; `--tag` leaves both
+  empty. The response keeps the same five keys.
+
 ## 0.24.1 — A queued note with an unknown type no longer crashes accept
 
 ### Fixed
