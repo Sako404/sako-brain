@@ -391,6 +391,65 @@ class TestToolMetadataAndInstructions(GatewayTestCase):
         self.assertIn("canonical", instructions.lower())
         self.assertIn("vault", instructions.lower())
 
+    def test_instructions_keep_every_earlier_rule(self):
+        """The knowledge-usage paragraph was appended; nothing the earlier
+        instructions told clients may be lost or reworded."""
+        from brain.remote_gateway.instructions import SERVER_INSTRUCTIONS as text
+        for phrase in (
+            "SAKO Brain is the user's canonical durable knowledge store",
+            "query Brain before answering when it would materially improve the answer",
+            "Never treat your own model memory as authoritative",
+            "Never attempt to access a filesystem or vault path directly",
+            "secret-shaped content is refused outright",
+            "goes to queue_memory for their review rather than remember",
+            "Accept or reject a queued entry only when the user says so.",
+            "If Brain is unavailable, say so plainly",
+        ):
+            self.assertIn(phrase, text)
+        self.assertLess(text.index("If Brain is unavailable"), text.index("Expert knowledge"))
+
+    def test_instructions_describe_kb_usage(self):
+        from brain.remote_gateway.instructions import SERVER_INSTRUCTIONS as text
+        for phrase in (
+            "kb:standard", "kb:playbook", "kb:checklist",
+            "Do not load the whole library",
+            "Check each note's status",
+            "status current is approved guidance",
+            "status open is an unapproved draft",
+            "say that it is a draft",
+            "Skip superseded notes",
+            "it is not a substitute for status current",
+            "stable rule ID",
+            "Keep law apart from regulator guidance",
+            "HYPOTHESIS",
+            "takes precedence over a general kb recommendation",
+            "unless following it would break the law or a security requirement",
+            "Use your own tools and skills",
+            "Do not copy them into your own instructions",
+            "never write or approve a kb note yourself",
+        ):
+            self.assertIn(phrase, text)
+
+    def test_instructions_name_only_tools_that_exist(self):
+        import re
+        from brain import mcp_server
+        from brain.remote_gateway.instructions import SERVER_INSTRUCTIONS as text
+        named = set(re.findall(r"\b(get_context|list_notes|queue_memory|remember|[a-z]+_[a-z_]+)\b", text))
+        tools = {n for n in named if n in mcp_server.TOOLS or n.startswith(("get_", "list_", "queue_"))}
+        self.assertTrue({"get_context", "list_notes", "queue_memory"} <= tools)
+        for name in tools:
+            self.assertIn(name, mcp_server.TOOLS, f"instructions name a tool that does not exist: {name}")
+
+    def test_instructions_stay_short_and_private(self):
+        from brain.remote_gateway.instructions import SERVER_INSTRUCTIONS as text
+        self.assertLess(len(text), 6000)
+        # the marker vocabulary has one owner; reuse it rather than spell markers here
+        from tests.test_oss2_neutralisation import PERSONAL_MARKERS
+        for marker in PERSONAL_MARKERS:
+            self.assertNotIn(marker, text)
+        for shape in ("http://", "https://", "@"):
+            self.assertNotIn(shape, text)
+
     def test_tools_list_entries_have_read_only_hints(self):
         tok = self.get_token(scope="brain.read brain.write")
         with patch("brain.mcp_bridge._run_brain") as mock_run:
