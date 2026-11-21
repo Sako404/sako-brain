@@ -5,6 +5,26 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/) — with the pre-1.0 caveat that the
 command line and configuration format may change between minor versions.
 
+## 0.25.1 — Remote gateway instructions describe how to use expert knowledge notes
+
+### Changed
+
+- The remote gateway's MCP server instructions (returned in `initialize`)
+  gain one paragraph on expert knowledge notes, for vaults that keep them:
+  knowledge notes tagged `kb:standard`, `kb:playbook` or `kb:checklist`.
+  Clients are told to fetch only the notes relevant to the task with
+  `get_context` and `list_notes` filtered by tag and status, to treat
+  `status: current` as approved and `open` as a draft they must name as
+  such, to skip `superseded` notes, and not to read `is_current` as
+  approval. They should cite the stable rule IDs and sources the notes
+  give, and keep law apart from guidance, quality standards and
+  hypotheses. A decision for the specific project wins unless it would
+  break the law or a security requirement. They should do the work with
+  their own tools, not copy the notes into their own configuration, and
+  offer `queue_memory` for missing knowledge rather than writing or
+  approving a note themselves. The earlier instructions are unchanged.
+  No tool, schema, permission, endpoint or search behaviour changes.
+
 ## 0.25.0 — `brain context` matches projects and events by whole words, and filters by type and tag
 
 ### Fixed
